@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
@@ -8,7 +8,7 @@ use Native\Mobile\Edge\Layouts\Builders\NavAction;
 use Native\Mobile\Icon\AndroidSymbol;
 use Native\Mobile\Icon\IconResolver;
 use Native\Mobile\Icon\IosSymbol;
-use Nativephp\NativeUi\Concerns\ResolvesColorValues;
+use Native\Mobile\UI\Concerns\ResolvesColorValues;
 
 class ListItem extends Element
 {

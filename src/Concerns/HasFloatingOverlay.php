@@ -1,9 +1,9 @@
 <?php
 
-namespace Nativephp\NativeUi\Concerns;
+namespace Native\Mobile\UI\Concerns;
 
 use Native\Mobile\Edge\NativeComponent;
-use Nativephp\NativeUi\Builders\FloatingOverlay;
+use Native\Mobile\UI\Builders\FloatingOverlay;
 
 /**
  * Add a content-agnostic floating overlay (a pill/banner that hovers above the

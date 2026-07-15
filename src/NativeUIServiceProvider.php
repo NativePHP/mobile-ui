@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi;
+namespace Native\Mobile\UI;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\View\View;
@@ -9,13 +9,13 @@ use Native\Mobile\Edge\Element;
 use Native\Mobile\Edge\Layouts\NativeLayout;
 use Native\Mobile\Edge\NativeComponent;
 use Native\Mobile\Edge\TailwindParser;
-use Nativephp\NativeUi\Builders\Drawer;
-use Nativephp\NativeUi\Builders\FloatingOverlay as FloatingOverlayBuilder;
-use Nativephp\NativeUi\Console\CopyFontsCommand;
-use Nativephp\NativeUi\Console\FontCommand;
-use Nativephp\NativeUi\Console\GenerateIconsCommand;
-use Nativephp\NativeUi\Elements\FloatingOverlay as FloatingOverlayElement;
-use Nativephp\NativeUi\Elements\NativeDrawer;
+use Native\Mobile\UI\Builders\Drawer;
+use Native\Mobile\UI\Builders\FloatingOverlay as FloatingOverlayBuilder;
+use Native\Mobile\UI\Console\CopyFontsCommand;
+use Native\Mobile\UI\Console\FontCommand;
+use Native\Mobile\UI\Console\GenerateIconsCommand;
+use Native\Mobile\UI\Elements\FloatingOverlay as FloatingOverlayElement;
+use Native\Mobile\UI\Elements\NativeDrawer;
 
 class NativeUIServiceProvider extends ServiceProvider
 {
@@ -136,8 +136,8 @@ class NativeUIServiceProvider extends ServiceProvider
      * hoists it onto a top layer over the content.
      *
      * Discovery is via `method_exists`, so layouts/screens opt in by using the
-     * {@see \Nativephp\NativeUi\Concerns\HasFloatingOverlay} /
-     * {@see \Nativephp\NativeUi\Concerns\InteractsWithFloatingOverlay} traits (or
+     * {@see \Native\Mobile\UI\Concerns\HasFloatingOverlay} /
+     * {@see \Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay} traits (or
      * by declaring the methods themselves) — core never knows.
      */
     protected function registerFloatingOverlay(): void

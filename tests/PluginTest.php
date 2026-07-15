@@ -41,8 +41,8 @@ describe('Plugin Manifest', function () {
 
         $button = collect($manifest['components'])->firstWhere('type', 'button');
         expect($button)->not->toBeNull();
-        expect($button['element'])->toBe('Nativephp\\NativeUi\\Elements\\Button');
-        expect($button['blade'])->toBe('Nativephp\\NativeUi\\Components\\Button');
+        expect($button['element'])->toBe('Native\\Mobile\\UI\\Elements\\Button');
+        expect($button['blade'])->toBe('Native\\Mobile\\UI\\Components\\Button');
         expect($button['android_renderer'])->not->toBeEmpty();
         expect($button['ios_renderer'])->not->toBeEmpty();
     });

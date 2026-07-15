@@ -1,5 +1,5 @@
 {{--
-    Default page layout for nativephp/native-ui.
+    Default page layout for nativephp/mobile-ui.
 
     Drop your screen content inside an `<x-layouts.app>` tag:
 

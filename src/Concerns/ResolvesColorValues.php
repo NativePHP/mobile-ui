@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Concerns;
+namespace Native\Mobile\UI\Concerns;
 
 use Native\Mobile\Edge\TailwindParser;
 

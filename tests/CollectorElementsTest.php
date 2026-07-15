@@ -4,13 +4,13 @@ use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\ElementRegistry;
 use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\TailwindParser;
-use Nativephp\NativeUi\Elements\BareTextInput;
-use Nativephp\NativeUi\Elements\Button;
-use Nativephp\NativeUi\Elements\Checkbox;
-use Nativephp\NativeUi\Elements\ProgressBar;
-use Nativephp\NativeUi\Elements\Radio;
-use Nativephp\NativeUi\Elements\RadioGroup;
-use Nativephp\NativeUi\Elements\Toggle;
+use Native\Mobile\UI\Elements\BareTextInput;
+use Native\Mobile\UI\Elements\Button;
+use Native\Mobile\UI\Elements\Checkbox;
+use Native\Mobile\UI\Elements\ProgressBar;
+use Native\Mobile\UI\Elements\Radio;
+use Native\Mobile\UI\Elements\RadioGroup;
+use Native\Mobile\UI\Elements\Toggle;
 
 /**
  * Attribute → wire-prop behavior of this plugin's elements, driven

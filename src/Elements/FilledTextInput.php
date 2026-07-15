@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 /**
  * Filled text input — renders as Material3 `TextField` (filled) on Android

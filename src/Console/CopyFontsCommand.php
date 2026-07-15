@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Console;
+namespace Native\Mobile\UI\Console;
 
 use Native\Mobile\Plugins\Commands\NativePluginHookCommand;
 

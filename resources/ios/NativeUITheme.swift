@@ -6,7 +6,7 @@ import UIKit
 /// One coherent set of theme tokens (light OR dark). Exposed to SwiftUI
 /// renderers via the `\.nativeUITheme` environment value.
 ///
-/// The PHP side (`Nativephp\NativeUi\Theme::merge([...])`) is the source of
+/// The PHP side (`Native\Mobile\UI\Theme::merge([...])`) is the source of
 /// truth. Tokens arrive over the bridge via `NativeUI.Theme.Set`.
 struct NativeUITokens: Equatable {
     // Colors

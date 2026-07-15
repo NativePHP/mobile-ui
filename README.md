@@ -5,13 +5,13 @@ A NativePHP Mobile plugin
 ## Installation
 
 ```bash
-composer require nativephp/native-ui
+composer require nativephp/mobile-ui
 ```
 
 ## Usage
 
 ```php
-use Nativephp\NativeUi\Facades\NativeUI;
+use Native\Mobile\UI\Facades\NativeUI;
 
 // Execute functionality
 $result = NativeUI::execute(['option1' => 'value']);
@@ -25,7 +25,7 @@ $status = NativeUI::getStatus();
 ```php
 use Livewire\Attributes\On;
 
-#[On('native:Nativephp\NativeUi\Events\NativeUICompleted')]
+#[On('native:Native\Mobile\UI\Events\NativeUICompleted')]
 public function handleNativeUICompleted($result, $id = null)
 {
     // Handle the event
@@ -76,7 +76,7 @@ content description on Android.
 ```
 
 ```php
-use Nativephp\NativeUi\Elements\Button;
+use Native\Mobile\UI\Elements\Button;
 
 Button::make()
     ->icon('plus')

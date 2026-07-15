@@ -1,16 +1,16 @@
-## nativephp/native-ui
+## nativephp/mobile-ui
 
 Native UI components for NativePHP Mobile. Every element renders as a real
 platform primitive — Material3 on Android, SwiftUI on iOS — not a webview
 widget. Elements are declared in Blade with `<native:*>` tags or built
-programmatically with the fluent `Nativephp\NativeUi\Elements\*` API; both
+programmatically with the fluent `Native\Mobile\UI\Elements\*` API; both
 paths serialize to the same wire tree.
 
 ### Core rules
 
 - Visual styling is theme-driven ("Model 3"): buttons, inputs, toggles, and
   other controls take their colors, radii, and typography from the theme
-  (`Nativephp\NativeUi\Theme`). Use semantic props like `variant="primary"`
+  (`Native\Mobile\UI\Theme`). Use semantic props like `variant="primary"`
   instead of per-instance colors — per-instance visual overrides on these
   controls are intentionally ignored.
 - Bind state with `native:model="property"` (works on toggle, checkbox, chip,
@@ -134,7 +134,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 
 @verbatim
 <code-snippet name="Fluent a11y API" lang="php">
-use Nativephp\NativeUi\Elements\Button;
+use Native\Mobile\UI\Elements\Button;
 
 Button::make()
     ->icon('plus')

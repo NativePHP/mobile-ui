@@ -1,10 +1,10 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
-use Nativephp\NativeUi\Concerns\ResolvesColorValues;
+use Native\Mobile\UI\Concerns\ResolvesColorValues;
 
 /**
  * Linear progress bar. Value in [0.0, 1.0]. Omit `value` for indeterminate

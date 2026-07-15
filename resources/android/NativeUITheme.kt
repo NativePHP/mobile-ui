@@ -19,7 +19,7 @@ import org.json.JSONObject
  * One coherent set of theme tokens (light OR dark). Renderers read the
  * active tokens via [LocalNativeUITheme].
  *
- * The PHP side (`Nativephp\NativeUi\Theme::merge([...])`) is the source of
+ * The PHP side (`Native\Mobile\UI\Theme::merge([...])`) is the source of
  * truth; tokens arrive over the bridge via `NativeUI.Theme.Set`.
  */
 data class NativeUITokens(

@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * The callback fires with `[from, to]` (overscan applied) as
  * `"$from,$to"` text — PHP decodes via the `virtual_window` callback kind.
  *
- * See `Plugins/nativephp/native-ui/src/Elements/NativeVirtualList.php` for
+ * See `Plugins/nativephp/mobile-ui/src/Elements/NativeVirtualList.php` for
  * the matching element class.
  */
 object VirtualListRenderer {

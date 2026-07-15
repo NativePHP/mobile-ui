@@ -4,12 +4,12 @@ use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\ElementRegistry;
 use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\TailwindParser;
-use Nativephp\NativeUi\Elements\Button;
-use Nativephp\NativeUi\Elements\Icon;
-use Nativephp\NativeUi\Elements\ListItem;
-use Nativephp\NativeUi\Elements\Tab;
-use Nativephp\NativeUi\Elements\TabRow;
-use Nativephp\NativeUi\Elements\Toggle;
+use Native\Mobile\UI\Elements\Button;
+use Native\Mobile\UI\Elements\Icon;
+use Native\Mobile\UI\Elements\ListItem;
+use Native\Mobile\UI\Elements\Tab;
+use Native\Mobile\UI\Elements\TabRow;
+use Native\Mobile\UI\Elements\Toggle;
 
 /**
  * Accessibility props (`HasA11y` trait + ListItem's trailing label):

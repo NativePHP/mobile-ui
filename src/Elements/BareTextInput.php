@@ -1,8 +1,8 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
-use Nativephp\NativeUi\Concerns\ResolvesColorValues;
+use Native\Mobile\UI\Concerns\ResolvesColorValues;
 
 /**
  * Chromeless text input — a SwiftUI `TextField` (iOS) / Compose

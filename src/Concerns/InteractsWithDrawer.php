@@ -1,8 +1,8 @@
 <?php
 
-namespace Nativephp\NativeUi\Concerns;
+namespace Native\Mobile\UI\Concerns;
 
-use Nativephp\NativeUi\Builders\Drawer;
+use Native\Mobile\UI\Builders\Drawer;
 
 /**
  * Per-screen control over the layout's side drawer. `use` this trait on a

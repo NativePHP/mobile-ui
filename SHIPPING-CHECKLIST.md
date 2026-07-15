@@ -1,6 +1,6 @@
 # NativeUI — Shipping Checklist
 
-Audit list for taking nativephp/native-ui from unreleased to ship-ready. Verified on iOS **and** Android in `~/Herd/native`. Docs are kept in sync as we go at `~/Herd/nativephp/resources/views/docs/mobile/3/edge-components/`.
+Audit list for taking nativephp/mobile-ui from unreleased to ship-ready. Verified on iOS **and** Android in `~/Herd/native`. Docs are kept in sync as we go at `~/Herd/nativephp/resources/views/docs/mobile/3/edge-components/`.
 
 **Phasing**: Layout first → Buttons & pressables → Inputs → Feedback → Lists → Overlays → Tabs → Misc. Cross-cutting items (§0) get checked as they come up; not gated to a phase.
 
