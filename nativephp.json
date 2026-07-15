@@ -423,6 +423,14 @@
             "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": false
+        },
+        {
+            "type": "webview",
+            "element": "Nativephp\\NativeUi\\Elements\\Webview",
+            "blade": "Nativephp\\NativeUi\\Components\\Webview",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.WebviewRenderer",
+            "ios_renderer": "NativeUIWebviewRenderer",
+            "self_closing": true
         }
     ],
     "bridge_functions": [
