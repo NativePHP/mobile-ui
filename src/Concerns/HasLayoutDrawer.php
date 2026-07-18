@@ -1,9 +1,9 @@
 <?php
 
-namespace Nativephp\NativeUi\Concerns;
+namespace Native\Mobile\UI\Concerns;
 
 use Native\Mobile\Edge\NativeComponent;
-use Nativephp\NativeUi\Builders\Drawer;
+use Native\Mobile\UI\Builders\Drawer;
 
 /**
  * Add a content-agnostic side drawer (X-style side nav) to a `NativeLayout`.

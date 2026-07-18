@@ -6,7 +6,7 @@ use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Icon\AndroidSymbol;
 use Native\Mobile\Icon\IosSymbol;
 use Native\Mobile\Platform;
-use Nativephp\NativeUi\Elements\Icon;
+use Native\Mobile\UI\Elements\Icon;
 
 /**
  * `<icon :ios="Ios::House" :android="Android::Home"/>` — platform enum

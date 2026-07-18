@@ -1,6 +1,6 @@
 <?php
 
-use Nativephp\NativeUi\Fonts\GoogleFonts;
+use Native\Mobile\UI\Fonts\GoogleFonts;
 
 /**
  * Pure-logic tests for `native:font` — css2 URL spec building, @font-face

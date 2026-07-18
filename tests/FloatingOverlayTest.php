@@ -2,11 +2,11 @@
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\NativeComponent;
-use Nativephp\NativeUi\Builders\FloatingOverlay as FloatingOverlayBuilder;
-use Nativephp\NativeUi\Concerns\InteractsWithFloatingOverlay;
-use Nativephp\NativeUi\Elements\Chip;
-use Nativephp\NativeUi\Elements\FloatingOverlay;
-use Nativephp\NativeUi\NativeUIServiceProvider;
+use Native\Mobile\UI\Builders\FloatingOverlay as FloatingOverlayBuilder;
+use Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay;
+use Native\Mobile\UI\Elements\Chip;
+use Native\Mobile\UI\Elements\FloatingOverlay;
+use Native\Mobile\UI\NativeUIServiceProvider;
 
 /**
  * The floating-overlay layout hook: a content-agnostic pill/banner that floats

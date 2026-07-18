@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
@@ -28,7 +28,7 @@ use Native\Mobile\Icon\IosSymbol;
  *
  * Per Model 3 customization (theme-only), there is intentionally NO per-instance
  * color, background, border, radius, shadow, font-size, or font-weight. All
- * visual styling comes from the theme (`Nativephp\NativeUi\Theme`). For full
+ * visual styling comes from the theme (`Native\Mobile\UI\Theme`). For full
  * visual control, drop to `<pressable>` with your own content.
  */
 class Button extends Element

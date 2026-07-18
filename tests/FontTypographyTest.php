@@ -1,9 +1,9 @@
 <?php
 
 use Native\Mobile\Edge\CallbackRegistry;
-use Nativephp\NativeUi\Elements\Button;
-use Nativephp\NativeUi\Elements\FilledTextInput;
-use Nativephp\NativeUi\Elements\OutlinedTextInput;
+use Native\Mobile\UI\Elements\Button;
+use Native\Mobile\UI\Elements\FilledTextInput;
+use Native\Mobile\UI\Elements\OutlinedTextInput;
 
 /**
  * Typography wire props on native-ui elements:

@@ -1,8 +1,8 @@
 <?php
 
-namespace Nativephp\NativeUi\Concerns;
+namespace Native\Mobile\UI\Concerns;
 
-use Nativephp\NativeUi\Builders\FloatingOverlay;
+use Native\Mobile\UI\Builders\FloatingOverlay;
 
 /**
  * Per-screen control over the layout's floating overlay. `use` this trait on a

@@ -1,7 +1,7 @@
 <?php
 
 use Native\Mobile\JumpBridge;
-use Nativephp\NativeUi\Theme;
+use Native\Mobile\UI\Theme;
 
 beforeEach(function () {
     // Keep Theme::pushToNative() off the wire: plain Pest has no Laravel

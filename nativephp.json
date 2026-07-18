@@ -1,5 +1,5 @@
 {
-    "name": "nativephp/native-ui",
+    "name": "nativephp/mobile-ui",
     "version": "1.0.0",
     "description": "Material3 Compose UI components for NativePHP Mobile",
     "namespace": "NativeUI",
@@ -210,48 +210,48 @@
         },
         {
             "type": "list",
-            "element": "Nativephp\\NativeUi\\Elements\\NativeList",
-            "blade": "Nativephp\\NativeUi\\Components\\NativeList",
+            "element": "Native\\Mobile\\UI\\Elements\\NativeList",
+            "blade": "Native\\Mobile\\UI\\Components\\NativeList",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ListRenderer",
             "ios_renderer": "NativeUIListRenderer",
             "self_closing": false
         },
         {
             "type": "virtual_list",
-            "element": "Nativephp\\NativeUi\\Elements\\NativeVirtualList",
-            "blade": "Nativephp\\NativeUi\\Components\\NativeVirtualList",
+            "element": "Native\\Mobile\\UI\\Elements\\NativeVirtualList",
+            "blade": "Native\\Mobile\\UI\\Components\\NativeVirtualList",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.VirtualListRenderer",
             "ios_renderer": "NativeUIVirtualListRenderer",
             "self_closing": true
         },
         {
             "type": "modal",
-            "element": "Nativephp\\NativeUi\\Elements\\Modal",
-            "blade": "Nativephp\\NativeUi\\Components\\Modal",
+            "element": "Native\\Mobile\\UI\\Elements\\Modal",
+            "blade": "Native\\Mobile\\UI\\Components\\Modal",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ModalRenderer",
             "ios_renderer": "NativeUIModalRenderer",
             "self_closing": false
         },
         {
             "type": "button",
-            "element": "Nativephp\\NativeUi\\Elements\\Button",
-            "blade": "Nativephp\\NativeUi\\Components\\Button",
+            "element": "Native\\Mobile\\UI\\Elements\\Button",
+            "blade": "Native\\Mobile\\UI\\Components\\Button",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ButtonRenderer",
             "ios_renderer": "NativeUIButtonRenderer",
             "self_closing": true
         },
         {
             "type": "progress_bar",
-            "element": "Nativephp\\NativeUi\\Elements\\ProgressBar",
-            "blade": "Nativephp\\NativeUi\\Components\\ProgressBar",
+            "element": "Native\\Mobile\\UI\\Elements\\ProgressBar",
+            "blade": "Native\\Mobile\\UI\\Components\\ProgressBar",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ProgressBarRenderer",
             "ios_renderer": "NativeUIProgressBarRenderer",
             "self_closing": true
         },
         {
             "type": "activity_indicator",
-            "element": "Nativephp\\NativeUi\\Elements\\ActivityIndicator",
-            "blade": "Nativephp\\NativeUi\\Components\\ActivityIndicator",
+            "element": "Native\\Mobile\\UI\\Elements\\ActivityIndicator",
+            "blade": "Native\\Mobile\\UI\\Components\\ActivityIndicator",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ActivityIndicatorRenderer",
             "ios_renderer": "NativeUIActivityIndicatorRenderer",
             "self_closing": true
@@ -259,175 +259,175 @@
         {
             "type": "icon",
             "element": "Native\\Mobile\\Edge\\Elements\\Icon",
-            "blade": "Nativephp\\NativeUi\\Components\\Icon",
+            "blade": "Native\\Mobile\\UI\\Components\\Icon",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.IconRenderer",
             "ios_renderer": "NativeUIIconRenderer",
             "self_closing": true
         },
         {
             "type": "outlined_text_input",
-            "element": "Nativephp\\NativeUi\\Elements\\OutlinedTextInput",
-            "blade": "Nativephp\\NativeUi\\Components\\OutlinedTextInput",
+            "element": "Native\\Mobile\\UI\\Elements\\OutlinedTextInput",
+            "blade": "Native\\Mobile\\UI\\Components\\OutlinedTextInput",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.OutlinedTextInputRenderer",
             "ios_renderer": "NativeUIOutlinedTextInputRenderer",
             "self_closing": true
         },
         {
             "type": "bare_text_input",
-            "element": "Nativephp\\NativeUi\\Elements\\BareTextInput",
-            "blade": "Nativephp\\NativeUi\\Components\\BareTextInput",
+            "element": "Native\\Mobile\\UI\\Elements\\BareTextInput",
+            "blade": "Native\\Mobile\\UI\\Components\\BareTextInput",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.BareTextInputRenderer",
             "ios_renderer": "NativeUIBareTextInputRenderer",
             "self_closing": true
         },
         {
             "type": "filled_text_input",
-            "element": "Nativephp\\NativeUi\\Elements\\FilledTextInput",
-            "blade": "Nativephp\\NativeUi\\Components\\FilledTextInput",
+            "element": "Native\\Mobile\\UI\\Elements\\FilledTextInput",
+            "blade": "Native\\Mobile\\UI\\Components\\FilledTextInput",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.FilledTextInputRenderer",
             "ios_renderer": "NativeUIFilledTextInputRenderer",
             "self_closing": true
         },
         {
             "type": "toggle",
-            "element": "Nativephp\\NativeUi\\Elements\\Toggle",
-            "blade": "Nativephp\\NativeUi\\Components\\Toggle",
+            "element": "Native\\Mobile\\UI\\Elements\\Toggle",
+            "blade": "Native\\Mobile\\UI\\Components\\Toggle",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ToggleRenderer",
             "ios_renderer": "NativeUIToggleRenderer",
             "self_closing": true
         },
         {
             "type": "checkbox",
-            "element": "Nativephp\\NativeUi\\Elements\\Checkbox",
-            "blade": "Nativephp\\NativeUi\\Components\\Checkbox",
+            "element": "Native\\Mobile\\UI\\Elements\\Checkbox",
+            "blade": "Native\\Mobile\\UI\\Components\\Checkbox",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.CheckboxRenderer",
             "ios_renderer": "NativeUICheckboxRenderer",
             "self_closing": true
         },
         {
             "type": "slider",
-            "element": "Nativephp\\NativeUi\\Elements\\Slider",
-            "blade": "Nativephp\\NativeUi\\Components\\Slider",
+            "element": "Native\\Mobile\\UI\\Elements\\Slider",
+            "blade": "Native\\Mobile\\UI\\Components\\Slider",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.SliderRenderer",
             "ios_renderer": "NativeUISliderRenderer",
             "self_closing": true
         },
         {
             "type": "select",
-            "element": "Nativephp\\NativeUi\\Elements\\Select",
-            "blade": "Nativephp\\NativeUi\\Components\\Select",
+            "element": "Native\\Mobile\\UI\\Elements\\Select",
+            "blade": "Native\\Mobile\\UI\\Components\\Select",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.SelectRenderer",
             "ios_renderer": "NativeUISelectRenderer",
             "self_closing": true
         },
         {
             "type": "radio_group",
-            "element": "Nativephp\\NativeUi\\Elements\\RadioGroup",
-            "blade": "Nativephp\\NativeUi\\Components\\RadioGroup",
+            "element": "Native\\Mobile\\UI\\Elements\\RadioGroup",
+            "blade": "Native\\Mobile\\UI\\Components\\RadioGroup",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.RadioGroupRenderer",
             "ios_renderer": "NativeUIRadioGroupRenderer",
             "self_closing": false
         },
         {
             "type": "radio",
-            "element": "Nativephp\\NativeUi\\Elements\\Radio",
-            "blade": "Nativephp\\NativeUi\\Components\\Radio",
+            "element": "Native\\Mobile\\UI\\Elements\\Radio",
+            "blade": "Native\\Mobile\\UI\\Components\\Radio",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.RadioRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": true
         },
         {
             "type": "badge",
-            "element": "Nativephp\\NativeUi\\Elements\\Badge",
-            "blade": "Nativephp\\NativeUi\\Components\\Badge",
+            "element": "Native\\Mobile\\UI\\Elements\\Badge",
+            "blade": "Native\\Mobile\\UI\\Components\\Badge",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.BadgeRenderer",
             "ios_renderer": "NativeUIBadgeRenderer",
             "self_closing": true
         },
         {
             "type": "chip",
-            "element": "Nativephp\\NativeUi\\Elements\\Chip",
-            "blade": "Nativephp\\NativeUi\\Components\\Chip",
+            "element": "Native\\Mobile\\UI\\Elements\\Chip",
+            "blade": "Native\\Mobile\\UI\\Components\\Chip",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ChipRenderer",
             "ios_renderer": "NativeUIChipRenderer",
             "self_closing": true
         },
         {
             "type": "list_item",
-            "element": "Nativephp\\NativeUi\\Elements\\ListItem",
-            "blade": "Nativephp\\NativeUi\\Components\\ListItem",
+            "element": "Native\\Mobile\\UI\\Elements\\ListItem",
+            "blade": "Native\\Mobile\\UI\\Components\\ListItem",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ListItemRenderer",
             "ios_renderer": "NativeUIListItemRenderer",
             "self_closing": true
         },
         {
             "type": "list_section",
-            "element": "Nativephp\\NativeUi\\Elements\\ListSection",
-            "blade": "Nativephp\\NativeUi\\Components\\ListSection",
+            "element": "Native\\Mobile\\UI\\Elements\\ListSection",
+            "blade": "Native\\Mobile\\UI\\Components\\ListSection",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": false
         },
         {
             "type": "tab_row",
-            "element": "Nativephp\\NativeUi\\Elements\\TabRow",
-            "blade": "Nativephp\\NativeUi\\Components\\TabRow",
+            "element": "Native\\Mobile\\UI\\Elements\\TabRow",
+            "blade": "Native\\Mobile\\UI\\Components\\TabRow",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.TabRowRenderer",
             "ios_renderer": "NativeUITabRowRenderer",
             "self_closing": false
         },
         {
             "type": "tab",
-            "element": "Nativephp\\NativeUi\\Elements\\Tab",
-            "blade": "Nativephp\\NativeUi\\Components\\Tab",
+            "element": "Native\\Mobile\\UI\\Elements\\Tab",
+            "blade": "Native\\Mobile\\UI\\Components\\Tab",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.TabRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": true
         },
         {
             "type": "bottom_sheet",
-            "element": "Nativephp\\NativeUi\\Elements\\BottomSheet",
-            "blade": "Nativephp\\NativeUi\\Components\\BottomSheet",
+            "element": "Native\\Mobile\\UI\\Elements\\BottomSheet",
+            "blade": "Native\\Mobile\\UI\\Components\\BottomSheet",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.BottomSheetRenderer",
             "ios_renderer": "NativeUIBottomSheetRenderer",
             "self_closing": false
         },
         {
             "type": "button_group",
-            "element": "Nativephp\\NativeUi\\Elements\\ButtonGroup",
-            "blade": "Nativephp\\NativeUi\\Components\\ButtonGroup",
+            "element": "Native\\Mobile\\UI\\Elements\\ButtonGroup",
+            "blade": "Native\\Mobile\\UI\\Components\\ButtonGroup",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ButtonGroupRenderer",
             "ios_renderer": "NativeUIButtonGroupRenderer",
             "self_closing": true
         },
         {
             "type": "carousel",
-            "element": "Nativephp\\NativeUi\\Elements\\Carousel",
-            "blade": "Nativephp\\NativeUi\\Components\\Carousel",
+            "element": "Native\\Mobile\\UI\\Elements\\Carousel",
+            "blade": "Native\\Mobile\\UI\\Components\\Carousel",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.CarouselRenderer",
             "ios_renderer": "NativeUICarouselRenderer",
             "self_closing": false
         },
         {
             "type": "native_drawer",
-            "element": "Nativephp\\NativeUi\\Elements\\NativeDrawer",
-            "blade": "Nativephp\\NativeUi\\Components\\NativeDrawer",
+            "element": "Native\\Mobile\\UI\\Elements\\NativeDrawer",
+            "blade": "Native\\Mobile\\UI\\Components\\NativeDrawer",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": false
         },
         {
             "type": "floating_overlay",
-            "element": "Nativephp\\NativeUi\\Elements\\FloatingOverlay",
-            "blade": "Nativephp\\NativeUi\\Components\\FloatingOverlay",
+            "element": "Native\\Mobile\\UI\\Elements\\FloatingOverlay",
+            "blade": "Native\\Mobile\\UI\\Components\\FloatingOverlay",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": false
         },
         {
             "type": "webview",
-            "element": "Nativephp\\NativeUi\\Elements\\Webview",
-            "blade": "Nativephp\\NativeUi\\Components\\Webview",
+            "element": "Native\\Mobile\\UI\\Elements\\Webview",
+            "blade": "Native\\Mobile\\UI\\Components\\Webview",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.WebviewRenderer",
             "ios_renderer": "NativeUIWebviewRenderer",
             "self_closing": true

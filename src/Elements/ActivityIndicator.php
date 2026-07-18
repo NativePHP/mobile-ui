@@ -1,10 +1,10 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
-use Nativephp\NativeUi\Concerns\ResolvesColorValues;
+use Native\Mobile\UI\Concerns\ResolvesColorValues;
 
 /**
  * Circular activity indicator (spinner). Always indeterminate — use

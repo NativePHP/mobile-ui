@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Builders;
+namespace Native\Mobile\UI\Builders;
 
 use Illuminate\View\View;
 use Native\Mobile\Edge\Element;
@@ -13,12 +13,12 @@ use Native\Mobile\Edge\Element;
  * null (or a builder wrapping nothing) leaves the screen untouched.
  *
  * A layout returns a FloatingOverlay from its `floatingOverlay()` method
- * (provide it with the {@see \Nativephp\NativeUi\Concerns\HasFloatingOverlay}
+ * (provide it with the {@see \Native\Mobile\UI\Concerns\HasFloatingOverlay}
  * trait). The content is any Blade view (or pre-built Element), so devs can
  * float whatever UI they want — a pill, a banner, a mini-player:
  *
- *   use Nativephp\NativeUi\Builders\FloatingOverlay;
- *   use Nativephp\NativeUi\Concerns\HasFloatingOverlay;
+ *   use Native\Mobile\UI\Builders\FloatingOverlay;
+ *   use Native\Mobile\UI\Concerns\HasFloatingOverlay;
  *
  *   class AppLayout extends NativeLayout
  *   {
@@ -37,7 +37,7 @@ use Native\Mobile\Edge\Element;
  *
  * The native-ui chrome contributor renders the content through the screen's own
  * bound Blade path (so `@press` / wire bindings resolve against the screen) and
- * wraps it in a {@see \Nativephp\NativeUi\Elements\FloatingOverlay} sentinel.
+ * wraps it in a {@see \Native\Mobile\UI\Elements\FloatingOverlay} sentinel.
  * The native floating-overlay host hoists that out onto a persistent top layer
  * over every screen routed under the layout.
  */

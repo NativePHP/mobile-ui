@@ -4,11 +4,11 @@ use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\ElementRegistry;
 use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\TailwindParser;
-use Nativephp\NativeUi\Elements\ActivityIndicator;
-use Nativephp\NativeUi\Elements\BareTextInput;
-use Nativephp\NativeUi\Elements\Icon;
-use Nativephp\NativeUi\Elements\ListItem;
-use Nativephp\NativeUi\Elements\ProgressBar;
+use Native\Mobile\UI\Elements\ActivityIndicator;
+use Native\Mobile\UI\Elements\BareTextInput;
+use Native\Mobile\UI\Elements\Icon;
+use Native\Mobile\UI\Elements\ListItem;
+use Native\Mobile\UI\Elements\ProgressBar;
 
 /**
  * Element color props share the theme config's authoring grammar:

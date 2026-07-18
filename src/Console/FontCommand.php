@@ -1,9 +1,9 @@
 <?php
 
-namespace Nativephp\NativeUi\Console;
+namespace Native\Mobile\UI\Console;
 
 use Illuminate\Console\Command;
-use Nativephp\NativeUi\Fonts\GoogleFonts;
+use Native\Mobile\UI\Fonts\GoogleFonts;
 
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\select;

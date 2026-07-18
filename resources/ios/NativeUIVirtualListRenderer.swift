@@ -12,7 +12,7 @@ import Combine
 /// PHP only when the visible range is approaching the edge of the data
 /// PHP has already shipped. PHP's next render emits the new slice.
 ///
-/// See `Plugins/nativephp/native-ui/src/Elements/NativeVirtualList.php`
+/// See `Plugins/nativephp/mobile-ui/src/Elements/NativeVirtualList.php`
 /// for the matching element class.
 struct NativeUIVirtualListRenderer: View {
     let node: NativeUINode

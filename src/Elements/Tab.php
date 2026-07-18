@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Concerns\HasPlatformIcon;
 use Native\Mobile\Edge\CallbackRegistry;

@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Console;
+namespace Native\Mobile\UI\Console;
 
 use Illuminate\Console\Command;
 
@@ -17,7 +17,7 @@ use Illuminate\Console\Command;
  * The SF Symbols catalog has no public web URL — Apple ships it as a
  * plist bundled with the SF Symbols.app. To refresh the SF snapshot,
  * extract symbol names from the app on a Mac and update
- * `vendor/nativephp/native-ui/resources/icons/sf-symbols.json` (or
+ * `vendor/nativephp/mobile-ui/resources/icons/sf-symbols.json` (or
  * publish the snapshots into your app first to own them).
  *
  * Output goes to your app at `app/Icons/`. The namespace is `App\Icons`

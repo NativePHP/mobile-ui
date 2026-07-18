@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Elements;
+namespace Native\Mobile\UI\Elements;
 
 /**
  * Outlined text input — renders as Material3 `OutlinedTextField` on Android

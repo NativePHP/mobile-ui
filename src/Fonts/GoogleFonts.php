@@ -1,6 +1,6 @@
 <?php
 
-namespace Nativephp\NativeUi\Fonts;
+namespace Native\Mobile\UI\Fonts;
 
 /**
  * Pure helpers for the `native:font` Google Fonts downloader — URL spec
