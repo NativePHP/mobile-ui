@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nativephp.mobile.bridge.LaravelEnvironment
 import com.nativephp.mobile.bridge.PHPBridge
+import com.nativephp.mobile.bridge.WebviewPHPRuntime
 import com.nativephp.mobile.network.WebViewManager
 import com.nativephp.mobile.ui.MainActivity
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
@@ -145,11 +146,19 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
                 ?: return@factory WebView(ctx) // no shell activity — bare view, nothing to serve
 
             val webView = WebView(activity)
+
+            // Dedicated PHP context for this webview — phpExecutor is parked
+            // in the native screen's event loop and can never serve our
+            // requests. Released via PhpEmbedClient in onRelease.
+            val bridge = PHPBridge(activity)
+            val phpRuntime = WebviewPHPRuntime(bridge)
+            bridge.dedicatedWebviewRuntime = phpRuntime
+
             val previousShared = WebViewManager.shared
-            WebViewManager(activity, webView, PHPBridge(activity)).setup()
+            WebViewManager(activity, webView, bridge).setup()
             WebViewManager.shared = previousShared
 
-            webView.webViewClient = PhpEmbedClient(webView.webViewClient, onNavigatedCb, nodeId)
+            webView.webViewClient = PhpEmbedClient(webView.webViewClient, onNavigatedCb, nodeId, phpRuntime)
 
             val path = phpPath(src, activity)
             webView.tag = path
@@ -171,6 +180,9 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
             }
         },
         onRelease = { webView ->
+            // Stop this webview's dedicated PHP thread the moment the
+            // webview leaves the view hierarchy.
+            (webView.webViewClient as? PhpEmbedClient)?.phpRuntime?.release()
             webView.stopLoading()
             webView.webViewClient = WebViewClient()
             webView.webChromeClient = null
@@ -185,7 +197,8 @@ private fun phpPath(src: String, context: android.content.Context): String =
 private class PhpEmbedClient(
     private val inner: WebViewClient,
     var navigatedCallbackId: Int,
-    var nodeId: Int
+    var nodeId: Int,
+    val phpRuntime: WebviewPHPRuntime? = null
 ) : WebViewClient() {
 
     override fun shouldInterceptRequest(

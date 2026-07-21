@@ -61,9 +61,25 @@ private struct PHPWebViewContainer: UIViewRepresentable {
                     nodeId: node.id)
     }
 
+    /// Stop this webview's dedicated PHP thread the moment the webview
+    /// leaves the view hierarchy — contexts are per-webview resources.
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        coordinator.phpRuntime?.release()
+        coordinator.phpRuntime = nil
+    }
+
     func makeUIView(context: Context) -> WKWebView {
+        // Dedicated PHP context for this webview — the persistent runtime's
+        // queue is parked in the native screen's event loop and can never
+        // serve our php:// requests. Released in dismantleUIView.
+        let runtime = WebviewPHPRuntime()
+        context.coordinator.phpRuntime = runtime
+
+        let schemeHandler = PHPSchemeHandler()
+        schemeHandler.dedicatedRuntime = runtime
+
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(PHPSchemeHandler(), forURLScheme: "php")
+        config.setURLSchemeHandler(schemeHandler, forURLScheme: "php")
         config.websiteDataStore = WebView.dataStore
         config.allowsInlineMediaPlayback = true
 
@@ -100,7 +116,11 @@ private struct PHPWebViewContainer: UIViewRepresentable {
     }
 
     private func load(_ path: String, into webView: WKWebView) {
-        guard let url = URL(string: "php://127.0.0.1" + path) else { return }
+        guard let url = URL(string: "php://127.0.0.1" + path) else {
+            print("[NativePHP] webview(php): unloadable path '\(path)'")
+            return
+        }
+        print("[NativePHP] webview(php): loading \(url.absoluteString)")
         webView.load(URLRequest(url: url))
     }
 
@@ -108,10 +128,26 @@ private struct PHPWebViewContainer: UIViewRepresentable {
         var navigatedCallbackId: Int
         var nodeId: Int
         var lastPath: String = ""
+        var phpRuntime: WebviewPHPRuntime?
 
         init(navigatedCallbackId: Int, nodeId: Int) {
             self.navigatedCallbackId = navigatedCallbackId
             self.nodeId = nodeId
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("[NativePHP] webview(php): provisional load failed — \(error)")
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("[NativePHP] webview(php): load failed — \(error)")
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // Matches the RunningBoard entitlement chatter seen when helper
+            // processes die. Reload once so a transient kill self-heals.
+            print("[NativePHP] webview(php): content process terminated — reloading")
+            webView.reload()
         }
 
         func webView(
@@ -120,6 +156,7 @@ private struct PHPWebViewContainer: UIViewRepresentable {
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
             guard let url = navigationAction.request.url else {
+                print("[NativePHP] webview(php): policy — nil URL, cancel")
                 decisionHandler(.cancel)
                 return
             }
@@ -132,13 +169,23 @@ private struct PHPWebViewContainer: UIViewRepresentable {
 
             switch url.scheme?.lowercased() {
             case "php", "about", "data":
+                print("[NativePHP] webview(php): policy — allow \(url.absoluteString)")
                 decisionHandler(.allow)
             default:
                 // Links out of the app (https, mailto, tel, …) go to the
                 // system, mirroring the classic webview's behavior.
+                print("[NativePHP] webview(php): policy — external cancel \(url.absoluteString)")
                 UIApplication.shared.open(url)
                 decisionHandler(.cancel)
             }
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            print("[NativePHP] webview(php): provisional navigation started — \(webView.url?.absoluteString ?? "nil")")
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            print("[NativePHP] webview(php): did finish — \(webView.url?.absoluteString ?? "nil")")
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -276,6 +323,15 @@ private struct WebViewContainer: UIViewRepresentable {
             guard navigatedCallbackId != 0,
                   let url = webView.url?.absoluteString else { return }
             NativeElementBridge.sendTextChangeEvent(navigatedCallbackId, nodeId: nodeId, text: url)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("[NativePHP] webview: provisional load failed — \(error)")
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            print("[NativePHP] webview: content process terminated — reloading")
+            webView.reload()
         }
 
         // MARK: WKUIDelegate
