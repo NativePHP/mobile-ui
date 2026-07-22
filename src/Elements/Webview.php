@@ -50,7 +50,53 @@ class Webview extends Element
             );
         }
 
+        if (isset($attrs['fullscreen'])) {
+            $this->fullscreen(filter_var($attrs['fullscreen'], FILTER_VALIDATE_BOOLEAN));
+        }
+
+        if (isset($attrs['php'])) {
+            $this->php(filter_var($attrs['php'], FILTER_VALIDATE_BOOLEAN));
+        }
+
+        // `_navigated` isn't in the collector's generic callback allowlist
+        // (that list only covers core events like `_press` / `_change`), so
+        // the `@navigated` Blade sugar lands here for us to wire ourselves.
+        if (isset($attrs['_navigated'])) {
+            $this->onNavigated((string) $attrs['_navigated']);
+        }
+
         $this->applyA11yAttributes($attrs);
+    }
+
+    /**
+     * Fill the screen, v3-default-webview style: the element takes all
+     * available space and the renderers extend behind the safe areas.
+     */
+    public function fullscreen(bool $value = true): static
+    {
+        $this->webviewProps['fullscreen'] = $value;
+
+        if ($value) {
+            $this->fill();
+        }
+
+        return $this;
+    }
+
+    /**
+     * Enriched mode: instead of a sandboxed foreign-content view, embed the
+     * app's own Laravel webview — served by the built-in PHP runtime with
+     * the full `window.Native` bridge, shared session, and asset pipeline.
+     * `src` becomes an app route path (`/dashboard`); when omitted, the
+     * app's configured start URL loads. The sandbox opt-ins (`javascript`,
+     * `dom-storage`) don't apply — the enriched webview needs both and the
+     * renderers force them on.
+     */
+    public function php(bool $value = true): static
+    {
+        $this->webviewProps['php'] = $value;
+
+        return $this;
     }
 
     /**
