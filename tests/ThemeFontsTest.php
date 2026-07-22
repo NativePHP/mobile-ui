@@ -1,7 +1,7 @@
 <?php
 
 use Native\Mobile\JumpBridge;
-use Nativephp\NativeUi\Theme;
+use Native\Mobile\UI\Theme;
 
 /**
  * Font aliases: `config('native-ui.fonts')` maps semantic names to bundled

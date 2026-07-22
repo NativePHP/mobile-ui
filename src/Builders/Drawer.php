@@ -4,12 +4,14 @@ namespace Native\Mobile\UI\Builders;
 
 use Illuminate\View\View;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\HasLayoutDrawer;
+use Native\Mobile\UI\Elements\NativeDrawer;
 
 /**
  * Fluent builder for a content-agnostic side drawer (X-style side nav).
  *
  * A layout returns a Drawer from its `drawer()` method (provide it with the
- * {@see \Native\Mobile\UI\Concerns\HasLayoutDrawer} trait). The content is any
+ * {@see HasLayoutDrawer} trait). The content is any
  * Blade view (or pre-built Element), so devs can put whatever UI they want
  * inside:
  *
@@ -30,7 +32,7 @@ use Native\Mobile\Edge\Element;
  *
  * The native-ui chrome contributor renders the content through the screen's own
  * bound Blade path (so `@press` / wire bindings resolve against the screen) and
- * wraps it in an {@see \Native\Mobile\UI\Elements\NativeDrawer} sentinel. The
+ * wraps it in an {@see NativeDrawer} sentinel. The
  * native drawer host hoists that out into a global, persistent drawer.
  */
 class Drawer

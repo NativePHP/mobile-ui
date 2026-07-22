@@ -103,7 +103,7 @@ of that in a unit test:
 ```php
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
-use Nativephp\NativeUi\Theme;
+use Native\Mobile\UI\Theme;
 
 it('normalizes tokens and mirrors them into config', function () {
     Container::getInstance()->instance('config', new Repository);
@@ -133,7 +133,7 @@ same way. Elements expose `toArray(new CallbackRegistry)` (via
 
 ```php
 use Native\Mobile\Edge\CallbackRegistry;
-use Nativephp\NativeUi\Elements\Button;
+use Native\Mobile\UI\Elements\Button;
 
 it('serializes typography props on an element', function () {
     $props = Button::make('Save')->font('Inter-Bold')->toArray(new CallbackRegistry)['props'];
@@ -152,7 +152,7 @@ use — and `reset()` between tests:
 
 ```php
 use Native\Mobile\JumpBridge;
-use Nativephp\NativeUi\Theme;
+use Native\Mobile\UI\Theme;
 
 beforeEach(function () {
     JumpBridge::instance()->mute();

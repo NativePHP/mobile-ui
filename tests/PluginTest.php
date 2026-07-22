@@ -96,7 +96,7 @@ describe('Native Renderers', function () {
 
 describe('Composer Configuration', function () {
     it('has valid composer.json with nativephp-plugin type', function () {
-        $composerPath = $this->pluginPath . '/composer.json';
+        $composerPath = $this->pluginPath.'/composer.json';
         expect(file_exists($composerPath))->toBeTrue();
 
         $composer = json_decode(file_get_contents($composerPath), true);

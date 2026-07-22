@@ -11,6 +11,8 @@ use Native\Mobile\Edge\NativeComponent;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\UI\Builders\Drawer;
 use Native\Mobile\UI\Builders\FloatingOverlay as FloatingOverlayBuilder;
+use Native\Mobile\UI\Concerns\HasFloatingOverlay;
+use Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay;
 use Native\Mobile\UI\Console\CopyFontsCommand;
 use Native\Mobile\UI\Console\FontCommand;
 use Native\Mobile\UI\Console\GenerateIconsCommand;
@@ -137,8 +139,8 @@ class NativeUIServiceProvider extends ServiceProvider
      * hoists it onto a top layer over the content.
      *
      * Discovery is via `method_exists`, so layouts/screens opt in by using the
-     * {@see \Native\Mobile\UI\Concerns\HasFloatingOverlay} /
-     * {@see \Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay} traits (or
+     * {@see HasFloatingOverlay} /
+     * {@see InteractsWithFloatingOverlay} traits (or
      * by declaring the methods themselves) — core never knows.
      */
     protected function registerFloatingOverlay(): void
