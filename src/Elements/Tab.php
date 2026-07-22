@@ -31,8 +31,12 @@ class Tab extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['label'])) { $this->tabProps['label'] = $attrs['label']; }
-        if (isset($attrs['icon']))  { $this->icon($attrs['icon']); }
+        if (isset($attrs['label'])) {
+            $this->tabProps['label'] = $attrs['label'];
+        }
+        if (isset($attrs['icon'])) {
+            $this->icon($attrs['icon']);
+        }
 
         $this->applyA11yAttributes($attrs);
     }

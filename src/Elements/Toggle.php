@@ -20,7 +20,6 @@ use Native\Mobile\Edge\Element;
  */
 class Toggle extends Element
 {
-
     protected string $type = 'toggle';
 
     /** @var array<string, mixed> */
@@ -35,9 +34,15 @@ class Toggle extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['label']))    { $this->label($attrs['label']); }
-        if (isset($attrs['value']))    { $this->value((bool) $attrs['value']); }
-        if (! empty($attrs['disabled'])) { $this->disabled(); }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (isset($attrs['value'])) {
+            $this->value((bool) $attrs['value']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
 

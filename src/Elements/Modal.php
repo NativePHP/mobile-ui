@@ -17,7 +17,6 @@ use Native\Mobile\Edge\Element;
  */
 class Modal extends Element
 {
-
     protected string $type = 'modal';
 
     /** @var array<string, mixed> */
@@ -32,7 +31,9 @@ class Modal extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['visible']))   { $this->visible((bool) $attrs['visible']); }
+        if (isset($attrs['visible'])) {
+            $this->visible((bool) $attrs['visible']);
+        }
         if (isset($attrs['dismissible']) || isset($attrs['dismissable'])) {
             $this->dismissible((bool) ($attrs['dismissible'] ?? $attrs['dismissable']));
         }

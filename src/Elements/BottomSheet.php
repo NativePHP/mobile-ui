@@ -15,7 +15,6 @@ use Native\Mobile\Edge\Element;
  */
 class BottomSheet extends Element
 {
-
     protected string $type = 'bottom_sheet';
 
     /** @var array<string, mixed> */
@@ -30,8 +29,12 @@ class BottomSheet extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['visible'])) { $this->visible((bool) $attrs['visible']); }
-        if (isset($attrs['detents'])) { $this->detents($attrs['detents']); }
+        if (isset($attrs['visible'])) {
+            $this->visible((bool) $attrs['visible']);
+        }
+        if (isset($attrs['detents'])) {
+            $this->detents($attrs['detents']);
+        }
 
         $this->applyA11yAttributes($attrs);
     }

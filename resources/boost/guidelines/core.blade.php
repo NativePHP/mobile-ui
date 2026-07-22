@@ -78,10 +78,13 @@ paths serialize to the same wire tree.
 - **Downloading fonts.** `php artisan native:font Lobster` (or `"Rock Salt"`,
   multiple families, `--weights=400,700`, `--italic`) downloads Google Fonts
   into `resources/fonts/` with ready-to-use token names — no API key.
-- **App-wide default font.** Set the theme's `font-family` token in
-  `config/native-ui.php` to a bundled token (e.g. `'Inter-Regular'`) to apply
-  it everywhere; per-element `font` attributes and `font-serif`/`font-mono`
-  classes still win. `native:font --default` sets it for you.
+- **Font aliases + app-wide default.** Name fonts semantically in
+  `config/native-ui.php`: `'fonts' => ['default' => 'Inter-Regular',
+  'accent' => 'DynaPuff-Regular']`. Use an alias anywhere a font token works
+  (`font="accent"`, chrome `->font()`, layout `$font`); the `default` alias
+  applies app-wide (superseding the older `font-family` token). Per-element
+  `font` attributes and `font-serif`/`font-mono` classes still win over the
+  default. `native:font --default` sets it for you.
 - **Line height (leading).** `leading-none|tight|snug|normal|relaxed|loose`
   (unitless multipliers of the font size), plus arbitrary `leading-[1.4]`
   (multiplier) and `leading-[24px]` (absolute). Applies to `<native:text>` and

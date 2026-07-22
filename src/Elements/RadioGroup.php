@@ -15,7 +15,6 @@ use Native\Mobile\Edge\Element;
  */
 class RadioGroup extends Element
 {
-
     protected string $type = 'radio_group';
 
     /** @var array<string, mixed> */
@@ -33,9 +32,15 @@ class RadioGroup extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['value']))    { $this->value($attrs['value']); }
-        if (isset($attrs['label']))    { $this->label($attrs['label']); }
-        if (! empty($attrs['disabled'])) { $this->disabled(); }
+        if (isset($attrs['value'])) {
+            $this->value($attrs['value']);
+        }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
 

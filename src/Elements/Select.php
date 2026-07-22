@@ -16,7 +16,6 @@ use Native\Mobile\Edge\Element;
  */
 class Select extends Element
 {
-
     protected string $type = 'select';
 
     /** @var array<string, mixed> */
@@ -31,11 +30,21 @@ class Select extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['value']))       { $this->value($attrs['value']); }
-        if (isset($attrs['label']))       { $this->label($attrs['label']); }
-        if (isset($attrs['placeholder'])) { $this->placeholder($attrs['placeholder']); }
-        if (isset($attrs['options']))     { $this->options((array) $attrs['options']); }
-        if (! empty($attrs['disabled']))  { $this->disabled(); }
+        if (isset($attrs['value'])) {
+            $this->value($attrs['value']);
+        }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (isset($attrs['placeholder'])) {
+            $this->placeholder($attrs['placeholder']);
+        }
+        if (isset($attrs['options'])) {
+            $this->options((array) $attrs['options']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
 

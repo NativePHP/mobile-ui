@@ -18,7 +18,6 @@ use Native\Mobile\Edge\Element;
  */
 class Slider extends Element
 {
-
     protected string $type = 'slider';
 
     /** @var array<string, mixed> */
@@ -33,13 +32,25 @@ class Slider extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['value']))    { $this->value((float) $attrs['value']); }
-        if (isset($attrs['min']))      { $this->min((float) $attrs['min']); }
-        if (isset($attrs['max']))      { $this->max((float) $attrs['max']); }
-        if (isset($attrs['step']))     { $this->step((float) $attrs['step']); }
-        if (! empty($attrs['disabled'])) { $this->disabled(); }
+        if (isset($attrs['value'])) {
+            $this->value((float) $attrs['value']);
+        }
+        if (isset($attrs['min'])) {
+            $this->min((float) $attrs['min']);
+        }
+        if (isset($attrs['max'])) {
+            $this->max((float) $attrs['max']);
+        }
+        if (isset($attrs['step'])) {
+            $this->step((float) $attrs['step']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
-        if (isset($attrs['size']))     { $this->size($attrs['size']); }
+        if (isset($attrs['size'])) {
+            $this->size($attrs['size']);
+        }
 
         $this->applyA11yAttributes($attrs);
 

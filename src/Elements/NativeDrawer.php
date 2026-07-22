@@ -22,7 +22,6 @@ use Native\Mobile\Edge\Element;
  */
 class NativeDrawer extends Element
 {
-
     protected string $type = 'native_drawer';
 
     protected array $props = ['mode' => 'modal'];

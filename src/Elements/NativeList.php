@@ -7,7 +7,6 @@ use Native\Mobile\Edge\Element;
 
 class NativeList extends Element
 {
-
     protected string $type = 'list';
 
     protected array $listProps = [];

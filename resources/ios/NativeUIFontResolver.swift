@@ -20,6 +20,12 @@ enum NativeUIFontResolver {
     private static var cache: [String: String?] = [:]
     private static let lock = NSLock()
 
+    /// Semantic aliases from the theme payload's `fonts` map (e.g.
+    /// "accent" → "DynaPuff-Regular"). Consulted before file lookup, so any
+    /// font token — element `font=`, chrome props, the app default — may be
+    /// an alias. Set by `NativeUITheme.apply()`.
+    static var aliases: [String: String] = [:]
+
     private static let extensions = ["ttf", "otf", "ttc"]
 
     /// A SwiftUI `Font` for a bundled token at `size`, or nil to fall back.
@@ -55,7 +61,12 @@ enum NativeUIFontResolver {
     }
 
     /// PostScript name for a bundled token, registering it on first use.
+    /// The token may be a semantic alias (`fonts` map in the theme config);
+    /// caching keys on the RESOLVED file token so a runtime re-alias never
+    /// serves a stale mapping.
     static func postScriptName(for token: String) -> String? {
+        let token = aliases[token] ?? token
+
         lock.lock()
         defer { lock.unlock() }
 

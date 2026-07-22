@@ -33,7 +33,6 @@ use Native\Mobile\Icon\IosSymbol;
  */
 class Button extends Element
 {
-
     protected string $type = 'button';
 
     /** @var array<string, mixed> */

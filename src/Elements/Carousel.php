@@ -7,7 +7,6 @@ use Native\Mobile\Edge\Element;
 
 class Carousel extends Element
 {
-
     protected string $type = 'carousel';
 
     protected array $carouselProps = [];

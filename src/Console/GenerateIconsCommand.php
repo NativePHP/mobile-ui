@@ -40,9 +40,9 @@ class GenerateIconsCommand extends Command
 
     public function handle(): int
     {
-        $iconsDir   = $this->pluginResourcesPath('icons');
-        $outputDir  = $this->option('output')    ?: app_path('Icons');
-        $namespace  = $this->option('namespace') ?: 'App\\Icons';
+        $iconsDir = $this->pluginResourcesPath('icons');
+        $outputDir = $this->option('output') ?: app_path('Icons');
+        $namespace = $this->option('namespace') ?: 'App\\Icons';
 
         if (! is_dir($outputDir)) {
             mkdir($outputDir, 0755, recursive: true);
@@ -53,7 +53,7 @@ class GenerateIconsCommand extends Command
             $this->info("Material catalog refreshed — {$count} symbols.");
         }
 
-        $sf       = $this->loadSymbols($iconsDir.'/sf-symbols.json');
+        $sf = $this->loadSymbols($iconsDir.'/sf-symbols.json');
         $material = $this->loadSymbols($iconsDir.'/material-icons.json');
 
         $this->writeEnum(
@@ -123,8 +123,8 @@ class GenerateIconsCommand extends Command
     /**
      * Build deduplicated [caseName => rawValue] pairs, sorted by case name.
      *
-     * @param  string[]                $symbols
-     * @param  callable(string):string $caseFn
+     * @param  string[]  $symbols
+     * @param  callable(string):string  $caseFn
      * @return array<string, string>
      */
     private function buildCases(array $symbols, callable $caseFn): array
@@ -171,7 +171,7 @@ class GenerateIconsCommand extends Command
     }
 
     /**
-     * @param string[] $parts
+     * @param  string[]  $parts
      */
     private function toPascal(array $parts): string
     {
@@ -200,7 +200,7 @@ class GenerateIconsCommand extends Command
     }
 
     /**
-     * @param array<string, string> $cases
+     * @param  array<string, string>  $cases
      */
     private function writeEnum(
         string $file,
@@ -214,7 +214,7 @@ class GenerateIconsCommand extends Command
     ): void {
         $longestCaseName = max(array_map('strlen', array_keys($cases)) ?: [0]);
 
-        $lines = ['<?php', '', "namespace {$namespace};", '', "use {$interfaceFqn};", '', '/**', " * {$blurb}", ' *', ' * GENERATED FILE — do not hand-edit.', " * Run `php artisan native-ui:generate-icons` to regenerate from", ' * `resources/icons/*.json` snapshots.', ' */', "enum {$class}: string implements {$interface}", '{'];
+        $lines = ['<?php', '', "namespace {$namespace};", '', "use {$interfaceFqn};", '', '/**', " * {$blurb}", ' *', ' * GENERATED FILE — do not hand-edit.', ' * Run `php artisan native-ui:generate-icons` to regenerate from', ' * `resources/icons/*.json` snapshots.', ' */', "enum {$class}: string implements {$interface}", '{'];
 
         if ($variant !== null) {
             $lines[] = '    public function variant(): string';
@@ -264,8 +264,8 @@ class GenerateIconsCommand extends Command
 
         $snapshot = [
             '_meta' => [
-                'source'  => 'Auto-fetched from '.self::MATERIAL_URL,
-                'format'  => 'Material Icons font ligature names (snake_case). Same name renders in both Filled and Outlined fonts.',
+                'source' => 'Auto-fetched from '.self::MATERIAL_URL,
+                'format' => 'Material Icons font ligature names (snake_case). Same name renders in both Filled and Outlined fonts.',
                 'updated' => date('Y-m-d'),
             ],
             'symbols' => $names,

@@ -29,8 +29,12 @@ class ActivityIndicator extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['size']))  { $this->size($attrs['size']); }
-        if (isset($attrs['color'])) { $this->color((string) $attrs['color']); }
+        if (isset($attrs['size'])) {
+            $this->size($attrs['size']);
+        }
+        if (isset($attrs['color'])) {
+            $this->color((string) $attrs['color']);
+        }
 
         $this->applyA11yAttributes($attrs);
     }

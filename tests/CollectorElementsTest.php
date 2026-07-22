@@ -2,6 +2,9 @@
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\ElementRegistry;
+use Native\Mobile\Edge\Elements\Column;
+use Native\Mobile\Edge\Elements\Row;
+use Native\Mobile\Edge\Elements\Text;
 use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\UI\Elements\BareTextInput;
@@ -22,7 +25,7 @@ beforeEach(function () {
     NativeElementCollector::reset();
     TailwindParser::clearCache();
     ElementRegistry::reset();
-    ElementRegistry::register('text', \Native\Mobile\Edge\Elements\Text::class);
+    ElementRegistry::register('text', Text::class);
     ElementRegistry::register('button', Button::class);
     ElementRegistry::register('bare_text_input', BareTextInput::class);
     ElementRegistry::register('toggle', Toggle::class);
@@ -187,9 +190,9 @@ it('produces identical tree to programmatic API', function () {
     $collectorTree = NativeElementCollector::collect()->toArray($collectorRegistry);
 
     // Build via programmatic API
-    $programmatic = \Native\Mobile\Edge\Elements\Column::make(
-        \Native\Mobile\Edge\Elements\Text::make('Count: 5')->fontSize(32)->fontWeight(7)->color('#1a1a2e'),
-        \Native\Mobile\Edge\Elements\Row::make(
+    $programmatic = Column::make(
+        Text::make('Count: 5')->fontSize(32)->fontWeight(7)->color('#1a1a2e'),
+        Row::make(
             Button::make('-')->onPress('decrement'),
             Button::make('+')->onPress('increment'),
         )->gap(16),

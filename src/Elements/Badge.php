@@ -19,7 +19,6 @@ use Native\Mobile\Edge\Element;
  */
 class Badge extends Element
 {
-
     protected string $type = 'badge';
 
     /** @var array<string, mixed> */
@@ -38,9 +37,15 @@ class Badge extends Element
         // still override via applyStyle.
         $this->borderRadius(9999);
 
-        if (isset($attrs['count']))   { $this->count((int) $attrs['count']); }
-        if (isset($attrs['label']))   { $this->label($attrs['label']); }
-        if (isset($attrs['variant'])) { $this->variant((string) $attrs['variant']); }
+        if (isset($attrs['count'])) {
+            $this->count((int) $attrs['count']);
+        }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (isset($attrs['variant'])) {
+            $this->variant((string) $attrs['variant']);
+        }
 
         $this->applyA11yAttributes($attrs);
     }

@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Config\Repository;
+use Illuminate\Container\Container;
 use Native\Mobile\JumpBridge;
 use Native\Mobile\UI\Theme;
 
@@ -80,5 +82,60 @@ describe('Theme color token normalization', function () {
 
         // Wire format is #AARRGGBB — derived dark keeps the authored alpha.
         expect(Theme::get('dark.primary'))->toMatch('/^#80[0-9A-F]{6}$/');
+    });
+});
+
+describe('Theme config write-back', function () {
+    // Core's theme() helper reads config('native-ui.theme.…') directly, so
+    // load()/merge() must mirror the normalized tokens back into the config
+    // repository — otherwise chrome setters like ->color(theme('primary'))
+    // receive raw authored strings ('red-500') the native side can't parse.
+    it('mirrors normalized tokens into the config repository on load', function () {
+        Container::getInstance()->instance('config', new Repository);
+
+        try {
+            Theme::load([
+                'light' => ['primary' => 'red-300'],
+                'dark' => ['primary' => 'red-800'],
+            ]);
+
+            expect(config('native-ui.theme.light.primary'))->toBe('#FCA5A5');
+            expect(config('native-ui.theme.dark.primary'))->toBe('#991B1B');
+        } finally {
+            Container::setInstance(null);
+        }
+    });
+
+    it('mirrors the auto-derived dark block, so theme() works in dark mode without one', function () {
+        Container::getInstance()->instance('config', new Repository);
+
+        try {
+            Theme::load(['light' => ['primary' => 'red-300']]);
+
+            expect(config('native-ui.theme.dark.primary'))->toMatch('/^#[0-9A-F]{6}$/');
+        } finally {
+            Container::setInstance(null);
+        }
+    });
+
+    it('mirrors merge() overrides into the config repository', function () {
+        Container::getInstance()->instance('config', new Repository);
+
+        try {
+            Theme::load(['light' => ['primary' => 'red-300']]);
+            Theme::merge(['light' => ['primary' => 'orange-800']]);
+
+            expect(config('native-ui.theme.light.primary'))->toBe('#9A3412');
+        } finally {
+            Container::setInstance(null);
+        }
+    });
+
+    it('no-ops without a bound config repository', function () {
+        Container::setInstance(null);
+
+        Theme::load(['light' => ['primary' => 'red-300']]);
+
+        expect(Theme::get('light.primary'))->toBe('#FCA5A5');
     });
 });

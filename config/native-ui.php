@@ -41,66 +41,66 @@ return [
 
         'light' => [
             // Primary brand color — used for filled buttons, active states, key accents.
-            'primary'       => '#0F766E',
-            'on-primary'    => '#FFFFFF',
+            'primary' => '#0F766E',
+            'on-primary' => '#FFFFFF',
 
             // Secondary / muted action color.
-            'secondary'     => '#475569',
-            'on-secondary'  => '#FFFFFF',
+            'secondary' => '#475569',
+            'on-secondary' => '#FFFFFF',
 
             // Surface = cards, sheets, dialogs. Background = page root.
-            'surface'       => '#FFFFFF',
-            'on-surface'    => '#0F172A',
-            'background'    => '#F8FAFC',
+            'surface' => '#FFFFFF',
+            'on-surface' => '#0F172A',
+            'background' => '#F8FAFC',
             'on-background' => '#0F172A',
 
             // Surface variant = filled text fields, muted tonal surfaces.
             // on-surface-variant = muted label/hint text on those surfaces.
-            'surface-variant'    => '#F1F5F9',
+            'surface-variant' => '#F1F5F9',
             'on-surface-variant' => '#475569',
 
             // Outline = neutral borders (text fields, dividers, cards).
-            'outline'       => '#CBD5E1',
+            'outline' => '#CBD5E1',
 
             // Destructive actions — maps to `variant="destructive"` on components.
-            'destructive'    => '#B91C1C',
+            'destructive' => '#B91C1C',
             'on-destructive' => '#FFFFFF',
 
             // Tertiary accent — for highlights, badges, emphasis not covered by primary.
-            'accent'        => '#C2410C',
-            'on-accent'     => '#FFFFFF',
+            'accent' => '#C2410C',
+            'on-accent' => '#FFFFFF',
         ],
 
         'dark' => [
             // Leave empty or partial to auto-derive from `light` (luminance inversion).
             // Specify any token here to override the derived value.
-            'primary'       => '#14B8A6',
-            'on-primary'    => '#FFFFFF',
+            'primary' => '#14B8A6',
+            'on-primary' => '#FFFFFF',
 
-            'secondary'     => '#94A3B8',
-            'on-secondary'  => '#0F172A',
+            'secondary' => '#94A3B8',
+            'on-secondary' => '#0F172A',
 
-            'surface'       => '#1E293B',
-            'on-surface'    => '#F8FAFC',
-            'background'    => '#0F172A',
+            'surface' => '#1E293B',
+            'on-surface' => '#F8FAFC',
+            'background' => '#0F172A',
             'on-background' => '#F8FAFC',
 
-            'surface-variant'    => '#334155',
+            'surface-variant' => '#334155',
             'on-surface-variant' => '#94A3B8',
 
-            'outline'       => '#475569',
+            'outline' => '#475569',
 
-            'destructive'    => '#F87171',
+            'destructive' => '#F87171',
             'on-destructive' => '#0F172A',
 
-            'accent'        => '#FDBA74',
-            'on-accent'     => '#0F172A',
+            'accent' => '#FDBA74',
+            'on-accent' => '#0F172A',
         ],
 
         // Corner radii (points / dp).
-        'radius-sm'   => 4,
-        'radius-md'   => 8,
-        'radius-lg'   => 16,
+        'radius-sm' => 4,
+        'radius-md' => 8,
+        'radius-lg' => 16,
         'radius-full' => 9999,
 
         // Font size scale (points / sp).
@@ -116,5 +116,25 @@ return [
         // font-serif / font-mono classes still win over this default.
         'font-family' => 'System',
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Font aliases
+    |---------------------------------------------------------------------------
+    |
+    | Semantic names for bundled fonts (resources/fonts/ file tokens, minus
+    | the extension). Use an alias anywhere a font token works — the `font`
+    | attribute (`font="accent"`), chrome ->font() builders, or the layout
+    | $font property. The special `default` alias sets the app-wide default
+    | font (and supersedes the `font-family` token above).
+    |
+    |   'fonts' => [
+    |       'default' => 'Inter-Regular',
+    |       'accent'  => 'DynaPuff-Regular',
+    |   ],
+    |
+    */
+
+    'fonts' => [],
 
 ];

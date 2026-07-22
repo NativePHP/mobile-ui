@@ -115,6 +115,13 @@ object NativeUITheme {
         val fontXl     = numSp(parameters["font-xl"],     NativeUITokens.fallback.fontXl)
         val fontFamily = (parameters["font-family"] as? String) ?: NativeUITokens.fallback.fontFamily
 
+        // Semantic font aliases (config `fonts` map) — handed to the resolver
+        // so every token lookup (elements, chrome, the default above) accepts
+        // an alias. Assigned before the token stores so any recomposition
+        // triggered below already sees the fresh mapping.
+        com.nativephp.plugins.native_ui.ui.NativeUIFontResolver.aliases =
+            asMap(parameters["fonts"]).mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+
         val lightTokens = tokensFrom(
             lightMap, NativeUITokens.fallback,
             radiusSm, radiusMd, radiusLg, radiusFull,

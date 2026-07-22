@@ -29,6 +29,7 @@
         }
     },
     "require-dev": {
+        "orchestra/testbench": "^10.0",
         "pestphp/pest": "^3.0"
     },
     "scripts": {

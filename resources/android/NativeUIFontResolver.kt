@@ -95,10 +95,23 @@ object NativeUIFontResolver {
     // token -> FontFamily; a stored null means "looked up, not present".
     private val cache = HashMap<String, FontFamily?>()
 
+    /**
+     * Semantic aliases from the theme payload's `fonts` map (e.g.
+     * "accent" -> "DynaPuff-Regular"). Consulted before file lookup, so any
+     * font token — element `font=`, chrome props, the app default — may be
+     * an alias. Set by [NativeUITheme.apply].
+     */
+    @Volatile
+    var aliases: Map<String, String> = emptyMap()
+
     private val extensions = listOf("ttf", "otf", "ttc")
 
     @Synchronized
     fun resolve(context: Context, token: String): FontFamily? {
+        // Alias hop first; cache keys on the RESOLVED file token so a
+        // runtime re-alias never serves a stale mapping.
+        val token = aliases[token] ?: token
+
         if (cache.containsKey(token)) {
             return cache[token]
         }

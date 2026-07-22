@@ -16,7 +16,6 @@ use Native\Mobile\Edge\Element;
  */
 class ButtonGroup extends Element
 {
-
     protected string $type = 'button_group';
 
     /** @var array<string, mixed> */
@@ -31,11 +30,21 @@ class ButtonGroup extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['options'])) { $this->options((array) $attrs['options']); }
-        if (isset($attrs['value']))         { $this->selectedIndex((int) $attrs['value']); }
-        if (isset($attrs['selectedIndex'])) { $this->selectedIndex((int) $attrs['selectedIndex']); }
-        if (isset($attrs['selected-index'])){ $this->selectedIndex((int) $attrs['selected-index']); }
-        if (! empty($attrs['disabled']))    { $this->disabled(); }
+        if (isset($attrs['options'])) {
+            $this->options((array) $attrs['options']);
+        }
+        if (isset($attrs['value'])) {
+            $this->selectedIndex((int) $attrs['value']);
+        }
+        if (isset($attrs['selectedIndex'])) {
+            $this->selectedIndex((int) $attrs['selectedIndex']);
+        }
+        if (isset($attrs['selected-index'])) {
+            $this->selectedIndex((int) $attrs['selected-index']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
 

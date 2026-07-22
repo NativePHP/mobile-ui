@@ -42,12 +42,22 @@ class Chip extends Element
         // still override via applyStyle.
         $this->borderRadius(9999);
 
-        if (isset($attrs['label'])) { $this->label($attrs['label']); }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
         // `selected` is the bound value; accept both `selected` and `value`.
-        if (isset($attrs['selected'])) { $this->selected((bool) $attrs['selected']); }
-        if (isset($attrs['value']))    { $this->selected((bool) $attrs['value']); }
-        if (isset($attrs['icon']))     { $this->icon($attrs['icon']); }
-        if (! empty($attrs['disabled'])) { $this->disabled(); }
+        if (isset($attrs['selected'])) {
+            $this->selected((bool) $attrs['selected']);
+        }
+        if (isset($attrs['value'])) {
+            $this->selected((bool) $attrs['value']);
+        }
+        if (isset($attrs['icon'])) {
+            $this->icon($attrs['icon']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
 

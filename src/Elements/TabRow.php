@@ -13,7 +13,6 @@ use Native\Mobile\Edge\Element;
  */
 class TabRow extends Element
 {
-
     protected string $type = 'tab_row';
 
     /** @var array<string, mixed> */
@@ -33,9 +32,15 @@ class TabRow extends Element
     {
         // Accept `value` (from native:model expansion) and `selectedIndex`
         // (from the fluent API / legacy shape) as aliases.
-        if (isset($attrs['value']))         { $this->selectedIndex((int) $attrs['value']); }
-        if (isset($attrs['selectedIndex'])) { $this->selectedIndex((int) $attrs['selectedIndex']); }
-        if (isset($attrs['selected-index'])){ $this->selectedIndex((int) $attrs['selected-index']); }
+        if (isset($attrs['value'])) {
+            $this->selectedIndex((int) $attrs['value']);
+        }
+        if (isset($attrs['selectedIndex'])) {
+            $this->selectedIndex((int) $attrs['selectedIndex']);
+        }
+        if (isset($attrs['selected-index'])) {
+            $this->selectedIndex((int) $attrs['selected-index']);
+        }
 
         $this->applyA11yAttributes($attrs);
 

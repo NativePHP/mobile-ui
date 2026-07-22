@@ -1,6 +1,8 @@
 <?php
 
 use Native\Mobile\Concerns\HasPlatformIcon;
+use Native\Mobile\Edge\CallbackRegistry;
+use Native\Mobile\Edge\Layouts\Builders\NavAction;
 use Native\Mobile\Icon\AndroidSymbol;
 use Native\Mobile\Icon\IosSymbol;
 use Native\Mobile\Platform;
@@ -15,22 +17,28 @@ use Native\Mobile\Platform;
  */
 enum Ios: string implements IosSymbol
 {
-    case BellSlash        = 'bell.slash';
+    case BellSlash = 'bell.slash';
     case SquareAndArrowUp = 'square.and.arrow.up';
-    case Trash            = 'trash';
+    case Trash = 'trash';
 }
 
 enum Android: string implements AndroidSymbol
 {
-    public function variant(): string { return 'filled'; }
-    case Delete           = 'delete';
+    public function variant(): string
+    {
+        return 'filled';
+    }
+    case Delete = 'delete';
     case NotificationsOff = 'notifications_off';
 }
 
 enum AndroidOutlined: string implements AndroidSymbol
 {
-    public function variant(): string { return 'outlined'; }
-    case Home             = 'home';
+    public function variant(): string
+    {
+        return 'outlined';
+    }
+    case Home = 'home';
     case NotificationsOff = 'notifications_off';
 }
 
@@ -50,7 +58,7 @@ afterEach(function () {
 });
 
 it('resolves a shared name on both platforms', function () {
-    $bag = (new IconBag())->icon('save');
+    $bag = (new IconBag)->icon('save');
 
     Platform::set('ios');
     expect($bag->resolvedIcon())->toBe('save');
@@ -62,7 +70,7 @@ it('resolves a shared name on both platforms', function () {
 });
 
 it('picks the iOS override on iOS and the Android override on Android', function () {
-    $bag = (new IconBag())->icon(
+    $bag = (new IconBag)->icon(
         ios: Ios::BellSlash,
         android: Android::NotificationsOff,
     );
@@ -76,7 +84,7 @@ it('picks the iOS override on iOS and the Android override on Android', function
 });
 
 it('falls back to the shared name when only one platform override is set', function () {
-    $bag = (new IconBag())->icon('share', ios: Ios::SquareAndArrowUp);
+    $bag = (new IconBag)->icon('share', ios: Ios::SquareAndArrowUp);
 
     Platform::set('ios');
     expect($bag->resolvedIcon())->toBe('square.and.arrow.up');
@@ -86,7 +94,7 @@ it('falls back to the shared name when only one platform override is set', funct
 });
 
 it('emits material_variant=outlined for AndroidOutlined overrides', function () {
-    $bag = (new IconBag())->icon(android: AndroidOutlined::Home);
+    $bag = (new IconBag)->icon(android: AndroidOutlined::Home);
 
     Platform::set('android');
     expect($bag->resolvedIcon())->toBe('home');
@@ -97,7 +105,7 @@ it('emits material_variant=outlined for AndroidOutlined overrides', function () 
 });
 
 it('accepts raw strings as platform overrides for new symbols not yet in the enum', function () {
-    $bag = (new IconBag())->icon(
+    $bag = (new IconBag)->icon(
         ios: 'newly.released.symbol',
         android: 'newly_released_symbol',
     );
@@ -112,7 +120,7 @@ it('accepts raw strings as platform overrides for new symbols not yet in the enu
 });
 
 it('returns null when no slot is set', function () {
-    $bag = new IconBag();
+    $bag = new IconBag;
 
     Platform::set('ios');
     expect($bag->resolvedIcon())->toBeNull();
@@ -125,7 +133,7 @@ it('returns null when no slot is set', function () {
 
 it('falls back to the shared name when platform is unknown (test / web preview)', function () {
     Platform::set(null);
-    $bag = (new IconBag())->icon('save', ios: Ios::BellSlash);
+    $bag = (new IconBag)->icon('save', ios: Ios::BellSlash);
 
     // No platform → no override applies → shared name is the safe default.
     expect($bag->resolvedIcon())->toBe('save');
@@ -133,7 +141,7 @@ it('falls back to the shared name when platform is unknown (test / web preview)'
 });
 
 it('overrides earlier values when icon() is called multiple times', function () {
-    $bag = (new IconBag())
+    $bag = (new IconBag)
         ->icon('save')
         ->icon(ios: Ios::Trash)
         ->icon('delete', android: Android::Delete);
@@ -150,11 +158,11 @@ it('overrides earlier values when icon() is called multiple times', function () 
 it('NavAction emits the iOS-resolved icon and no material_variant on iOS', function () {
     Platform::set('ios');
 
-    $element = \Native\Mobile\Edge\Layouts\Builders\NavAction::make('mute')
+    $element = NavAction::make('mute')
         ->icon(ios: Ios::BellSlash, android: Android::NotificationsOff)
         ->toElement();
 
-    $props = $element->getResolvedProps(new \Native\Mobile\Edge\CallbackRegistry());
+    $props = $element->getResolvedProps(new CallbackRegistry);
     expect($props['icon'] ?? null)->toBe('bell.slash');
     expect($props['material_variant'] ?? null)->toBeNull();
 });
@@ -162,11 +170,11 @@ it('NavAction emits the iOS-resolved icon and no material_variant on iOS', funct
 it('NavAction emits the Android-resolved icon and material_variant on Android', function () {
     Platform::set('android');
 
-    $element = \Native\Mobile\Edge\Layouts\Builders\NavAction::make('mute')
+    $element = NavAction::make('mute')
         ->icon(ios: Ios::BellSlash, android: AndroidOutlined::NotificationsOff)
         ->toElement();
 
-    $props = $element->getResolvedProps(new \Native\Mobile\Edge\CallbackRegistry());
+    $props = $element->getResolvedProps(new CallbackRegistry);
     expect($props['icon'] ?? null)->toBe('notifications_off');
     expect($props['material_variant'] ?? null)->toBe('outlined');
 });
@@ -174,11 +182,11 @@ it('NavAction emits the Android-resolved icon and material_variant on Android', 
 it('NavAction with a shared name only emits no material_variant', function () {
     Platform::set('android');
 
-    $element = \Native\Mobile\Edge\Layouts\Builders\NavAction::make('save')
+    $element = NavAction::make('save')
         ->icon('save')
         ->toElement();
 
-    $props = $element->getResolvedProps(new \Native\Mobile\Edge\CallbackRegistry());
+    $props = $element->getResolvedProps(new CallbackRegistry);
     expect($props['icon'] ?? null)->toBe('save');
     expect($props['material_variant'] ?? null)->toBeNull();
 });

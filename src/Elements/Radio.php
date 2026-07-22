@@ -13,7 +13,6 @@ use Native\Mobile\Edge\Element;
  */
 class Radio extends Element
 {
-
     protected string $type = 'radio';
 
     /** @var array<string, mixed> */
@@ -33,10 +32,18 @@ class Radio extends Element
     {
         // `value` is the option's own value, distinct from the group's
         // selected value. We also accept `radioValue` as a legacy alias.
-        if (isset($attrs['value']))      { $this->radioProps['value'] = (string) $attrs['value']; }
-        if (isset($attrs['radioValue'])) { $this->radioProps['value'] = (string) $attrs['radioValue']; }
-        if (isset($attrs['label']))      { $this->label($attrs['label']); }
-        if (! empty($attrs['disabled'])) { $this->disabled(); }
+        if (isset($attrs['value'])) {
+            $this->radioProps['value'] = (string) $attrs['value'];
+        }
+        if (isset($attrs['radioValue'])) {
+            $this->radioProps['value'] = (string) $attrs['radioValue'];
+        }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
     }

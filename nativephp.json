@@ -460,6 +460,7 @@
         }
     },
     "ios": {
+        "min_version": 18.2,
         "init_function": "registerNativeUIChrome",
         "dependencies": {
             "swift_packages": [],

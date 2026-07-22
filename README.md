@@ -91,6 +91,77 @@ decorative (silent to screen readers) unless given an `a11y-label`. List items
 with a trailing icon button take `trailing-a11y-label` (fluent:
 `->trailingA11yLabel()`) to label that button separately from the row.
 
+## Testing
+
+Theme normalization and config write-back are pure PHP — no device, emulator,
+or bridge round-trip required. `Theme::load()` / `Theme::merge()` resolve
+authored color tokens (Tailwind names, `red-300/20` opacity modifiers, CSS
+`#RRGGBBAA` alpha hex) to wire-format hex, auto-derive a dark block, and mirror
+the effective set into `config('native-ui.theme.…')`. You can assert every step
+of that in a unit test:
+
+```php
+use Illuminate\Config\Repository;
+use Illuminate\Container\Container;
+use Nativephp\NativeUi\Theme;
+
+it('normalizes tokens and mirrors them into config', function () {
+    Container::getInstance()->instance('config', new Repository);
+
+    try {
+        Theme::load([
+            'light' => ['primary' => 'red-300', 'accent' => '#8B5CF680'],
+            'dark'  => ['primary' => 'red-800'],
+        ]);
+
+        // Normalized tokens are readable via Theme::get('mode.token'):
+        expect(Theme::get('light.primary'))->toBe('#FCA5A5');   // palette name
+        expect(Theme::get('light.accent'))->toBe('#808B5CF6');  // CSS alpha → wire ARGB
+
+        // …and mirrored back so core's theme() helper reads wire-format hex:
+        expect(config('native-ui.theme.light.primary'))->toBe('#FCA5A5');
+        expect(config('native-ui.theme.dark.primary'))->toBe('#991B1B');
+    } finally {
+        Container::setInstance(null);
+    }
+});
+```
+
+Element color and typography props share the same grammar and serialize the
+same way. Elements expose `toArray(new CallbackRegistry)` (via
+`NativeElementCollector`), so you can assert what lands on the wire:
+
+```php
+use Native\Mobile\Edge\CallbackRegistry;
+use Nativephp\NativeUi\Elements\Button;
+
+it('serializes typography props on an element', function () {
+    $props = Button::make('Save')->font('Inter-Bold')->toArray(new CallbackRegistry)['props'];
+
+    expect($props['font_name'])->toBe('Inter-Bold');
+});
+```
+
+### Keeping `Theme::pushToNative()` off the wire
+
+`Theme::load()` / `merge()` fire a `NativeUI.Theme.Set` bridge call on every
+change. In a full Laravel test app, `pushToNative()`'s `runningUnitTests()`
+guard suppresses it. In **plain Pest** (no booted app), that guard can't trip,
+so mute the bridge in `beforeEach()` — the same pattern the plugin's own tests
+use — and `reset()` between tests:
+
+```php
+use Native\Mobile\JumpBridge;
+use Nativephp\NativeUi\Theme;
+
+beforeEach(function () {
+    JumpBridge::instance()->mute();
+    Theme::reset();
+});
+
+afterEach(fn () => Theme::reset());
+```
+
 ## License
 
 MIT

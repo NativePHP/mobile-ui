@@ -99,6 +99,12 @@ final class NativeUITheme: ObservableObject {
         let fontXl     = cgf(parameters["font-xl"],     fallback: light.fontXl)
         let fontFamily = (parameters["font-family"] as? String) ?? light.fontFamily
 
+        // Semantic font aliases (config `fonts` map) — handed to the resolver
+        // so every token lookup (elements, chrome, the default above) accepts
+        // an alias. Assigned before the token stores so any recomposition
+        // triggered below already sees the fresh mapping.
+        NativeUIFontResolver.aliases = (parameters["fonts"] as? [String: String]) ?? [:]
+
         func tokens(from map: [String: Any], fallbackTo: NativeUITokens) -> NativeUITokens {
             NativeUITokens(
                 primary:          hex(map["primary"],            fallback: fallbackTo.primary),

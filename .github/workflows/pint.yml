@@ -1,0 +1,29 @@
+name: Pint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pint:
+    name: Code style (Pint)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pint is a standalone formatter — it needs no project vendor/, so this
+      # job skips composer entirely.
+      - name: Setup PHP with Pint
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: pint
+
+      - name: Check code style
+        run: pint --test

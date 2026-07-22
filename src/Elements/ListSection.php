@@ -18,7 +18,6 @@ use Native\Mobile\Edge\Element;
  */
 class ListSection extends Element
 {
-
     protected string $type = 'list_section';
 
     protected array $sectionProps = [];

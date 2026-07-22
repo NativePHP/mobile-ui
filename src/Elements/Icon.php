@@ -18,7 +18,9 @@ class Icon extends Element
     protected array $iconProps = [];
 
     private ?string $shared = null;
+
     private IosSymbol|string|null $iosOverride = null;
+
     private AndroidSymbol|string|null $androidOverride = null;
 
     public static function make(string $name = ''): static
@@ -34,9 +36,15 @@ class Icon extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['name']))  { $this->name($attrs['name']); }
-        if (isset($attrs['size']))  { $this->size((float) $attrs['size']); }
-        if (isset($attrs['color'])) { $this->color($attrs['color']); }
+        if (isset($attrs['name'])) {
+            $this->name($attrs['name']);
+        }
+        if (isset($attrs['size'])) {
+            $this->size((float) $attrs['size']);
+        }
+        if (isset($attrs['color'])) {
+            $this->color($attrs['color']);
+        }
 
         // Platform enum overrides — `<icon :ios="Ios::House" :android="Android::Home"/>`
         // — same shape as the programmatic `Icon::make(ios: …, android: …)`.
@@ -71,9 +79,15 @@ class Icon extends Element
         IosSymbol|string|null $ios = null,
         AndroidSymbol|string|null $android = null,
     ): static {
-        if ($name !== null)    { $this->shared = $name; }
-        if ($ios !== null)     { $this->iosOverride = $ios; }
-        if ($android !== null) { $this->androidOverride = $android; }
+        if ($name !== null) {
+            $this->shared = $name;
+        }
+        if ($ios !== null) {
+            $this->iosOverride = $ios;
+        }
+        if ($android !== null) {
+            $this->androidOverride = $android;
+        }
 
         return $this;
     }

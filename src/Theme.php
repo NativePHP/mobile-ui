@@ -22,13 +22,40 @@ class Theme
     private static array $tokens = [];
 
     /**
+     * Font aliases — semantic name → resources/fonts/ file token, from
+     * `config('native-ui.fonts')`. Rides the theme payload as `fonts`; the
+     * native font resolvers consult it before file lookup, so `font="accent"`
+     * works everywhere a font token does (elements, chrome, even the
+     * `font-family` token itself). The `default` alias, when set, becomes the
+     * app-wide default font.
+     *
+     * @var array<string, string>
+     */
+    private static array $fonts = [];
+
+    /**
      * Initial load from config. Replaces any existing tokens.
      * Called by NativeUIServiceProvider during boot.
      */
     public static function load(array $tokens): void
     {
         static::$tokens = static::normalizeColors($tokens);
+        static::syncConfig();
         static::pushToNative();
+    }
+
+    /**
+     * Replace the font alias map. Called by NativeUIServiceProvider during
+     * boot (before load(), which triggers the push) — call it yourself when
+     * re-aliasing at runtime and the push follows automatically.
+     */
+    public static function fonts(array $aliases, bool $push = false): void
+    {
+        static::$fonts = $aliases;
+
+        if ($push) {
+            static::pushToNative();
+        }
     }
 
     /**
@@ -38,6 +65,7 @@ class Theme
     public static function merge(array $tokens): void
     {
         static::$tokens = static::deepMerge(static::$tokens, static::normalizeColors($tokens));
+        static::syncConfig();
         static::pushToNative();
     }
 
@@ -69,6 +97,17 @@ class Theme
 
         $tokens['dark'] = $dark;
 
+        // Font aliases ride the same payload. `default` doubles as the
+        // app-wide default font: it wins over a literal `font-family` token
+        // (the alias map is the newer, preferred spelling).
+        if (! empty(static::$fonts)) {
+            $tokens['fonts'] = static::$fonts;
+
+            if (isset(static::$fonts['default'])) {
+                $tokens['font-family'] = static::$fonts['default'];
+            }
+        }
+
         return $tokens;
     }
 
@@ -83,6 +122,7 @@ class Theme
     public static function reset(): void
     {
         static::$tokens = [];
+        static::$fonts = [];
     }
 
     /**
@@ -113,6 +153,29 @@ class Theme
     }
 
     // ─── Internals ────────────────────────────────────────────────────────────
+
+    /**
+     * Mirror the effective light/dark color blocks back into the Laravel
+     * config repository. Core's `theme()` helper reads
+     * `config('native-ui.theme.{mode}.{token}')` directly, so without this
+     * write-back it hands chrome setters the raw authored strings
+     * (`red-500`) that the native color parsers can't decode — they fall
+     * back to #000. Syncing the effective set (including the auto-derived
+     * dark block) keeps the helper, the renderers, and the native theme
+     * store reading identical wire-format hex. No-ops outside a booted
+     * Laravel app (plain Pest runs, early boot).
+     */
+    private static function syncConfig(): void
+    {
+        if (! function_exists('app') || ! app()->bound('config')) {
+            return;
+        }
+
+        $all = static::all();
+
+        app('config')->set('native-ui.theme.light', $all['light'] ?? []);
+        app('config')->set('native-ui.theme.dark', $all['dark'] ?? []);
+    }
 
     /**
      * Resolve authored color tokens in the `light` / `dark` blocks to
@@ -214,7 +277,7 @@ class Theme
         $h = match (true) {
             $max === $r => ($g - $b) / $d + ($g < $b ? 6.0 : 0.0),
             $max === $g => ($b - $r) / $d + 2.0,
-            default     => ($r - $g) / $d + 4.0,
+            default => ($r - $g) / $d + 4.0,
         };
         $h /= 6.0;
 
@@ -240,11 +303,21 @@ class Theme
 
     private static function hueToRgb(float $p, float $q, float $t): float
     {
-        if ($t < 0.0) $t += 1.0;
-        if ($t > 1.0) $t -= 1.0;
-        if ($t < 1.0 / 6.0) return $p + ($q - $p) * 6.0 * $t;
-        if ($t < 1.0 / 2.0) return $q;
-        if ($t < 2.0 / 3.0) return $p + ($q - $p) * (2.0 / 3.0 - $t) * 6.0;
+        if ($t < 0.0) {
+            $t += 1.0;
+        }
+        if ($t > 1.0) {
+            $t -= 1.0;
+        }
+        if ($t < 1.0 / 6.0) {
+            return $p + ($q - $p) * 6.0 * $t;
+        }
+        if ($t < 1.0 / 2.0) {
+            return $q;
+        }
+        if ($t < 2.0 / 3.0) {
+            return $p + ($q - $p) * (2.0 / 3.0 - $t) * 6.0;
+        }
 
         return $p;
     }

@@ -30,7 +30,6 @@ use Native\Mobile\Icon\IosSymbol;
  */
 abstract class BaseTextInput extends Element
 {
-
     /** @var array<string, mixed> */
     protected array $inputProps = [];
 
@@ -46,28 +45,46 @@ abstract class BaseTextInput extends Element
     public function applyAttributes(array $attrs): void
     {
         // Content
-        if (isset($attrs['value']))       { $this->value($attrs['value']); }
-        if (isset($attrs['placeholder'])) { $this->placeholder($attrs['placeholder']); }
-        if (isset($attrs['label']))       { $this->label($attrs['label']); }
-        if (isset($attrs['supporting']))  { $this->supporting($attrs['supporting']); }
+        if (isset($attrs['value'])) {
+            $this->value($attrs['value']);
+        }
+        if (isset($attrs['placeholder'])) {
+            $this->placeholder($attrs['placeholder']);
+        }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (isset($attrs['supporting'])) {
+            $this->supporting($attrs['supporting']);
+        }
 
         // State
-        if (! empty($attrs['disabled']))  { $this->disabled(); }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
         if (! empty($attrs['readOnly']) || ! empty($attrs['read-only'])) {
             $this->readOnly();
         }
         if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
             $this->error();
         }
-        if (! empty($attrs['loading']))   { $this->loading(); }
+        if (! empty($attrs['loading'])) {
+            $this->loading();
+        }
 
         // Behavior
-        if (isset($attrs['keyboard']))    { $this->keyboard($attrs['keyboard']); }
-        if (! empty($attrs['secure']))    { $this->secure(); }
+        if (isset($attrs['keyboard'])) {
+            $this->keyboard($attrs['keyboard']);
+        }
+        if (! empty($attrs['secure'])) {
+            $this->secure();
+        }
         if (isset($attrs['maxLength']) || isset($attrs['max-length'])) {
             $this->maxLength((int) ($attrs['maxLength'] ?? $attrs['max-length']));
         }
-        if (! empty($attrs['multiline'])) { $this->multiline(); }
+        if (! empty($attrs['multiline'])) {
+            $this->multiline();
+        }
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
         }
@@ -79,8 +96,12 @@ abstract class BaseTextInput extends Element
         }
 
         // Decorations
-        if (isset($attrs['prefix']))      { $this->prefix($attrs['prefix']); }
-        if (isset($attrs['suffix']))      { $this->suffix($attrs['suffix']); }
+        if (isset($attrs['prefix'])) {
+            $this->prefix($attrs['prefix']);
+        }
+        if (isset($attrs['suffix'])) {
+            $this->suffix($attrs['suffix']);
+        }
         if (isset($attrs['leading-icon']) || isset($attrs['leadingIcon'])) {
             $this->leadingIcon($attrs['leading-icon'] ?? $attrs['leadingIcon']);
         }
@@ -89,16 +110,24 @@ abstract class BaseTextInput extends Element
         }
 
         // Size + a11y
-        if (isset($attrs['size']))        { $this->size($attrs['size']); }
+        if (isset($attrs['size'])) {
+            $this->size($attrs['size']);
+        }
         // Custom font by name — the token is a font file (minus extension)
         // bundled from the app's resources/fonts/ by the copy_assets hook.
-        if (isset($attrs['font']))        { $this->font($attrs['font']); }
+        if (isset($attrs['font'])) {
+            $this->font($attrs['font']);
+        }
         // Line height (leading) — meaningful for multiline inputs. `line_height`
         // is a multiplier of font size; `line_height_px` an absolute override.
         $lineHeight = $attrs['line-height'] ?? $attrs['lineHeight'] ?? null;
-        if ($lineHeight !== null)   { $this->inputProps['line_height'] = (float) $lineHeight; }
+        if ($lineHeight !== null) {
+            $this->inputProps['line_height'] = (float) $lineHeight;
+        }
         $lineHeightPx = $attrs['line-height-px'] ?? $attrs['lineHeightPx'] ?? null;
-        if ($lineHeightPx !== null) { $this->inputProps['line_height_px'] = (float) $lineHeightPx; }
+        if ($lineHeightPx !== null) {
+            $this->inputProps['line_height_px'] = (float) $lineHeightPx;
+        }
         $this->applyA11yAttributes($attrs);
 
         // Sync mode + debounce (from `native:model` expansion, or set manually).

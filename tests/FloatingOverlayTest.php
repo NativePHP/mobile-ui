@@ -14,7 +14,6 @@ use Native\Mobile\UI\NativeUIServiceProvider;
  * builder surface (returned from `NativeLayout::floatingOverlay()`) and the
  * `floating_overlay` sentinel the chrome contributor emits from it.
  */
-
 it('defaults the builder to a bottom overlay with no explicit offset', function () {
     $builder = FloatingOverlayBuilder::make(Chip::make('3 servers nearby'));
 

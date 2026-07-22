@@ -16,7 +16,6 @@ use Native\Mobile\Edge\Element;
  */
 class Checkbox extends Element
 {
-
     protected string $type = 'checkbox';
 
     /** @var array<string, mixed> */
@@ -31,9 +30,15 @@ class Checkbox extends Element
 
     public function applyAttributes(array $attrs): void
     {
-        if (isset($attrs['value']))    { $this->value((bool) $attrs['value']); }
-        if (isset($attrs['label']))    { $this->label($attrs['label']); }
-        if (! empty($attrs['disabled'])) { $this->disabled(); }
+        if (isset($attrs['value'])) {
+            $this->value((bool) $attrs['value']);
+        }
+        if (isset($attrs['label'])) {
+            $this->label($attrs['label']);
+        }
+        if (! empty($attrs['disabled'])) {
+            $this->disabled();
+        }
 
         $this->applyA11yAttributes($attrs);
 

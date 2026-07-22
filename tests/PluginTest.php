@@ -2,7 +2,7 @@
 
 beforeEach(function () {
     $this->pluginPath = dirname(__DIR__);
-    $this->manifestPath = $this->pluginPath . '/nativephp.json';
+    $this->manifestPath = $this->pluginPath.'/nativephp.json';
 });
 
 describe('Plugin Manifest', function () {
@@ -31,7 +31,7 @@ describe('Plugin Manifest', function () {
             expect($component)->toHaveKeys(['type', 'element', 'blade']);
             // At least one platform renderer
             expect(
-                !empty($component['android_renderer']) || !empty($component['ios_renderer'])
+                ! empty($component['android_renderer']) || ! empty($component['ios_renderer'])
             )->toBeTrue();
         }
     });
@@ -50,7 +50,7 @@ describe('Plugin Manifest', function () {
 
 describe('PHP Classes', function () {
     it('has Button Element class', function () {
-        $file = $this->pluginPath . '/src/Elements/Button.php';
+        $file = $this->pluginPath.'/src/Elements/Button.php';
         expect(file_exists($file))->toBeTrue();
 
         $content = file_get_contents($file);
@@ -60,7 +60,7 @@ describe('PHP Classes', function () {
     });
 
     it('has Button Blade component class', function () {
-        $file = $this->pluginPath . '/src/Components/Button.php';
+        $file = $this->pluginPath.'/src/Components/Button.php';
         expect(file_exists($file))->toBeTrue();
 
         $content = file_get_contents($file);
@@ -69,14 +69,14 @@ describe('PHP Classes', function () {
     });
 
     it('has service provider', function () {
-        $file = $this->pluginPath . '/src/NativeUIServiceProvider.php';
+        $file = $this->pluginPath.'/src/NativeUIServiceProvider.php';
         expect(file_exists($file))->toBeTrue();
     });
 });
 
 describe('Native Renderers', function () {
     it('has Android Kotlin renderer', function () {
-        $file = $this->pluginPath . '/resources/android/ButtonRenderer.kt';
+        $file = $this->pluginPath.'/resources/android/ButtonRenderer.kt';
         expect(file_exists($file))->toBeTrue();
 
         $content = file_get_contents($file);
@@ -86,7 +86,7 @@ describe('Native Renderers', function () {
     });
 
     it('has iOS Swift renderer', function () {
-        $file = $this->pluginPath . '/resources/ios/NativeUIButtonRenderer.swift';
+        $file = $this->pluginPath.'/resources/ios/NativeUIButtonRenderer.swift';
         expect(file_exists($file))->toBeTrue();
 
         $content = file_get_contents($file);
