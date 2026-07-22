@@ -13,6 +13,7 @@ import android.webkit.CookieManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nativephp.mobile.bridge.LaravelEnvironment
 import com.nativephp.mobile.bridge.PHPBridge
@@ -66,7 +67,7 @@ object WebviewRenderer {
         }
 
         AndroidView(
-            modifier = modifier,
+            modifier = modifier.clipToBounds(),
             factory = { ctx ->
                 @SuppressLint("SetJavaScriptEnabled")
                 val webView = WebView(ctx).apply {
@@ -140,30 +141,38 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
     val nodeId = node.id
 
     AndroidView(
-        modifier = modifier,
+        modifier = modifier.clipToBounds(),
         factory = { ctx ->
             val activity = (ctx as? MainActivity) ?: MainActivity.instance
-                ?: return@factory WebView(ctx) // no shell activity — bare view, nothing to serve
+            if (activity == null) {
+                // No shell activity — bare view, nothing to serve
+                WebView(ctx)
+            } else {
+                val webView = WebView(activity)
 
-            val webView = WebView(activity)
+                // Transparent until Chromium's first paint — a fresh WebView
+                // surface otherwise renders opaque black over the window for
+                // a beat (the "black flash"), hiding the native siblings.
+                webView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-            // Dedicated PHP context for this webview — phpExecutor is parked
-            // in the native screen's event loop and can never serve our
-            // requests. Released via PhpEmbedClient in onRelease.
-            val bridge = PHPBridge(activity)
-            val phpRuntime = WebviewPHPRuntime(bridge)
-            bridge.dedicatedWebviewRuntime = phpRuntime
+                // Dedicated PHP context for this webview — phpExecutor is parked
+                // in the native screen's event loop and can never serve our
+                // requests. Released via PhpEmbedClient in onRelease.
+                val bridge = PHPBridge(activity)
+                val phpRuntime = WebviewPHPRuntime(bridge)
+                bridge.dedicatedWebviewRuntime = phpRuntime
 
-            val previousShared = WebViewManager.shared
-            WebViewManager(activity, webView, bridge).setup()
-            WebViewManager.shared = previousShared
+                val previousShared = WebViewManager.shared
+                WebViewManager(activity, webView, bridge, embedded = true).setup()
+                WebViewManager.shared = previousShared
 
-            webView.webViewClient = PhpEmbedClient(webView.webViewClient, onNavigatedCb, nodeId, phpRuntime)
+                webView.webViewClient = PhpEmbedClient(webView.webViewClient, onNavigatedCb, nodeId, phpRuntime)
 
-            val path = phpPath(src, activity)
-            webView.tag = path
-            webView.loadUrl("http://127.0.0.1$path")
-            webView
+                val path = phpPath(src, activity)
+                webView.tag = path
+                webView.loadUrl("http://127.0.0.1$path")
+                webView
+            }
         },
         update = { webView ->
             (webView.webViewClient as? PhpEmbedClient)?.let {
@@ -224,6 +233,9 @@ private class PhpEmbedClient(
 
     override fun onPageCommitVisible(view: WebView?, url: String?) {
         inner.onPageCommitVisible(view, url)
+        // Surface-geometry nudge: a WebView created mid-composition can
+        // paint its layer at a stale offset until the next layout pass.
+        view?.requestLayout()
         val resolved = url.orEmpty()
         if (navigatedCallbackId != 0 && resolved.isNotEmpty()) {
             NativeUIBridge.sendTextChangeEvent(navigatedCallbackId, nodeId, resolved)
@@ -239,7 +251,7 @@ private fun WebView.loadContent(src: String, html: String) {
         return
     }
     if (src.isEmpty()) return
-    if (!isLoadableScheme(src)) return
+    if (!isLoadableUrl(src)) return
     loadUrl(src)
 }
 
@@ -322,7 +334,7 @@ private fun isLoadableScheme(scheme: String?): Boolean {
     return s == "https" || s == "http" || s == "data" || s == "about"
 }
 
-private fun isLoadableScheme(url: String): Boolean {
+private fun isLoadableUrl(url: String): Boolean {
     val parsed = Uri.parse(url)
     return isLoadableScheme(parsed.scheme)
 }
