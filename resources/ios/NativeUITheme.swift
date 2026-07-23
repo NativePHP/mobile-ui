@@ -208,12 +208,14 @@ struct NUIScaledFontModifier: ViewModifier {
     private let weight: Font.Weight
     private let design: Font.Design
     private let fontName: String?
+    private let italic: Bool
 
-    init(size: CGFloat, weight: Font.Weight, design: Font.Design, fontName: String?) {
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, fontName: String?, italic: Bool) {
         _size = ScaledMetric(wrappedValue: size, relativeTo: .body)
         self.weight = weight
         self.design = design
         self.fontName = fontName
+        self.italic = italic
     }
 
     @ObservedObject private var themeStore = NativeUITheme.shared
@@ -224,7 +226,10 @@ struct NUIScaledFontModifier: ViewModifier {
         // selects/synthesizes it within the family). Unknown names — or none —
         // fall back to the system font unchanged. `size` is already Dynamic-
         // Type-scaled by `@ScaledMetric`, so the custom font uses it as-is.
-        if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size) {
+        // `italic` only matters to the resolver for single-style fonts (it
+        // synthesizes an oblique); real italic faces and the system font get
+        // the trait from the caller's `Text.italic()`.
+        if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size, italic: italic) {
             content.font(custom.weight(weight))
         } else {
             content.font(.system(size: size, weight: weight, design: design))
@@ -249,8 +254,8 @@ extension View {
     /// with the user's accessibility settings. Pass `fontName` (a bundled font
     /// token) to render in a custom font, falling back to the system font when
     /// it can't be resolved.
-    func nuiScaledFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default, fontName: String? = nil) -> some View {
-        modifier(NUIScaledFontModifier(size: size, weight: weight, design: design, fontName: fontName))
+    func nuiScaledFont(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default, fontName: String? = nil, italic: Bool = false) -> some View {
+        modifier(NUIScaledFontModifier(size: size, weight: weight, design: design, fontName: fontName, italic: italic))
     }
 
     /// Ensures a minimum 44×44pt hit target (Apple HIG) without changing the

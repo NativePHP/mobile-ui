@@ -66,7 +66,7 @@ struct NativeUITextRenderer: View {
             }()
 
             styledText
-                .nuiScaledFont(size: CGFloat(fontSize), weight: fontWeight, design: fontDesign, fontName: fontName.isEmpty ? nil : fontName)
+                .nuiScaledFont(size: CGFloat(fontSize), weight: fontWeight, design: fontDesign, fontName: fontName.isEmpty ? nil : fontName, italic: isItalic)
                 .lineSpacing(lineSpacingValue)
                 .foregroundColor(Color(argb: color))
                 .multilineTextAlignment(textAlign)
@@ -190,7 +190,7 @@ struct NativeUITextRenderer: View {
 
         var font: Font
         if !runFontName.isEmpty,
-           let custom = NativeUIFontResolver.font(runFontName, size: CGFloat(ctx.fontSize)) {
+           let custom = NativeUIFontResolver.font(runFontName, size: CGFloat(ctx.fontSize), italic: ctx.italic) {
             font = custom.weight(runWeight)
         } else {
             font = Font.system(
@@ -199,6 +199,9 @@ struct NativeUITextRenderer: View {
                 design: resolveFontDesign(ctx.fontFamilyInt)
             )
         }
+        // Real italic faces (and the system font) take the trait here; a
+        // single-style custom font already came back synthetically obliqued
+        // from the resolver, on which `.italic()` is a harmless no-op.
         if ctx.italic, #available(iOS 16.0, *) { font = font.italic() }
         run.font = font
 

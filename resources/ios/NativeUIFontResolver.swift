@@ -18,7 +18,14 @@ enum NativeUIFontResolver {
     // token → PostScript name. A cached `.some(nil)` records "looked up,
     // not found" so misses aren't retried every frame.
     private static var cache: [String: String?] = [:]
+    // PostScript name → whether CoreText can apply a REAL italic trait.
+    private static var italicTraitCache: [String: Bool] = [:]
     private static let lock = NSLock()
+
+    /// Slant for synthesized obliques: tan(14°), matching Android's fake
+    /// italic (`textSkewX = -0.25`) so a single-style font leans the same
+    /// amount on both platforms.
+    private static let obliqueSkew: CGFloat = 0.25
 
     /// Semantic aliases from the theme payload's `fonts` map (e.g.
     /// "accent" → "DynaPuff-Regular"). Consulted before file lookup, so any
@@ -30,10 +37,42 @@ enum NativeUIFontResolver {
 
     /// A SwiftUI `Font` for a bundled token at `size`, or nil to fall back.
     /// `size` is used as-is (callers pass an already-Dynamic-Type-scaled value).
-    static func font(_ token: String, size: CGFloat) -> Font? {
+    ///
+    /// With `italic`, a font whose family has a real italic face is returned
+    /// upright — the caller's `Text.italic()` / `Font.italic()` selects the
+    /// true face via the trait. A single-style font (no italic face) gets a
+    /// synthesized oblique here instead, because SwiftUI's trait path silently
+    /// renders such fonts upright while Android fakes the slant — the exact
+    /// cross-platform mismatch this resolves.
+    static func font(_ token: String, size: CGFloat, italic: Bool = false) -> Font? {
         guard let name = postScriptName(for: token) else { return nil }
 
+        if italic, !supportsItalicTrait(name) {
+            let matrix = CGAffineTransform(a: 1, b: 0, c: obliqueSkew, d: 1, tx: 0, ty: 0)
+            let descriptor = UIFontDescriptor(name: name, matrix: matrix)
+            return Font(UIFont(descriptor: descriptor, size: size))
+        }
+
         return Font.custom(name, size: size)
+    }
+
+    /// Whether CoreText can produce a genuinely italic face for this
+    /// PostScript name. `CTFontCreateCopyWithSymbolicTraits` returns nil when
+    /// the family has nothing to satisfy the trait — the case where SwiftUI's
+    /// `.italic()` becomes a silent no-op.
+    private static func supportsItalicTrait(_ postScriptName: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let cached = italicTraitCache[postScriptName] {
+            return cached
+        }
+
+        let base = CTFontCreateWithName(postScriptName as CFString, 12, nil)
+        let supported = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, .italicTrait, .italicTrait) != nil
+        italicTraitCache[postScriptName] = supported
+
+        return supported
     }
 
     /// Extra `.lineSpacing` needed to hit a Tailwind `leading` target for the
