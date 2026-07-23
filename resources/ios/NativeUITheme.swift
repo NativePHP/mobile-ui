@@ -226,11 +226,18 @@ struct NUIScaledFontModifier: ViewModifier {
         // selects/synthesizes it within the family). Unknown names — or none —
         // fall back to the system font unchanged. `size` is already Dynamic-
         // Type-scaled by `@ScaledMetric`, so the custom font uses it as-is.
-        // `italic` only matters to the resolver for single-style fonts (it
-        // synthesizes an oblique); real italic faces and the system font get
-        // the trait from the caller's `Text.italic()`.
-        if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size, italic: italic) {
-            content.font(custom.weight(weight))
+        // `italic` only matters for single-style custom fonts: the font stays
+        // upright (so SwiftUI rasterizes the full glyphs — a matrix-skewed
+        // font leans past its advances and gets clipped at line ends) and the
+        // rendered view is slanted instead. Real italic faces and the system
+        // font get the trait from the caller's `Text.italic()`.
+        if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size) {
+            if italic, NativeUIFontResolver.needsSyntheticOblique(name) {
+                content.font(custom.weight(weight))
+                    .transformEffect(NativeUIFontResolver.obliqueTransform(name, size: size))
+            } else {
+                content.font(custom.weight(weight))
+            }
         } else {
             content.font(.system(size: size, weight: weight, design: design))
         }

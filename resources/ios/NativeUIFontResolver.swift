@@ -44,6 +44,13 @@ enum NativeUIFontResolver {
     /// synthesized oblique here instead, because SwiftUI's trait path silently
     /// renders such fonts upright while Android fakes the slant — the exact
     /// cross-platform mismatch this resolves.
+    ///
+    /// Matrix-skewed glyphs lean PAST their advance widths, and SwiftUI's
+    /// text renderer clips each line to those advances — so a line ENDING in
+    /// an oblique run loses the top-right of its last glyph. Leaf text
+    /// therefore skews at the view level instead (`obliqueTransform`); this
+    /// font-level path remains for inline composed runs, where a per-view
+    /// transform can't reach and mid-line runs hide the overhang naturally.
     static func font(_ token: String, size: CGFloat, italic: Bool = false) -> Font? {
         guard let name = postScriptName(for: token) else { return nil }
 
@@ -54,6 +61,33 @@ enum NativeUIFontResolver {
         }
 
         return Font.custom(name, size: size)
+    }
+
+    /// Whether an italic request for this token needs a synthesized oblique
+    /// (custom font resolves, but its family has no real italic face).
+    static func needsSyntheticOblique(_ token: String) -> Bool {
+        guard let name = postScriptName(for: token) else { return false }
+
+        return !supportsItalicTrait(name)
+    }
+
+    /// View-space skew for a synthetic oblique on LEAF text: the Text keeps
+    /// its upright font (complete raster, nothing clipped) and the rendered
+    /// view is slanted after the fact — the same draw-time model as Android's
+    /// `textSkewX`. Anchored at the first baseline (`ascender` below the top
+    /// in view coordinates, where y grows downward), so the baseline stays
+    /// put and glyph tops lean right. On wrapped text later baselines sit
+    /// lower and drift slightly left — the trade against the font-matrix
+    /// path's hard clip at every line end.
+    static func obliqueTransform(_ token: String, size: CGFloat) -> CGAffineTransform {
+        let ascent: CGFloat = {
+            if let name = postScriptName(for: token), let font = UIFont(name: name, size: size) {
+                return font.ascender
+            }
+            return UIFont.systemFont(ofSize: size).ascender
+        }()
+
+        return CGAffineTransform(a: 1, b: 0, c: -obliqueSkew, d: 1, tx: obliqueSkew * ascent, ty: 0)
     }
 
     /// Whether CoreText can produce a genuinely italic face for this
