@@ -102,9 +102,42 @@ it('strips spaces from multi-word families', function () {
     expect(GoogleFonts::filenameFor('Rock Salt', 400, false))->toBe('RockSalt-Regular.ttf');
 });
 
+it('reads + as a space in family names (css2 URL spelling)', function () {
+    expect(GoogleFonts::familySpec('Archivo+Black', [400], false))->toBe('Archivo+Black');
+    expect(GoogleFonts::filenameFor('Archivo+Black', 400, false))->toBe('ArchivoBlack-Regular.ttf');
+    expect(GoogleFonts::filenameFor('archivo+black', 400, false))->toBe('ArchivoBlack-Regular.ttf');
+});
+
 // ── replaceDefaultFontToken ─────────────────────────────────────────────────
 
-it('rewrites the font-family value in config contents', function () {
+it('rewrites the fonts default alias', function () {
+    $config = "<?php return [\n    'fonts' => [\n        'default' => 'System',\n        'accent' => 'DynaPuff-Regular',\n    ],\n];";
+
+    $updated = GoogleFonts::replaceDefaultFontToken($config, 'Inter-Regular');
+
+    expect($updated)->toContain("'default' => 'Inter-Regular'");
+    expect($updated)->toContain("'accent' => 'DynaPuff-Regular'");
+    expect($updated)->not->toContain("'System'");
+});
+
+it('inserts a default alias into an empty fonts block', function () {
+    $config = "<?php return [\n    'fonts' => [],\n];";
+
+    $updated = GoogleFonts::replaceDefaultFontToken($config, 'Inter-Regular');
+
+    expect($updated)->toContain("'default' => 'Inter-Regular'");
+});
+
+it('inserts a default alias into a fonts block that lacks one', function () {
+    $config = "<?php return [\n    'fonts' => [\n        'accent' => 'DynaPuff-Regular',\n    ],\n];";
+
+    $updated = GoogleFonts::replaceDefaultFontToken($config, 'Inter-Regular');
+
+    expect($updated)->toContain("'default' => 'Inter-Regular'");
+    expect($updated)->toContain("'accent' => 'DynaPuff-Regular'");
+});
+
+it('rewrites a legacy font-family token when no fonts block exists', function () {
     $config = "<?php return ['theme' => ['light' => ['font-family' => 'System']]];";
 
     $updated = GoogleFonts::replaceDefaultFontToken($config, 'Inter-Regular');
@@ -113,7 +146,7 @@ it('rewrites the font-family value in config contents', function () {
     expect($updated)->not->toContain("'System'");
 });
 
-it('returns null when the config has no font-family key', function () {
+it('returns null when the config has neither a fonts block nor font-family', function () {
     expect(GoogleFonts::replaceDefaultFontToken('<?php return [];', 'X'))->toBeNull();
 });
 
@@ -125,5 +158,7 @@ it('matches the shipped config stub', function () {
     $updated = GoogleFonts::replaceDefaultFontToken($stub, 'Lobster-Regular');
 
     expect($updated)->not->toBeNull();
-    expect($updated)->toContain("'font-family' => 'Lobster-Regular'");
+    expect($updated)->toContain("'default' => 'Lobster-Regular'");
+    // The docblock example above the fonts block must not be rewritten.
+    expect($updated)->toContain("'default' => 'Inter-Regular'");
 });
