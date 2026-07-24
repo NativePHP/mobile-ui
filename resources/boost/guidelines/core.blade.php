@@ -16,7 +16,7 @@ paths serialize to the same wire tree.
 - Bind state with `native:model="property"` (works on toggle, checkbox, chip,
   slider, select, radio-group, button-group, tab-row, and the text inputs).
   Use `.live` / `.blur` / `.debounce.Xms` modifiers to control sync frequency.
-- Wire callbacks with event attributes (`@press`, `@change`, `@submit`,
+- Wire callbacks with event attributes (`@tap`, `@change`, `@submit`,
   `@dismiss`) pointing at public methods on the component.
 
 @verbatim
@@ -24,7 +24,7 @@ paths serialize to the same wire tree.
 <native:column class="gap-4 p-4">
     <native:outlined-text-input label="Email" native:model.blur="email" />
     <native:toggle label="Notifications" native:model="notify" />
-    <native:button variant="primary" @press="save">Save</native:button>
+    <native:button variant="primary" @tap="save">Save</native:button>
 </native:column>
 </code-snippet>
 @endverbatim
@@ -143,7 +143,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 
 @verbatim
 <code-snippet name="Accessible icon-only controls" lang="blade">
-<native:button icon="trash" a11y-label="Delete draft" a11y-hint="Deletes the draft permanently" @press="deleteDraft" />
+<native:button icon="trash" a11y-label="Delete draft" a11y-hint="Deletes the draft permanently" @tap="deleteDraft" />
 <native:icon name="checkmark.seal" a11y-label="Verified" />
 <native:list-item headline="Team meeting" trailingIconButton="ellipsis" trailing-a11y-label="More options" />
 </code-snippet>
