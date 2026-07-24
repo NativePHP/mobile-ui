@@ -127,6 +127,13 @@ return [
         'font-lg' => 20,
         'font-xl' => 24,
 
+        // 'System' resolves to the platform default (San Francisco on iOS, Roboto on Android).
+        // Set a bundled font token to apply it app-wide — a file from your app's
+        // resources/fonts/ minus the extension (e.g. 'Inter-Regular'). Download one
+        // with `php artisan native:font Inter`. The fonts 'default' alias below,
+        // when set, supersedes this token. Per-element `font` attributes and
+        // font-serif / font-mono classes still win over both.
+        'font-family' => 'System',
     ],
 
     /*
