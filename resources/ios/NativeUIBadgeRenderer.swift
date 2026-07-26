@@ -40,6 +40,7 @@ struct NativeUIBadgeRenderer: View {
             switch variant {
             case "primary":     return (theme.primary,     theme.onPrimary)
             case "accent":      return (theme.accent,      theme.onAccent)
+            case "success":     return (theme.success,     theme.onSuccess)
             default:            return (theme.destructive, theme.onDestructive) // "destructive"
             }
         }()

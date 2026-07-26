@@ -21,8 +21,11 @@ struct NativeUITokens: Equatable {
     let surfaceVariant: Color
     let onSurfaceVariant: Color
     let outline: Color
+    let outlineVariant: Color
     let destructive: Color
     let onDestructive: Color
+    let success: Color
+    let onSuccess: Color
     let accent: Color
     let onAccent: Color
 
@@ -53,8 +56,11 @@ struct NativeUITokens: Equatable {
         surfaceVariant:   Color(hex: "#F1F5F9"),
         onSurfaceVariant: Color(hex: "#475569"),
         outline:          Color(hex: "#CBD5E1"),
+        outlineVariant:   Color(hex: "#E2E8F0"),
         destructive:      Color(hex: "#B91C1C"),
         onDestructive:    Color(hex: "#FFFFFF"),
+        success:          Color(hex: "#15803D"),
+        onSuccess:        Color(hex: "#FFFFFF"),
         accent:           Color(hex: "#C2410C"),
         onAccent:         Color(hex: "#FFFFFF"),
         radiusSm: 4, radiusMd: 8, radiusLg: 16, radiusFull: 9999,
@@ -118,8 +124,11 @@ final class NativeUITheme: ObservableObject {
                 surfaceVariant:   hex(map["surface-variant"],    fallback: fallbackTo.surfaceVariant),
                 onSurfaceVariant: hex(map["on-surface-variant"], fallback: fallbackTo.onSurfaceVariant),
                 outline:          hex(map["outline"],            fallback: fallbackTo.outline),
+                outlineVariant:   hex(map["outline-variant"],    fallback: fallbackTo.outlineVariant),
                 destructive:      hex(map["destructive"],        fallback: fallbackTo.destructive),
                 onDestructive:    hex(map["on-destructive"],     fallback: fallbackTo.onDestructive),
+                success:          hex(map["success"],            fallback: fallbackTo.success),
+                onSuccess:        hex(map["on-success"],         fallback: fallbackTo.onSuccess),
                 accent:           hex(map["accent"],             fallback: fallbackTo.accent),
                 onAccent:         hex(map["on-accent"],          fallback: fallbackTo.onAccent),
                 radiusSm: radiusSm, radiusMd: radiusMd, radiusLg: radiusLg, radiusFull: radiusFull,

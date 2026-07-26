@@ -68,14 +68,27 @@ struct NativeUIStackLayout: Layout {
             let widthFill = layout?.widthMode == SizeMode.fill
             let heightFill = layout?.heightMode == SizeMode.fill
 
-            let natural = subview.sizeThatFits(.unspecified)
+            // Measure against the width the child will ACTUALLY be given. A
+            // `w-full` child's height depends on that width — wrapping text is
+            // the obvious case — and `.unspecified` measures at unbounded
+            // width, so a multi-line title reports the height of ONE long line.
+            // That under-reported height then feeds the bottom-anchored
+            // placement below (`maxY - height - bottom`), putting the child far
+            // too low and letting it spill out of the stack once it renders
+            // wrapped. Non-filling children keep the unspecified proposal, so
+            // intrinsic-sized badges and chips are unaffected.
+            let natural = subview.sizeThatFits(ProposedViewSize(
+                width: widthFill ? bounds.width : nil,
+                height: heightFill ? bounds.height : nil
+            ))
             let width = widthFill ? bounds.width : natural.width
             let height = heightFill ? bounds.height : natural.height
 
             // Absolute children pin to the stack's edges by inset — the
             // docs-blessed "layer a badge over an icon" pattern. Same anchor
-            // convention as FlexContainer.placeAbsolute: a positive right /
-            // bottom inset (with zero left/top) anchors to that edge.
+            // convention as FlexContainer.placeAbsolute: a NON-ZERO right /
+            // bottom inset (with zero left/top) anchors to that edge, and a
+            // negative one deliberately overhangs it (`-right-8` bleed).
             if layout?.positionType == PositionType.absolute {
                 let top = CGFloat(layout?.positionTop ?? 0)
                 let right = CGFloat(layout?.positionRight ?? 0)
@@ -83,11 +96,11 @@ struct NativeUIStackLayout: Layout {
                 let left = CGFloat(layout?.positionLeft ?? 0)
 
                 var x = bounds.minX + left
-                if right > 0 && left == 0 {
+                if right != 0 && left == 0 {
                     x = bounds.maxX - width - right
                 }
                 var y = bounds.minY + top
-                if bottom > 0 && top == 0 {
+                if bottom != 0 && top == 0 {
                     y = bounds.maxY - height - bottom
                 }
 

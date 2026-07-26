@@ -8,6 +8,7 @@ import SwiftUI
 ///     (solid, like primary — for a tonal look set opacity on the token in
 ///     the theme config, e.g. `'secondary' => 'fuchsia-500/70'`)
 ///   - destructive → `.buttonStyle(.borderedProminent)` + `.tint(theme.destructive)`
+///   - success     → `.buttonStyle(.borderedProminent)` + `.tint(theme.success)`
 ///   - accent      → `.buttonStyle(.borderedProminent)` + `.tint(theme.accent)`
 ///   - ghost       → `.buttonStyle(.plain)` + `.foregroundStyle(theme.primary)`
 ///
@@ -277,6 +278,16 @@ struct NativeUIButtonRenderer: View {
                 .modifier(A11yLabelModifier(label: a11yLabel))
                 .modifier(A11yHintModifier(hint: a11yHint))
 
+        case "success":
+            Button(action: action) { content.fillWidthIfRequested(node) }
+                .buttonStyle(.borderedProminent)
+                .tint(enabled ? theme.success : theme.surfaceVariant)
+                .foregroundStyle(enabled ? theme.onSuccess : theme.onSurfaceVariant)
+                .controlSize(metrics.controlSize)
+                .disabled(!enabled)
+                .modifier(A11yLabelModifier(label: a11yLabel))
+                .modifier(A11yHintModifier(hint: a11yHint))
+
         case "ghost":
             Button(action: action) { content.fillWidthIfRequested(node) }
                 .buttonStyle(.plain)
@@ -314,6 +325,7 @@ struct NativeUIButtonRenderer: View {
         switch variant {
         case "secondary":   return theme.secondary
         case "destructive": return theme.destructive
+        case "success":     return theme.success
         case "accent":      return theme.accent
         case "ghost":       return theme.primary
         default:            return theme.primary
@@ -324,6 +336,7 @@ struct NativeUIButtonRenderer: View {
         switch variant {
         case "secondary":   return theme.onSecondary
         case "destructive": return theme.onDestructive
+        case "success":     return theme.onSuccess
         case "accent":      return theme.onAccent
         case "ghost":       return theme.primary
         default:            return theme.onPrimary

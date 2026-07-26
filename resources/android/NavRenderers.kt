@@ -37,11 +37,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.R
-import com.nativephp.mobile.ui.NativeUIState
 import com.nativephp.mobile.ui.getIconName
 import com.nativephp.mobile.ui.nativerender.LocalSafeAreaBottom
 import com.nativephp.mobile.ui.nativerender.LocalSafeAreaTop
-import com.nativephp.mobile.ui.nativerender.NativeEdgeDrawerState
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import kotlinx.coroutines.launch
@@ -257,7 +255,12 @@ object BottomNavRenderer {
 object SideNavRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
-        NativeEdgeDrawerState.sideNavNode.value = node
+        // No-op: the Edge-bridge drawer host (NativeEdgeDrawerState) was
+        // removed with the v3 Edge chrome system. A hoisted side_nav node
+        // currently has no drawer host on Android — layout drawers go
+        // through HasLayoutDrawer / the native_drawer root host instead.
+        // This renderer stays registered so a side_nav in the wire tree
+        // renders nothing rather than crashing renderer dispatch.
     }
 }
 

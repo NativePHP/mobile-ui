@@ -148,6 +148,20 @@ object ButtonRenderer {
                     content = { content() },
                 )
 
+                "success" -> Button(
+                    onClick = onClick,
+                    enabled = enabled,
+                    modifier = buttonModifier,
+                    contentPadding = metrics.contentPadding,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = theme.success,
+                        contentColor = theme.onSuccess,
+                        disabledContainerColor = theme.surfaceVariant,
+                        disabledContentColor = theme.onSurfaceVariant,
+                    ),
+                    content = { content() },
+                )
+
                 "ghost" -> TextButton(
                     onClick = onClick,
                     enabled = enabled,

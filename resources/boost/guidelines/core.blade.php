@@ -16,7 +16,7 @@ paths serialize to the same wire tree.
 - Bind state with `native:model="property"` (works on toggle, checkbox, chip,
   slider, select, radio-group, button-group, tab-row, and the text inputs).
   Use `.live` / `.blur` / `.debounce.Xms` modifiers to control sync frequency.
-- Wire callbacks with event attributes (`@press`, `@change`, `@submit`,
+- Wire callbacks with event attributes (`@tap`, `@change`, `@submit`,
   `@dismiss`) pointing at public methods on the component.
 
 @verbatim
@@ -24,7 +24,7 @@ paths serialize to the same wire tree.
 <native:column class="gap-4 p-4">
     <native:outlined-text-input label="Email" native:model.blur="email" />
     <native:toggle label="Notifications" native:model="notify" />
-    <native:button variant="primary" @press="save">Save</native:button>
+    <native:button variant="primary" @tap="save">Save</native:button>
 </native:column>
 </code-snippet>
 @endverbatim
@@ -44,6 +44,20 @@ paths serialize to the same wire tree.
   and `bg-theme-*` / `text-theme-*` / `border-theme-*` classes emit both
   modes automatically. This works for Blade-declared AND programmatically
   built elements (`Element->class()`).
+- The theme token map is open-ended: add any semantic role your design
+  needs (`success`, `warning`, `outline-variant`, …) to both `light` and
+  `dark` blocks and the matching `*-theme-*` classes resolve immediately —
+  never fall back to hardcoded hex for a missing role.
+- `success`/`on-success` and `outline-variant` are first-class tokens: the
+  native theme stores parse them (with fallbacks), and `variant="success"`
+  works on `<native:button>` and `<native:badge>` for confirm / "safe to
+  proceed" actions — prefer it over green hex or misusing `primary`.
+- Theme classes accept opacity modifiers like every other color class:
+  `bg-theme-primary/15` is the tonal-fill idiom (alpha applies to the dark
+  companion too).
+- In PHP — layout chrome builders (`->activeColor()`, `->backgroundColor()`),
+  dynamic styling — read tokens with the appearance-aware `theme()` helper
+  (`theme('primary')`) instead of raw `config()` paths or pasted hex.
 - Disabled controls use the `surface-variant` (fill) + `on-surface-variant`
   (label) tokens on both platforms — tune disabled contrast by adjusting
   those two tokens, not per-component.
@@ -129,7 +143,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 
 @verbatim
 <code-snippet name="Accessible icon-only controls" lang="blade">
-<native:button icon="trash" a11y-label="Delete draft" a11y-hint="Deletes the draft permanently" @press="deleteDraft" />
+<native:button icon="trash" a11y-label="Delete draft" a11y-hint="Deletes the draft permanently" @tap="deleteDraft" />
 <native:icon name="checkmark.seal" a11y-label="Verified" />
 <native:list-item headline="Team meeting" trailingIconButton="ellipsis" trailing-a11y-label="More options" />
 </code-snippet>

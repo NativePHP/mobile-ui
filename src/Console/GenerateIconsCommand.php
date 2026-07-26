@@ -239,8 +239,6 @@ class GenerateIconsCommand extends Command
         ?string $variant,
         string $blurb,
     ): void {
-        $longestCaseName = max(array_map('strlen', array_keys($cases)) ?: [0]);
-
         $lines = ['<?php', '', "namespace {$namespace};", '', "use {$interfaceFqn};", '', '/**', " * {$blurb}", ' *', ' * GENERATED FILE — do not hand-edit.', ' * Run `php artisan native-ui:generate-icons` to regenerate from', ' * `resources/icons/*.json` snapshots.', ' */', "enum {$class}: string implements {$interface}", '{'];
 
         if ($variant !== null) {
@@ -252,8 +250,7 @@ class GenerateIconsCommand extends Command
         }
 
         foreach ($cases as $case => $value) {
-            $padded = str_pad($case, $longestCaseName);
-            $lines[] = "    case {$padded} = '{$value}';";
+            $lines[] = "    case {$case} = '{$value}';";
         }
 
         $lines[] = '}';

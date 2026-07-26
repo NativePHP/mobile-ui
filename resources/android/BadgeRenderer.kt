@@ -37,6 +37,7 @@ object BadgeRenderer {
         val (bg, fg) = when (variant) {
             "primary" -> theme.primary     to theme.onPrimary
             "accent"  -> theme.accent      to theme.onAccent
+            "success" -> theme.success     to theme.onSuccess
             else      -> theme.destructive to theme.onDestructive // "destructive"
         }
 

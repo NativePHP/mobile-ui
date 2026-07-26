@@ -19,10 +19,18 @@ return [
     | Theme
     |---------------------------------------------------------------------------
     |
-    | 17 color tokens, 4 radii, 4 font sizes, font family.
+    | Color tokens (open-ended map), 4 radii, 4 font sizes, font family.
     |
     | "on-X" means "color of content placed ON a surface of color X"
     |   — i.e., text/icons on that background.
+    |
+    | The token map is OPEN-ENDED: add any key your design needs (e.g. a
+    | `warning` pair) to both blocks and `bg-theme-warning` /
+    | `text-theme-on-warning` / `border-theme-warning` resolve immediately.
+    | Theme classes also accept opacity modifiers — `bg-theme-primary/15`
+    | is the tonal-fill idiom (the alpha applies to the dark companion
+    | too). In PHP (layout chrome builders, dynamic styling) read tokens
+    | with the appearance-aware `theme()` helper: `theme('primary')`.
     |
     | Color tokens accept:
     |   - CSS hex: '#B91C1C', '#F00', or with alpha '#8B5CF680' (#RRGGBBAA)
@@ -60,11 +68,17 @@ return [
             'on-surface-variant' => '#475569',
 
             // Outline = neutral borders (text fields, dividers, cards).
+            // outline-variant = softer edges: hairline dividers, card seams.
             'outline' => '#CBD5E1',
+            'outline-variant' => '#E2E8F0',
 
             // Destructive actions — maps to `variant="destructive"` on components.
             'destructive' => '#B91C1C',
             'on-destructive' => '#FFFFFF',
+
+            // Success / "safe to proceed" — confirmations, verified badges.
+            'success' => '#15803D',
+            'on-success' => '#FFFFFF',
 
             // Tertiary accent — for highlights, badges, emphasis not covered by primary.
             'accent' => '#C2410C',
@@ -89,9 +103,13 @@ return [
             'on-surface-variant' => '#94A3B8',
 
             'outline' => '#475569',
+            'outline-variant' => '#334155',
 
             'destructive' => '#F87171',
             'on-destructive' => '#0F172A',
+
+            'success' => '#4ADE80',
+            'on-success' => '#052E16',
 
             'accent' => '#FDBA74',
             'on-accent' => '#0F172A',
@@ -109,24 +127,21 @@ return [
         'font-lg' => 20,
         'font-xl' => 24,
 
-        // 'System' resolves to the platform default (San Francisco on iOS, Roboto on Android).
-        // Set a bundled font token to apply it app-wide — a file from your app's
-        // resources/fonts/ minus the extension (e.g. 'Inter-Regular'). Download one
-        // with `php artisan native:font Inter`. Per-element `font` attributes and
-        // font-serif / font-mono classes still win over this default.
-        'font-family' => 'System',
     ],
 
     /*
     |---------------------------------------------------------------------------
-    | Font aliases
+    | Fonts
     |---------------------------------------------------------------------------
     |
     | Semantic names for bundled fonts (resources/fonts/ file tokens, minus
     | the extension). Use an alias anywhere a font token works — the `font`
     | attribute (`font="accent"`), chrome ->font() builders, or the layout
-    | $font property. The special `default` alias sets the app-wide default
-    | font (and supersedes the `font-family` token above).
+    | $font property. The `default` alias is the app-wide default font:
+    | 'System' resolves to the platform face (San Francisco on iOS, Roboto
+    | on Android); set a bundled token to apply it everywhere. Download one
+    | with `php artisan native:font Inter --default`. Per-element `font`
+    | attributes and font-serif / font-mono classes still win over the default.
     |
     |   'fonts' => [
     |       'default' => 'Inter-Regular',
@@ -135,6 +150,8 @@ return [
     |
     */
 
-    'fonts' => [],
+    'fonts' => [
+        'default' => 'System',
+    ],
 
 ];

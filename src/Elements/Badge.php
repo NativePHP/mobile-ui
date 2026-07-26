@@ -12,6 +12,7 @@ use Native\Mobile\Edge\Element;
  * Variants (semantic, color comes from theme):
  *   destructive (default) — theme.destructive / on-destructive
  *   primary               — theme.primary / on-primary
+ *   success               — theme.success / on-success
  *   accent                — theme.accent / on-accent
  *
  * Use either `count` (renders an integer; "99+" for >99) or `label` (arbitrary

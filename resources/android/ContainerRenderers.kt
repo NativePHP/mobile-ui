@@ -79,21 +79,23 @@ object StackRenderer {
                     // Absolute children pin to the stack's edges by inset —
                     // the docs-blessed "layer a badge over an icon" pattern.
                     // Same anchor convention as ComposeFlexLayout / the iOS
-                    // FlexContainer: a positive right/bottom inset anchors to
-                    // that edge; otherwise offset from top-left.
+                    // FlexContainer: a NON-ZERO right/bottom inset anchors to
+                    // that edge; otherwise offset from top-left. Non-zero (not
+                    // positive) so NEGATIVE insets overhang the edge, matching
+                    // Tailwind's `-right-8` bleed.
                     if (layout.positionType == PositionType.ABSOLUTE) {
                         val left = layout.positionLeft
                         val top = layout.positionTop
                         val right = layout.positionRight
                         val bottom = layout.positionBottom
                         val anchor = when {
-                            right > 0f && bottom > 0f -> Alignment.BottomEnd
-                            right > 0f                -> Alignment.TopEnd
-                            bottom > 0f               -> Alignment.BottomStart
-                            else                      -> Alignment.TopStart
+                            right != 0f && bottom != 0f -> Alignment.BottomEnd
+                            right != 0f                 -> Alignment.TopEnd
+                            bottom != 0f                -> Alignment.BottomStart
+                            else                        -> Alignment.TopStart
                         }
-                        val offsetX = if (right > 0f) (-right).dp else left.dp
-                        val offsetY = if (bottom > 0f) (-bottom).dp else top.dp
+                        val offsetX = if (right != 0f) (-right).dp else left.dp
+                        val offsetY = if (bottom != 0f) (-bottom).dp else top.dp
                         childMod = childMod.align(anchor).offset(x = offsetX, y = offsetY)
                     }
                 }

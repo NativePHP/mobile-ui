@@ -16,7 +16,7 @@ use Native\Mobile\Icon\IosSymbol;
  * family on Android, SwiftUI `Button` with `buttonStyle(...)` on iOS.
  *
  * API shape (locked in plan doc, sections A/C/E):
- *   - `variant`: semantic vocabulary (primary | secondary | destructive | ghost)
+ *   - `variant`: semantic vocabulary (primary | secondary | destructive | success | ghost)
  *   - `size`: sm | md | lg
  *   - `disabled`, `loading`: state
  *   - `icon`, `icon-trailing`: optional icon names (leading/trailing)
@@ -107,7 +107,7 @@ class Button extends Element
         }
     }
 
-    /** primary | secondary | destructive | ghost. Default: primary. */
+    /** primary | secondary | destructive | success | ghost. Default: primary. */
     public function variant(string $value): static
     {
         $this->buttonProps['variant'] = $value;

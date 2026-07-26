@@ -5,7 +5,7 @@ namespace Native\Mobile\UI\Fonts;
 /**
  * Pure helpers for the `native:font` Google Fonts downloader — URL spec
  * building, css2 response parsing, filename conventions, and the config
- * `font-family` rewrite. No framework dependencies so the logic is unit
+ * default-font rewrite. No framework dependencies so the logic is unit
  * testable without booting Laravel; `Console\FontCommand` does the I/O.
  */
 class GoogleFonts
@@ -23,7 +23,7 @@ class GoogleFonts
      */
     public static function familySpec(string $family, array $weights, bool $italic): string
     {
-        $name = str_replace(' ', '+', trim($family));
+        $name = str_replace(' ', '+', self::canonicalFamily($family));
 
         if ($weights === [400] && ! $italic) {
             return $name;
@@ -80,10 +80,20 @@ class GoogleFonts
         return empty($faces) ? null : array_values($faces);
     }
 
+    /**
+     * Family name as typed → canonical spaced form. `+` reads as a space —
+     * it's the css2 URL spelling users copy from fonts.google.com, so
+     * `Archivo+Black` means the "Archivo Black" family.
+     */
+    public static function canonicalFamily(string $family): string
+    {
+        return trim(str_replace('+', ' ', $family));
+    }
+
     /** Inter + 700 + italic → Inter-BoldItalic.ttf (Google's zip convention). */
     public static function filenameFor(string $family, int $weight, bool $italic): string
     {
-        $base = str_replace(' ', '', ucwords(trim($family)));
+        $base = str_replace(' ', '', ucwords(self::canonicalFamily($family)));
         $style = self::WEIGHT_NAMES[$weight] ?? (string) $weight;
 
         if ($italic) {
@@ -94,11 +104,47 @@ class GoogleFonts
     }
 
     /**
-     * Rewrite the theme's `font-family` value in a config file's contents.
-     * Returns null when no `font-family` key was found to replace.
+     * Rewrite the app-wide default font in a config file's contents — the
+     * `default` alias of the top-level `fonts` block, falling back to a
+     * legacy theme `font-family` token. Returns null when neither exists.
+     * Line-start anchors keep the docblock example above the fonts block
+     * (its lines begin with `|`) from being touched.
      */
     public static function replaceDefaultFontToken(string $config, string $token): ?string
     {
+        // Preferred spelling: 'fonts' => ['default' => '…'].
+        $updated = preg_replace(
+            "/^([ \t]*'fonts'\s*=>\s*\[[^\]]*?'default'\s*=>\s*)'[^']*'/m",
+            "\$1'{$token}'",
+            $config, 1, $replaced,
+        );
+
+        if ($replaced) {
+            return $updated;
+        }
+
+        // A fonts block with no default alias yet (possibly empty) — insert one.
+        $updated = preg_replace(
+            "/^([ \t]*)'fonts'\s*=>\s*\[\s*\]/m",
+            "\$1'fonts' => [\n\$1    'default' => '{$token}',\n\$1]",
+            $config, 1, $replaced,
+        );
+
+        if ($replaced) {
+            return $updated;
+        }
+
+        $updated = preg_replace(
+            "/^([ \t]*)('fonts'\s*=>\s*\[)/m",
+            "\$1\$2\n\$1    'default' => '{$token}',",
+            $config, 1, $replaced,
+        );
+
+        if ($replaced) {
+            return $updated;
+        }
+
+        // Legacy configs predating the fonts block: rewrite font-family in place.
         $updated = preg_replace(
             "/'font-family'\s*=>\s*'[^']*'/",
             "'font-family' => '{$token}'",

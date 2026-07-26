@@ -39,7 +39,7 @@ class FontCommand extends Command
         {family* : Google Fonts family name(s), e.g. Lobster or "Rock Salt"}
         {--weights=400 : Comma-separated weights to download (e.g. 400,700)}
         {--italic : Also download italic styles for each weight}
-        {--default : Set the downloaded font as the app-wide default (theme font-family)}';
+        {--default : Set the downloaded font as the app-wide default (fonts default alias)}';
 
     protected $description = 'Download Google Fonts into resources/fonts/ for use with font="…"';
 
@@ -124,9 +124,9 @@ class FontCommand extends Command
     }
 
     /**
-     * Offer to set the downloaded font as the app-wide default — the theme's
-     * `font-family` token, which every text renderer falls back to when an
-     * element has no `font` of its own.
+     * Offer to set the downloaded font as the app-wide default — the
+     * `default` alias in the config's fonts block, which every text renderer
+     * falls back to when an element has no `font` of its own.
      */
     private function maybeSetDefault(array $tokens): void
     {
@@ -156,8 +156,8 @@ class FontCommand extends Command
         $updated = GoogleFonts::replaceDefaultFontToken(file_get_contents($configPath), $token);
 
         if ($updated === null) {
-            $this->warn("Couldn't find a 'font-family' key in config/native-ui.php — add it to the theme block yourself:");
-            $this->line("  'font-family' => '{$token}',");
+            $this->warn("Couldn't find a 'fonts' block in config/native-ui.php — add the default alias yourself:");
+            $this->line("  'fonts' => ['default' => '{$token}'],");
 
             return;
         }
