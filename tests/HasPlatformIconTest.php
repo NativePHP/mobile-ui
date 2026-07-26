@@ -9,7 +9,7 @@ use Native\Mobile\Platform;
 
 /**
  * Test fixtures defined inline so the trait tests don't depend on
- * `App\Icons\*` (which only exists after a developer has run
+ * `App\Enums\Icons\*` (which only exists after a developer has run
  * `php artisan native-ui:generate-icons`) or any other concrete catalog.
  * They implement the same marker interfaces that real generated enums
  * use, so the trait's `instanceof IosSymbol` / `instanceof AndroidSymbol`

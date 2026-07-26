@@ -13,7 +13,7 @@ use Native\Mobile\UI\Elements\Icon;
  * overrides as blade attributes, same shape as the programmatic
  * `Icon::make(ios: …, android: …)`. Fixture enums are inline (distinct
  * names from HasPlatformIconTest's — Pest loads all test files into one
- * process) so the test doesn't depend on a generated `App\Icons\*` catalog.
+ * process) so the test doesn't depend on a generated `App\Enums\Icons\*` catalog.
  */
 enum IconAttrIos: string implements IosSymbol
 {

@@ -5,8 +5,8 @@ namespace Native\Mobile\UI\Console;
 use Illuminate\Console\Command;
 
 /**
- * Regenerate the icon enums (`App\Icons\Ios`, `App\Icons\Android`,
- * `App\Icons\AndroidOutlined`) from the JSON snapshots that ship with
+ * Regenerate the icon enums (`App\Enums\Icons\Ios`, `App\Enums\Icons\Android`,
+ * `App\Enums\Icons\AndroidOutlined`) from the JSON snapshots that ship with
  * the native-ui plugin.
  *
  *   php artisan native-ui:generate-icons                 # regenerate from local snapshots
@@ -20,9 +20,10 @@ use Illuminate\Console\Command;
  * `vendor/nativephp/mobile-ui/resources/icons/sf-symbols.json` (or
  * publish the snapshots into your app first to own them).
  *
- * Output goes to your app at `app/Icons/`. The namespace is `App\Icons`
- * — change `--namespace` to write somewhere else. Files survive
- * `composer update` because they're in app-space, not vendor.
+ * Output goes to your app at `app/Enums/Icons/`. The namespace is
+ * `App\Enums\Icons` — change `--namespace` to write somewhere else.
+ * Files survive `composer update` because they're in app-space, not
+ * vendor.
  *
  * Generated files are overwritten in-place. Don't hand-edit the enum
  * cases — add to the JSON snapshot, regenerate.
@@ -31,8 +32,8 @@ class GenerateIconsCommand extends Command
 {
     protected $signature = 'native-ui:generate-icons
         {--refresh-material : Fetch latest Material catalog from Google before regenerating}
-        {--output= : Override output directory (default: app/Icons)}
-        {--namespace= : Override generated namespace (default: App\\Icons)}';
+        {--output= : Override output directory (default: app/Enums/Icons)}
+        {--namespace= : Override generated namespace (default: App\\Enums\\Icons)}';
 
     protected $description = 'Generate Ios / Android / AndroidOutlined icon enums into your app';
 
@@ -41,8 +42,8 @@ class GenerateIconsCommand extends Command
     public function handle(): int
     {
         $iconsDir = $this->pluginResourcesPath('icons');
-        $outputDir = $this->option('output') ?: app_path('Icons');
-        $namespace = $this->option('namespace') ?: 'App\\Icons';
+        $outputDir = $this->option('output') ?: app_path('Enums/Icons');
+        $namespace = $this->option('namespace') ?: 'App\\Enums\\Icons';
 
         if (! is_dir($outputDir)) {
             mkdir($outputDir, 0755, recursive: true);
@@ -96,7 +97,33 @@ class GenerateIconsCommand extends Command
             count($material),
         ));
 
+        $this->warnAboutLegacyEnums($outputDir);
+
         return self::SUCCESS;
+    }
+
+    private function warnAboutLegacyEnums(string $outputDir): void
+    {
+        $legacyDir = app_path('Icons');
+        if (! is_dir($legacyDir) || realpath($legacyDir) === realpath($outputDir)) {
+            return;
+        }
+
+        $stale = array_filter(
+            array_map(fn ($f) => $legacyDir.'/'.$f, ['Ios.php', 'Android.php', 'AndroidOutlined.php']),
+            'is_file',
+        );
+        if (empty($stale)) {
+            return;
+        }
+
+        $this->warn('Legacy icon enums found at the old default location:');
+        foreach ($stale as $file) {
+            $this->warn("  {$file}");
+        }
+        $this->warn('Icons are now generated into app/Enums/Icons (namespace App\\Enums\\Icons).');
+        $this->warn("Delete the legacy files and update any `@use('App\\Icons\\...')` imports");
+        $this->warn('to `App\\Enums\\Icons\\...` so views don\'t keep resolving the stale enums.');
     }
 
     /**
