@@ -63,9 +63,6 @@ paths serialize to the same wire tree.
   those two tokens, not per-component.
 - Buttons render their variant token solid; for a softer tonal fill set
   opacity on the token itself (e.g. `'secondary' => 'fuchsia-500/70'`).
-- `<native:icon>` accepts platform enum overrides as attributes —
-  `:ios="Ios::House"` / `:android="Android::Home"` — matching the
-  programmatic `Icon::make(ios: …, android: …)`.
 
 @verbatim
 <code-snippet name="Theme tokens accept the full color grammar" lang="php">
@@ -76,6 +73,32 @@ paths serialize to the same wire tree.
     'surface'   => '#F8FAFC',         // plain hex
     'accent'    => '#00AAA680',       // CSS alpha hex (#RRGGBBAA)
 ],
+</code-snippet>
+@endverbatim
+
+### Icons
+
+- `<native:icon>` accepts platform enum overrides as attributes —
+  `:ios="Ios::House"` / `:android="Android::Home"` — matching the
+  programmatic `Icon::make(ios: …, android: …)`. Prefer the typed enums over
+  string names: they autocomplete and can't misspell a symbol.
+- This package owns the enum catalogs (`Ios`, `Android`, `AndroidOutlined`).
+  They're generated, not shipped — run `php artisan native-ui:generate-icons`
+  to create them, and re-run with `--refresh-material` to pull the latest
+  Material catalog from Google.
+- They land in `app/Enums/Icons/` (namespace `App\Enums\Icons`) by default.
+  `--output` / `--namespace` relocate them, so grep `app/` for `enum Ios` and
+  import whatever this project actually generated rather than assuming the
+  default.
+- Import them with Blade's use directive — compiled views have no namespace —
+  or reference fully-qualified cases.
+
+@verbatim
+<code-snippet name="Typed icon enums in Blade" lang="blade">
+@use('App\Enums\Icons\Ios')
+@use('App\Enums\Icons\Android')
+
+<native:icon :ios="Ios::Gearshape" :android="Android::Settings" :size="28" />
 </code-snippet>
 @endverbatim
 
