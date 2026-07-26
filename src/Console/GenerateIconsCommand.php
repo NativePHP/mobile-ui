@@ -97,33 +97,7 @@ class GenerateIconsCommand extends Command
             count($material),
         ));
 
-        $this->warnAboutLegacyEnums($outputDir);
-
         return self::SUCCESS;
-    }
-
-    private function warnAboutLegacyEnums(string $outputDir): void
-    {
-        $legacyDir = app_path('Icons');
-        if (! is_dir($legacyDir) || realpath($legacyDir) === realpath($outputDir)) {
-            return;
-        }
-
-        $stale = array_filter(
-            array_map(fn ($f) => $legacyDir.'/'.$f, ['Ios.php', 'Android.php', 'AndroidOutlined.php']),
-            'is_file',
-        );
-        if (empty($stale)) {
-            return;
-        }
-
-        $this->warn('Legacy icon enums found at the old default location:');
-        foreach ($stale as $file) {
-            $this->warn("  {$file}");
-        }
-        $this->warn('Icons are now generated into app/Enums/Icons (namespace App\\Enums\\Icons).');
-        $this->warn("Delete the legacy files and update any `@use('App\\Icons\\...')` imports");
-        $this->warn('to `App\\Enums\\Icons\\...` so views don\'t keep resolving the stale enums.');
     }
 
     /**
