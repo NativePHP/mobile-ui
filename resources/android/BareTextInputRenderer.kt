@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -12,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -108,14 +110,21 @@ object BareTextInputRenderer {
             ),
             singleLine = !props.multiline,
             decorationBox = { innerTextField ->
-                if (text.isEmpty() && props.placeholder.isNotEmpty()) {
-                    Text(
-                        text = props.placeholder,
-                        color = placeholderColor,
-                        fontSize = props.textSize.sp
-                    )
+                // Stack the placeholder and the real field in a centered Box.
+                // Without this, Compose lays both out top-start independently —
+                // if their intrinsic line heights differ even slightly, the
+                // visible cursor and the placeholder glyph drift apart
+                // vertically, showing the cursor visibly above the placeholder.
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty() && props.placeholder.isNotEmpty()) {
+                        Text(
+                            text = props.placeholder,
+                            color = placeholderColor,
+                            fontSize = props.textSize.sp
+                        )
+                    }
+                    innerTextField()
                 }
-                innerTextField()
             },
             keyboardActions = KeyboardActions(onAny = { props.dispatchSubmit?.invoke(text) })
         )
