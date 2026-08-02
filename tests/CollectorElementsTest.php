@@ -7,6 +7,9 @@ use Native\Mobile\Edge\Elements\Row;
 use Native\Mobile\Edge\Elements\Text;
 use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\TailwindParser;
+use Native\Mobile\UI\Elements\Accordion;
+use Native\Mobile\UI\Elements\AccordionContent;
+use Native\Mobile\UI\Elements\AccordionHeader;
 use Native\Mobile\UI\Elements\BareTextInput;
 use Native\Mobile\UI\Elements\Button;
 use Native\Mobile\UI\Elements\Checkbox;
@@ -33,6 +36,9 @@ beforeEach(function () {
     ElementRegistry::register('progress_bar', ProgressBar::class);
     ElementRegistry::register('radio_group', RadioGroup::class);
     ElementRegistry::register('radio', Radio::class);
+    ElementRegistry::register('accordion', Accordion::class);
+    ElementRegistry::register('accordion_header', AccordionHeader::class);
+    ElementRegistry::register('accordion_content', AccordionContent::class);
 });
 
 afterEach(function () {
@@ -174,6 +180,50 @@ it('applies radio group and radio props', function () {
     expect($tree['children'][0]['props']['value'])->toBe('opt1');
     expect($tree['children'][0]['props']['label'])->toBe('Option 1');
     expect($tree['children'][2]['props']['disabled'])->toBeTrue();
+});
+
+it('applies accordion props and keeps header and content as distinct slots', function () {
+    NativeElementCollector::open('accordion', ['expanded' => true, '_change' => 'onToggleSection']);
+    NativeElementCollector::open('accordion_header', []);
+    NativeElementCollector::leaf('text', ['text' => 'Specifications']);
+    NativeElementCollector::close();
+    NativeElementCollector::open('accordion_content', []);
+    NativeElementCollector::leaf('text', ['text' => 'Weight — 1.24 kg']);
+    NativeElementCollector::close();
+    NativeElementCollector::close();
+
+    $registry = new CallbackRegistry;
+    $tree = NativeElementCollector::collect()->toArray($registry);
+
+    expect($tree['type'])->toBe('accordion');
+    expect($tree['props']['expanded'])->toBeTrue();
+    expect($registry->resolve($tree['props']['on_change']))->toBe(['method' => 'onToggleSection', 'args' => []]);
+
+    // Both renderers pick their slot by child type, so the two must stay
+    // separate typed children rather than being flattened into one list.
+    expect($tree['children'])->toHaveCount(2);
+    expect($tree['children'][0]['type'])->toBe('accordion_header');
+    expect($tree['children'][0]['children'][0]['props']['text'])->toBe('Specifications');
+    expect($tree['children'][1]['type'])->toBe('accordion_content');
+    expect($tree['children'][1]['children'][0]['props']['text'])->toBe('Weight — 1.24 kg');
+});
+
+it('defaults an accordion to collapsed with no change callback', function () {
+    NativeElementCollector::open('accordion', []);
+    NativeElementCollector::open('accordion_header', []);
+    NativeElementCollector::leaf('text', ['text' => 'Care instructions']);
+    NativeElementCollector::close();
+    NativeElementCollector::close();
+
+    $registry = new CallbackRegistry;
+    $tree = NativeElementCollector::collect()->toArray($registry);
+
+    // An untouched accordion carries no props at all — the renderers read
+    // `expanded` as false and `on_change` as callback id 0.
+    $props = $tree['props'] ?? [];
+
+    expect($props)->not->toHaveKey('on_change');
+    expect($props['expanded'] ?? false)->toBeFalse();
 });
 
 it('produces identical tree to programmatic API', function () {
