@@ -436,6 +436,30 @@
             "android_renderer": "com.nativephp.plugins.native_ui.ui.WebviewRenderer",
             "ios_renderer": "NativeUIWebviewRenderer",
             "self_closing": true
+        },
+        {
+            "type": "accordion",
+            "element": "Native\\Mobile\\UI\\Elements\\Accordion",
+            "blade": "Native\\Mobile\\UI\\Components\\Accordion",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.AccordionRenderer",
+            "ios_renderer": "NativeUIAccordionRenderer",
+            "self_closing": false
+        },
+        {
+            "type": "accordion_content",
+            "element": "Native\\Mobile\\UI\\Elements\\AccordionContent",
+            "blade": "Native\\Mobile\\UI\\Components\\AccordionContent",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
+        },
+        {
+            "type": "accordion_header",
+            "element": "Native\\Mobile\\UI\\Elements\\AccordionHeader",
+            "blade": "Native\\Mobile\\UI\\Components\\AccordionHeader",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
         }
     ],
     "bridge_functions": [
