@@ -36,7 +36,14 @@ enum NativeUIFontResolver {
     private static let extensions = ["ttf", "otf", "ttc"]
 
     /// A SwiftUI `Font` for a bundled token at `size`, or nil to fall back.
-    /// `size` is used as-is (callers pass an already-Dynamic-Type-scaled value).
+    /// `size` is used as-is (callers pass an already-Dynamic-Type-scaled value),
+    /// so the font is built with `Font.custom(_:fixedSize:)`. The `size:` variant
+    /// would scale relative to `.body` a SECOND time on top of the caller's
+    /// `@ScaledMetric`, squaring the multiplier — invisible at the default text
+    /// size (where it is 1.0) and roughly 1.8x at xxxLarge. The `UIFont` branch
+    /// below is already non-scaling, and the system-font fallback in
+    /// `NUIScaledFontModifier` uses fixed-size `.system(size:)` for the same
+    /// reason.
     ///
     /// With `italic`, a font whose family has a real italic face is returned
     /// upright — the caller's `Text.italic()` / `Font.italic()` selects the
@@ -60,7 +67,7 @@ enum NativeUIFontResolver {
             return Font(UIFont(descriptor: descriptor, size: size))
         }
 
-        return Font.custom(name, size: size)
+        return Font.custom(name, fixedSize: size)
     }
 
     /// Whether an italic request for this token needs a synthesized oblique
