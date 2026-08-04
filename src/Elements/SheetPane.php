@@ -19,6 +19,7 @@ use Native\Mobile\Edge\Element;
  *
  *   <native:sheet-pane detents="200,560,780" :detent="$detent"
  *       corner-radius="44" inset-x="8" inset-bottom="8"
+ *
  *       @change="setDetent">
  *       ...content...
  *   </native:sheet-pane>
