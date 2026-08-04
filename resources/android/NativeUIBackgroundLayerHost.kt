@@ -3,9 +3,7 @@ package com.nativephp.plugins.native_ui.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
-import com.nativephp.mobile.ui.nativerender.LocalBackgroundLayerPresent
 import com.nativephp.mobile.ui.nativerender.NativeRendererRegistry
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
@@ -17,8 +15,12 @@ import com.nativephp.mobile.ui.nativerender.NodeView
  * MapLibre MapView, a player) survives every publish: tab switches and
  * pushes update props in place instead of recreating the native view.
  *
- * Provides [LocalBackgroundLayerPresent] so opaque chrome (the tabs
- * Scaffold) knows to go transparent above the layer.
+ * NOTE: this file must compile against every core this plugin installs
+ * into — it must not reference core symbols that only exist on newer
+ * cores. The `LocalBackgroundLayerPresent` transparency signal (so the
+ * tabs Scaffold can go transparent above the layer) returns here once
+ * the distributed core ships that composition local alongside the
+ * tabs-hosting work.
  */
 @Composable
 fun NativeUIBackgroundLayerHost(
@@ -50,8 +52,6 @@ fun NativeUIBackgroundLayerHost(
 
         // Content composes SECOND — Compose draws later Box children on
         // top, which is what keeps the layer beneath the screen.
-        CompositionLocalProvider(LocalBackgroundLayerPresent provides true) {
-            content()
-        }
+        content()
     }
 }
