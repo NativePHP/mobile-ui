@@ -15,6 +15,7 @@ use Native\Mobile\UI\Elements\Button;
 use Native\Mobile\UI\Elements\Checkbox;
 use Native\Mobile\UI\Elements\FilledTextInput;
 use Native\Mobile\UI\Elements\OutlinedTextInput;
+use Native\Mobile\UI\Elements\NativeVirtualList;
 use Native\Mobile\UI\Elements\ProgressBar;
 use Native\Mobile\UI\Elements\Radio;
 use Native\Mobile\UI\Elements\RadioGroup;
@@ -43,6 +44,7 @@ beforeEach(function () {
     ElementRegistry::register('accordion', Accordion::class);
     ElementRegistry::register('accordion_header', AccordionHeader::class);
     ElementRegistry::register('accordion_content', AccordionContent::class);
+    ElementRegistry::register('virtual_list', NativeVirtualList::class);
 });
 
 afterEach(function () {
@@ -234,6 +236,19 @@ it('applies toggle props', function () {
     expect($tree['props']['label'])->toBe('Notifications');
     expect($tree['props']['disabled'])->toBeTrue();
     expect($registry->resolve($tree['props']['on_change']))->toBe(['method' => 'onToggle', 'args' => []]);
+});
+
+it('applies virtual list scroll-indicator props', function () {
+    NativeElementCollector::leaf('virtual_list', [
+        'count' => 100,
+        'shows-indicators' => false,
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['type'])->toBe('virtual_list');
+    expect($tree['props']['count'])->toBe(100);
+    expect($tree['props']['shows_indicators'])->toBeFalse();
 });
 
 it('applies checkbox props', function () {

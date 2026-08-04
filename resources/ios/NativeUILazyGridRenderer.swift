@@ -14,6 +14,9 @@ struct NativeUILazyGridRenderer: View {
         let columns = max(1, node.props.getInt("columns", default: 2))
         let gap = CGFloat(node.props.getFloat("gap", default: 0))
         let horizontal = node.props.getBool("horizontal")
+        // Unlike scroll-view, the grid's historical default is HIDDEN —
+        // `shows_indicators: true` opts long grids into a position cue.
+        let showsIndicators = node.props.getBool("shows_indicators", default: false)
 
         // `.flexible()` lets each track share the available cross-axis
         // space evenly. Spacing is symmetrical with the inter-line gap.
@@ -23,7 +26,7 @@ struct NativeUILazyGridRenderer: View {
         )
 
         if horizontal {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: showsIndicators) {
                 LazyHGrid(rows: tracks, spacing: gap) {
                     ForEach(node.children) { child in
                         NodeView(node: child).equatable()
@@ -32,7 +35,7 @@ struct NativeUILazyGridRenderer: View {
             }
             .scrollDismissesKeyboard(.interactively)
         } else {
-            ScrollView(.vertical, showsIndicators: false) {
+            ScrollView(.vertical, showsIndicators: showsIndicators) {
                 LazyVGrid(columns: tracks, spacing: gap) {
                     ForEach(node.children) { child in
                         NodeView(node: child).equatable()

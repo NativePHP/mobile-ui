@@ -236,6 +236,9 @@ object CanvasRenderer {
  * chunked row-of-row grid whenever the cell count is large enough to
  * matter.
  *
+ * `shows_indicators` is accepted for parity with iOS but is a no-op
+ * here — Compose's lazy grids draw no scroll indicators to begin with.
+ *
  * When the main axis is UNBOUNDED (the grid sits inside a scroll_view /
  * scrollable column), Compose's lazy grids throw ("measured with an
  * infinity maximum height constraints") where SwiftUI's LazyVGrid just
