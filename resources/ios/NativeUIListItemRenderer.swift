@@ -115,6 +115,11 @@ struct NativeUIListItemRenderer: View {
         .padding(.vertical, 12)
         .background(containerColor != 0 ? Color(argb: containerColor) : Color.clear)
         .opacity(disabled ? 0.5 : 1.0)
+        // Without an explicit content shape, onTapGesture only registers on
+        // opaque pixels — the padding and the Spacer gap between text and
+        // trailing content (most of the row) are tap-dead. Make the whole
+        // row bounds hittable before attaching @tap / @longPress handlers.
+        .contentShape(Rectangle())
         .applyClickHandlers(node: node)
     }
 
