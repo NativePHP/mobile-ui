@@ -78,24 +78,29 @@ object StackRenderer {
 
                     // Absolute children pin to the stack's edges by inset —
                     // the docs-blessed "layer a badge over an icon" pattern.
-                    // Same anchor convention as ComposeFlexLayout / the iOS
-                    // FlexContainer: a NON-ZERO right/bottom inset anchors to
-                    // that edge; otherwise offset from top-left. Non-zero (not
-                    // positive) so NEGATIVE insets overhang the edge, matching
-                    // Tailwind's `-right-8` bleed.
+                    // Same anchor convention as the iOS stack renderer: +0.0
+                    // means unset, non-zero anchors (negatives overhang —
+                    // `-right-8` bleed), and IEEE -0.0 is an authored explicit
+                    // zero (`bottom-0`), which anchors to that edge too. When
+                    // both edges are authored, left/top win (CSS precedence).
                     if (layout.positionType == PositionType.ABSOLUTE) {
                         val left = layout.positionLeft
                         val top = layout.positionTop
                         val right = layout.positionRight
                         val bottom = layout.positionBottom
+                        // -0.0f == 0f in Kotlin, so authored zeros need the
+                        // raw sign bit.
+                        fun isSet(v: Float) = v != 0f || v.toRawBits() != 0
+                        val anchorEnd = isSet(right) && !isSet(left)
+                        val anchorBottom = isSet(bottom) && !isSet(top)
                         val anchor = when {
-                            right != 0f && bottom != 0f -> Alignment.BottomEnd
-                            right != 0f                 -> Alignment.TopEnd
-                            bottom != 0f                -> Alignment.BottomStart
-                            else                        -> Alignment.TopStart
+                            anchorEnd && anchorBottom -> Alignment.BottomEnd
+                            anchorEnd                 -> Alignment.TopEnd
+                            anchorBottom              -> Alignment.BottomStart
+                            else                      -> Alignment.TopStart
                         }
-                        val offsetX = if (right != 0f) (-right).dp else left.dp
-                        val offsetY = if (bottom != 0f) (-bottom).dp else top.dp
+                        val offsetX = if (anchorEnd) (-right).dp else left.dp
+                        val offsetY = if (anchorBottom) (-bottom).dp else top.dp
                         childMod = childMod.align(anchor).offset(x = offsetX, y = offsetY)
                     }
                 }
