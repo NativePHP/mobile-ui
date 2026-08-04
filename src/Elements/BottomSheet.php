@@ -35,6 +35,14 @@ class BottomSheet extends Element
         if (isset($attrs['detents'])) {
             $this->detents($attrs['detents']);
         }
+        if (isset($attrs['permanent'])) {
+            $this->permanent(filter_var($attrs['permanent'], FILTER_VALIDATE_BOOLEAN));
+        }
+        foreach (['background-interaction', 'backgroundInteraction'] as $key) {
+            if (isset($attrs[$key])) {
+                $this->backgroundInteraction(filter_var($attrs[$key], FILTER_VALIDATE_BOOLEAN));
+            }
+        }
 
         $this->applyA11yAttributes($attrs);
     }
@@ -55,6 +63,29 @@ class BottomSheet extends Element
     public function detents(string $detents): static
     {
         $this->sheetProps['detents'] = $detents;
+
+        return $this;
+    }
+
+    /**
+     * A permanent sheet can't be swiped away — drag only snaps between
+     * detents (Maps/Flighty-style always-on panel). Pair with
+     * `backgroundInteraction()` so the content behind stays usable.
+     */
+    public function permanent(bool $value = true): static
+    {
+        $this->sheetProps['permanent'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Keep the view behind the sheet interactive (no dim, touches pass
+     * through) — the HIG "sheet with interaction behind" pattern.
+     */
+    public function backgroundInteraction(bool $value = true): static
+    {
+        $this->sheetProps['background_interaction'] = $value;
 
         return $this;
     }

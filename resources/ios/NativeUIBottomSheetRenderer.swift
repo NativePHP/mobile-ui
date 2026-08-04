@@ -19,6 +19,10 @@ struct NativeUIBottomSheetRenderer: View {
         let onDismissCb = node.props.getCallbackId("on_dismiss")
         let detentsStr = node.props.getString("detents", default: "medium,large")
         let a11yLabel = node.props.getString("a11y_label")
+        // Flighty/Maps-style always-on panel: no swipe-away, and the view
+        // behind stays interactive (HIG "sheets with interaction behind").
+        let permanent = node.props.getBool("permanent")
+        let bgInteraction = node.props.getBool("background_interaction")
 
         Color.clear.frame(width: 0, height: 0)
             .sheet(isPresented: $isPresented, onDismiss: {
@@ -35,6 +39,8 @@ struct NativeUIBottomSheetRenderer: View {
                 .background(theme.surface)
                 .presentationDetents(resolveDetents(detentsStr))
                 .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(permanent)
+                .presentationBackgroundInteraction(bgInteraction ? .enabled : .automatic)
                 .modifier(A11yLabelModifier(label: a11yLabel))
             }
             .onAppear { isPresented = visible }

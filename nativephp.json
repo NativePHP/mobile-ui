@@ -460,6 +460,14 @@
             "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": false
+        },
+        {
+            "type": "sheet_pane",
+            "element": "Native\\Mobile\\UI\\Elements\\SheetPane",
+            "blade": "Native\\Mobile\\UI\\Components\\SheetPane",
+            "ios_renderer": "NativeUISheetPaneRenderer",
+            "self_closing": false,
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.SheetPaneRenderer"
         }
     ],
     "bridge_functions": [
