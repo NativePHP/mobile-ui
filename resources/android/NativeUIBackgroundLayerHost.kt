@@ -33,10 +33,6 @@ fun NativeUIBackgroundLayerHost(
     }
 
     Box(Modifier.fillMaxSize()) {
-        // TEMP BISECT: content FIRST (map on top) to test input routing.
-        CompositionLocalProvider(LocalBackgroundLayerPresent provides true) {
-            content()
-        }
         // Dispatch the layer's renderer DIRECTLY instead of via NodeView:
         // NodeView wraps children in key(node.id), and flat-buffer ids
         // shift whenever the tree's shape changes (every navigation) —
@@ -52,5 +48,10 @@ fun NativeUIBackgroundLayerHost(
             NodeView(node = child, overrideModifier = Modifier.fillMaxSize())
         }
 
+        // Content composes SECOND — Compose draws later Box children on
+        // top, which is what keeps the layer beneath the screen.
+        CompositionLocalProvider(LocalBackgroundLayerPresent provides true) {
+            content()
+        }
     }
 }

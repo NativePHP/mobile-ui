@@ -34,11 +34,7 @@ fun registerNativeUIChrome(context: Context) {
 
     NativeRootHostRegistry.register("native-ui.background-layer", consumes = "background_layer") { root, content ->
         val layerNode = root.children.firstOrNull { it.type == "background_layer" }
-        NativeUIBackgroundLayerHost(
-            layerNode = layerNode,
-            hostedByChrome = root.type == "native_root_tabs",
-            content = content,
-        )
+        NativeUIBackgroundLayerHost(layerNode = layerNode, content = content)
     }
 
     // Supply the app's color scheme from native-ui's theme tokens. The lambda
