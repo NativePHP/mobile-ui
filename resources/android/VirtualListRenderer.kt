@@ -35,6 +35,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  *
  * See `Plugins/nativephp/mobile-ui/src/Elements/NativeVirtualList.php` for
  * the matching element class.
+ *
+ * `shows_indicators` is accepted for parity with iOS but is a no-op
+ * here — LazyColumn draws no scroll indicators to begin with.
  */
 object VirtualListRenderer {
     @Composable

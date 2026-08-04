@@ -30,6 +30,7 @@ struct NativeUIListRenderer: View {
 
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
+        let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let separator = node.props.getBool("separator")
         let onRefreshCb = node.props.getCallbackId("on_refresh")
         let onEndReachedCb = node.props.getCallbackId("on_end_reached")
@@ -48,7 +49,7 @@ struct NativeUIListRenderer: View {
         let (leafIndex, leafCount) = Self.leafRowIndex(children)
 
         if horizontal {
-            ScrollView(.horizontal) {
+            ScrollView(.horizontal, showsIndicators: showsIndicators) {
                 LazyHStack(spacing: 0) {
                     ForEach(children) { child in
                         NodeView(node: child)
@@ -85,6 +86,10 @@ struct NativeUIListRenderer: View {
                 }
             }
             .modifier(GroupedOrPlainListStyle(grouped: grouped))
+            .modifier(ListBackgroundModifier(node: node))
+            // `List` has no showsIndicators initializer — the modifier is
+            // the supported route (iOS 16+).
+            .scrollIndicators(showsIndicators ? .automatic : .hidden)
             .scrollDismissesKeyboard(.interactively)
             .refreshable {
                 if onRefreshCb != 0 {
@@ -204,6 +209,28 @@ private struct GroupedOrPlainListStyle: ViewModifier {
             content.listStyle(.insetGrouped)
         } else {
             content.listStyle(.plain)
+        }
+    }
+}
+
+/// SwiftUI's List paints the system (grouped) background and ignores the
+/// node's own background style, so a themed screen (`bg-theme-background`)
+/// renders on the stock gray instead of the app's palette. When the node
+/// declares a background, hide the system scroll background and paint the
+/// node's color — matching how every other container element behaves.
+private struct ListBackgroundModifier: ViewModifier {
+    let node: NativeUINode
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let darkBg = colorScheme == .dark ? node.props.getColor("dark_bg_color", default: 0) : 0
+        let argb = darkBg != 0 ? darkBg : (node.style?.bgColor ?? 0)
+        if argb != 0 {
+            content
+                .scrollContentBackground(.hidden)
+                .background(Color(argb: argb))
+        } else {
+            content
         }
     }
 }
