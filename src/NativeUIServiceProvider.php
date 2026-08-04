@@ -10,8 +10,10 @@ use Native\Mobile\Edge\Layouts\NativeLayout;
 use Native\Mobile\Edge\NativeComponent;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\Testing\TestableComponent;
+use Native\Mobile\UI\Builders\BackgroundLayer;
 use Native\Mobile\UI\Builders\Drawer;
 use Native\Mobile\UI\Builders\FloatingOverlay as FloatingOverlayBuilder;
+use Native\Mobile\UI\Concerns\HasBackgroundLayer;
 use Native\Mobile\UI\Concerns\HasFloatingOverlay;
 use Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay;
 use Native\Mobile\UI\Console\CopyFontsCommand;
@@ -161,7 +163,7 @@ class NativeUIServiceProvider extends ServiceProvider
      * BENEATH every screen under the layout, mounted once at the root so
      * a map/video/canvas persists across tab switches and pushes. Same
      * discovery shape as the floating overlay: layouts opt in with
-     * {@see \Native\Mobile\UI\Concerns\HasBackgroundLayer}, screens can
+     * {@see HasBackgroundLayer}, screens can
      * override via `backgroundLayerOverride()` or hide with
      * `hidesBackgroundLayer`.
      */
@@ -184,14 +186,14 @@ class NativeUIServiceProvider extends ServiceProvider
                 $builder = $layout->backgroundLayer($screen);
             }
 
-            if (! $builder instanceof \Native\Mobile\UI\Builders\BackgroundLayer) {
+            if (! $builder instanceof BackgroundLayer) {
                 return null;
             }
 
             $content = $builder->getContent();
             $contentElement = $content instanceof View ? $renderPartial($content) : $content;
 
-            $sentinel = \Native\Mobile\UI\Elements\BackgroundLayer::make();
+            $sentinel = Elements\BackgroundLayer::make();
             $sentinel->addChild($contentElement);
 
             return $sentinel;
