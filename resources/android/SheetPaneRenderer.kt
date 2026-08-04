@@ -32,6 +32,7 @@ import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.floor
 
 /**
  * Inline draggable bottom pane (`sheet_pane`) — Compose counterpart of the
@@ -105,6 +106,7 @@ object SheetPaneRenderer {
                             val projected = height.value + velocityDp * 0.15f
                             val target = detents.minByOrNull { abs(it - projected) } ?: height.value
 
+                            val settledElsewhere = target != appliedDetent.floatValue
                             appliedDetent.floatValue = target
                             scope.launch {
                                 height.animateTo(
@@ -113,8 +115,15 @@ object SheetPaneRenderer {
                                     initialVelocity = velocityDp
                                 )
                             }
-                            if (changeCb != 0) {
-                                NativeUIBridge.sendTextChangeEvent(changeCb, node.id, target.toInt().toString())
+                            // Only report a detent CHANGE — snapping back to
+                            // the detent we started from is not one. Report
+                            // fractional detents faithfully: truncating
+                            // `560.5` to `560` fails the applied-detent
+                            // equality on the republish and nudges the pane
+                            // a frame after every drag.
+                            if (changeCb != 0 && settledElsewhere) {
+                                val text = if (target == floor(target)) target.toInt().toString() else target.toString()
+                                NativeUIBridge.sendTextChangeEvent(changeCb, node.id, text)
                             }
                         }
                     )

@@ -69,8 +69,9 @@ class BottomSheet extends Element
 
     /**
      * A permanent sheet can't be swiped away — drag only snaps between
-     * detents (Maps/Flighty-style always-on panel). Pair with
-     * `backgroundInteraction()` so the content behind stays usable.
+     * detents, and Android's back press won't dismiss it either. Pair
+     * with `backgroundInteraction()` on iOS so the content behind stays
+     * usable (see that method for the Android caveat).
      */
     public function permanent(bool $value = true): static
     {
@@ -82,6 +83,11 @@ class BottomSheet extends Element
     /**
      * Keep the view behind the sheet interactive (no dim, touches pass
      * through) — the HIG "sheet with interaction behind" pattern.
+     *
+     * iOS-only: Android's Material ModalBottomSheet is a modal window, so
+     * the scrim always intercepts background touches. For a Maps-style
+     * always-on panel over a live background on both platforms, use
+     * `<native:sheet-pane>` instead.
      */
     public function backgroundInteraction(bool $value = true): static
     {

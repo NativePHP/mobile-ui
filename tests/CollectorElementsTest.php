@@ -11,6 +11,7 @@ use Native\Mobile\UI\Elements\Accordion;
 use Native\Mobile\UI\Elements\AccordionContent;
 use Native\Mobile\UI\Elements\AccordionHeader;
 use Native\Mobile\UI\Elements\BareTextInput;
+use Native\Mobile\UI\Elements\BottomSheet;
 use Native\Mobile\UI\Elements\Button;
 use Native\Mobile\UI\Elements\Checkbox;
 use Native\Mobile\UI\Elements\FilledTextInput;
@@ -18,6 +19,7 @@ use Native\Mobile\UI\Elements\OutlinedTextInput;
 use Native\Mobile\UI\Elements\ProgressBar;
 use Native\Mobile\UI\Elements\Radio;
 use Native\Mobile\UI\Elements\RadioGroup;
+use Native\Mobile\UI\Elements\SheetPane;
 use Native\Mobile\UI\Elements\Toggle;
 
 /**
@@ -36,6 +38,8 @@ beforeEach(function () {
     ElementRegistry::register('outlined_text_input', OutlinedTextInput::class);
     ElementRegistry::register('filled_text_input', FilledTextInput::class);
     ElementRegistry::register('toggle', Toggle::class);
+    ElementRegistry::register('sheet_pane', SheetPane::class);
+    ElementRegistry::register('bottom_sheet', BottomSheet::class);
     ElementRegistry::register('checkbox', Checkbox::class);
     ElementRegistry::register('progress_bar', ProgressBar::class);
     ElementRegistry::register('radio_group', RadioGroup::class);
@@ -391,4 +395,77 @@ it('produces identical tree to programmatic API', function () {
     expect($collectorRegistry->resolve($collectorButtons[1]['props']['on_press']))->toBe(['method' => 'increment', 'args' => []]);
     expect($programmaticRegistry->resolve($programmaticButtons[0]['props']['on_press']))->toBe(['method' => 'decrement', 'args' => []]);
     expect($programmaticRegistry->resolve($programmaticButtons[1]['props']['on_press']))->toBe(['method' => 'increment', 'args' => []]);
+});
+
+it('applies sheet pane props with kebab attributes and registers the change callback', function () {
+    NativeElementCollector::leaf('sheet_pane', [
+        'detents' => '180,520',
+        'detent' => '520',
+        'corner-radius' => '32',
+        'inset-x' => '12',
+        'inset-bottom' => '16',
+        '_change' => 'onDetentChange',
+    ]);
+
+    $registry = new CallbackRegistry;
+    $tree = NativeElementCollector::collect()->toArray($registry);
+
+    expect($tree['type'])->toBe('sheet_pane');
+    expect($tree['props']['detents'])->toBe('180,520');
+    expect($tree['props']['detent'])->toBe(520.0);
+    expect($tree['props']['corner_radius'])->toBe(32.0);
+    expect($tree['props']['inset_x'])->toBe(12.0);
+    expect($tree['props']['inset_bottom'])->toBe(16.0);
+    expect($registry->resolve($tree['props']['on_change']))->toBe(['method' => 'onDetentChange', 'args' => []]);
+});
+
+it('accepts camelCase sheet pane attributes', function () {
+    NativeElementCollector::leaf('sheet_pane', [
+        'cornerRadius' => '28',
+        'insetX' => '4',
+        'insetBottom' => '6',
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['corner_radius'])->toBe(28.0);
+    expect($tree['props']['inset_x'])->toBe(4.0);
+    expect($tree['props']['inset_bottom'])->toBe(6.0);
+});
+
+it('falls back to the sheet pane defaults when attributes are absent', function () {
+    NativeElementCollector::leaf('sheet_pane', []);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['detents'])->toBe('200,560,780');
+    expect($tree['props']['corner_radius'])->toBe(44.0);
+    expect($tree['props']['inset_x'])->toBe(8.0);
+    expect($tree['props']['inset_bottom'])->toBe(8.0);
+});
+
+it('applies the permanent and background-interaction sheet props', function () {
+    NativeElementCollector::leaf('bottom_sheet', [
+        'visible' => true,
+        'permanent' => true,
+        'background-interaction' => true,
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['type'])->toBe('bottom_sheet');
+    expect($tree['props']['permanent'])->toBeTrue();
+    expect($tree['props']['background_interaction'])->toBeTrue();
+});
+
+it('parses string booleans on the new sheet props via filter_var', function () {
+    NativeElementCollector::leaf('bottom_sheet', [
+        'permanent' => 'false',
+        'backgroundInteraction' => 'false',
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['permanent'])->toBeFalse();
+    expect($tree['props']['background_interaction'])->toBeFalse();
 });

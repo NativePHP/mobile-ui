@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -39,24 +41,35 @@ object BottomSheetRenderer {
         val onDismissCb = p.getCallbackId("on_dismiss")
         val detentsStr = p.getString("detents", "medium,large")
         val a11yLabel = p.getString("a11y_label")
+        // Counterpart of iOS `.interactiveDismissDisabled`: block drag-to-hide
+        // and back-press, and swallow scrim-tap dismiss requests. NOTE:
+        // `background_interaction` has no Android counterpart here — M3's
+        // ModalBottomSheet is a modal window, so the scrim always intercepts
+        // touches; a Maps-style pane over a live background is what
+        // `sheet_pane` is for.
+        val permanent = p.getBool("permanent")
 
         if (!visible) return
 
         val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
 
         val skipPartial = !hasPartialDetent(detentsStr)
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartial)
+        val sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = skipPartial,
+            confirmValueChange = { value -> !(permanent && value == SheetValue.Hidden) },
+        )
 
         val sheetModifier = modifier
             .let { m -> if (a11yLabel.isNotEmpty()) m.semantics { contentDescription = a11yLabel } else m }
 
         ModalBottomSheet(
             onDismissRequest = {
-                if (onDismissCb != 0) {
+                if (!permanent && onDismissCb != 0) {
                     NativeUIBridge.sendSheetDismissEvent(onDismissCb, node.id)
                 }
             },
             sheetState = sheetState,
+            properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !permanent),
             containerColor = theme.surface,
             contentColor = theme.onSurface,
             scrimColor = BottomSheetDefaults.ScrimColor,

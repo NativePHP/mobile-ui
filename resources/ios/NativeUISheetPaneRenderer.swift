@@ -93,9 +93,16 @@ struct NativeUISheetPaneRenderer: View {
                         )) {
                             model.height = target
                         }
+                        let settledElsewhere = target != model.appliedDetent
                         model.appliedDetent = target
-                        if changeCb != 0 {
-                            NativeElementBridge.sendTextChangeEvent(changeCb, nodeId: node.id, text: String(Int(target)))
+                        // Only report a detent CHANGE — snapping back to the
+                        // detent we started from is not one. Report fractional
+                        // detents faithfully: truncating `560.5` to `560`
+                        // fails the applied-detent equality on the republish
+                        // and nudges the pane a frame after every drag.
+                        if changeCb != 0 && settledElsewhere {
+                            let text = target == target.rounded() ? String(Int(target)) : String(describing: target)
+                            NativeElementBridge.sendTextChangeEvent(changeCb, nodeId: node.id, text: text)
                         }
                     }
             )
