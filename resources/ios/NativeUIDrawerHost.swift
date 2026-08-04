@@ -16,6 +16,11 @@ func registerNativeUIChrome() {
         return AnyView(NativeFloatingOverlayHost(overlayNode: overlayNode) { content })
     }
 
+    NativeRootHostRegistry.shared.register("native-ui.background-layer", consumes: "background_layer") { root, content in
+        let layerNode = root.children.first { $0.type == "background_layer" }
+        return AnyView(NativeUIBackgroundLayerHost(layerNode: layerNode) { content })
+    }
+
     // Resolve chrome font tokens (per-layout / per-bar `font_name` props on
     // the root sentinels) for core's chrome renderers — bundle lookup +
     // CoreText registration + PostScript naming is this plugin's knowledge.

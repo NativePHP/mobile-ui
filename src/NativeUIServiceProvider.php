@@ -83,6 +83,7 @@ class NativeUIServiceProvider extends ServiceProvider
 
         $this->registerLayoutDrawer();
         $this->registerFloatingOverlay();
+        $this->registerBackgroundLayer();
 
         if ($this->app->runningInConsole()) {
             $this->commands([
@@ -155,6 +156,48 @@ class NativeUIServiceProvider extends ServiceProvider
      * {@see InteractsWithFloatingOverlay} traits (or
      * by declaring the methods themselves) — core never knows.
      */
+    /**
+     * Register the background-layer chrome contributor: content rendered
+     * BENEATH every screen under the layout, mounted once at the root so
+     * a map/video/canvas persists across tab switches and pushes. Same
+     * discovery shape as the floating overlay: layouts opt in with
+     * {@see \Native\Mobile\UI\Concerns\HasBackgroundLayer}, screens can
+     * override via `backgroundLayerOverride()` or hide with
+     * `hidesBackgroundLayer`.
+     */
+    protected function registerBackgroundLayer(): void
+    {
+        if (! class_exists(ChromeContributorRegistry::class)) {
+            return;
+        }
+
+        ChromeContributorRegistry::register(function (NativeComponent $screen, ?NativeLayout $layout, callable $renderPartial): ?Element {
+            if (self::screenHides($screen, 'hidesBackgroundLayer')) {
+                return null;
+            }
+
+            $builder = null;
+            if (method_exists($screen, 'backgroundLayerOverride')) {
+                $builder = $screen->backgroundLayerOverride();
+            }
+            if ($builder === null && $layout !== null && method_exists($layout, 'backgroundLayer')) {
+                $builder = $layout->backgroundLayer($screen);
+            }
+
+            if (! $builder instanceof \Native\Mobile\UI\Builders\BackgroundLayer) {
+                return null;
+            }
+
+            $content = $builder->getContent();
+            $contentElement = $content instanceof View ? $renderPartial($content) : $content;
+
+            $sentinel = \Native\Mobile\UI\Elements\BackgroundLayer::make();
+            $sentinel->addChild($contentElement);
+
+            return $sentinel;
+        });
+    }
+
     protected function registerFloatingOverlay(): void
     {
         if (! class_exists(ChromeContributorRegistry::class)) {

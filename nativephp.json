@@ -460,6 +460,14 @@
             "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
             "ios_renderer": "NativeUIEmptyRenderer",
             "self_closing": false
+        },
+        {
+            "type": "background_layer",
+            "element": "Native\\Mobile\\UI\\Elements\\BackgroundLayer",
+            "blade": "Native\\Mobile\\UI\\Components\\BackgroundLayer",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
         }
     ],
     "bridge_functions": [
