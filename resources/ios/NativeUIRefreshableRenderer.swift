@@ -13,6 +13,8 @@ import SwiftUI
 ///     the pull past threshold. The refresh spinner stays visible
 ///     until our `await Task.sleep(800ms)` completes, giving PHP time
 ///     to handle the event and publish a new tree.
+///   - `shows_indicators` (bool, default true) — same contract as
+///     scroll-view; hides the scroll indicators when false.
 ///
 /// Children should NOT include their own `<scroll-view>` — this
 /// element IS the scrolling container.
@@ -21,9 +23,10 @@ struct NativeUIRefreshableRenderer: View {
 
     var body: some View {
         let refreshCallback = node.props.getInt("on_refresh", default: 0)
+        let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let nodeId = node.id
 
-        ScrollView(.vertical, showsIndicators: true) {
+        ScrollView(.vertical, showsIndicators: showsIndicators) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(node.children) { child in
                     NodeView(node: child)
