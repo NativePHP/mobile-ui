@@ -9,7 +9,12 @@ struct NativeUIScrollViewRenderer: View {
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let spacing = CGFloat(node.layout?.gap ?? 0)
         let axis = node.props.getString("axis", default: "")
-        let stickBottom = node.props.getString("scroll_anchor", default: "") == "bottom"
+        // Explicit index targeting (`auto-scroll-to`) wins over bottom
+        // anchoring when both are set — the author named a specific child,
+        // so honour that rather than yanking them to the end.
+        let autoScrollIndex = node.props.getInt("auto_scroll_to", default: -1)
+        let hasAutoScroll = autoScrollIndex >= 0
+        let stickBottom = !hasAutoScroll && node.props.getString("scroll_anchor", default: "") == "bottom"
         let messageSignal = stickBottom ? Self.descendantCount(node) : 0
 
         // 2D mode. Bypass the Lazy stacks (which force 1D layout) and use a
@@ -46,15 +51,30 @@ struct NativeUIScrollViewRenderer: View {
             }
             .scrollDismissesKeyboard(.interactively)
         } else if horizontal {
-            ScrollView(.horizontal, showsIndicators: showsIndicators) {
-                LazyHStack(alignment: .top, spacing: spacing) {
-                    ForEach(node.children) { child in
-                        NodeView(node: child)
-                            .equatable()
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: showsIndicators) {
+                    LazyHStack(alignment: .top, spacing: spacing) {
+                        ForEach(node.children) { child in
+                            NodeView(node: child)
+                                .equatable()
+                        }
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onAppear {
+                    guard hasAutoScroll else { return }
+                    // Defer past first layout — lazy content isn't measured
+                    // yet inside onAppear, so an immediate scrollTo no-ops.
+                    DispatchQueue.main.async {
+                        Self.scroll(proxy, to: autoScrollIndex, in: node, anchor: .leading)
+                    }
+                }
+                .onChange(of: autoScrollIndex) { index in
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        Self.scroll(proxy, to: index, in: node, anchor: .leading)
                     }
                 }
             }
-            .scrollDismissesKeyboard(.interactively)
         } else {
             // Chat-style bottom anchoring (`scroll-anchor="bottom"`). Deterministic
             // ScrollViewReader + a zero-height bottom anchor: scroll to it on
@@ -93,11 +113,22 @@ struct NativeUIScrollViewRenderer: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onAppear {
-                    guard stickBottom else { return }
+                    guard stickBottom || hasAutoScroll else { return }
                     // Defer past first layout — lazy content isn't measured yet
                     // inside onAppear, so an immediate scrollTo no-ops.
                     DispatchQueue.main.async {
-                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                        if hasAutoScroll {
+                            Self.scroll(proxy, to: autoScrollIndex, in: node, anchor: .top)
+                        } else {
+                            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                }
+                // Follow an `auto-scroll-to` index as it moves — a chat log
+                // binding it to the last message re-pins on every new arrival.
+                .onChange(of: autoScrollIndex) { index in
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        Self.scroll(proxy, to: index, in: node, anchor: .top)
                     }
                 }
                 .onChange(of: messageSignal) { _ in
@@ -130,6 +161,17 @@ struct NativeUIScrollViewRenderer: View {
     }
 
     private static let bottomAnchorID = "nphp.scroll.bottom.anchor"
+
+    /// Bring the direct child at `index` into view. Indexes the scroll-view's
+    /// OWN children, so a log wrapped in a `<column>` addresses the column,
+    /// not the messages inside it. A negative or out-of-range index is a
+    /// no-op — content that hasn't arrived yet must not crash the render, and
+    /// `-1` is the "unset" sentinel for the prop.
+    private static func scroll(_ proxy: ScrollViewProxy, to index: Int, in node: NativeUINode, anchor: UnitPoint) {
+        guard index >= 0, index < node.children.count else { return }
+
+        proxy.scrollTo(node.children[index].id, anchor: anchor)
+    }
 
     /// Recursive descendant count — a content signal that changes whenever a
     /// message is added anywhere in the subtree (even inside a wrapping

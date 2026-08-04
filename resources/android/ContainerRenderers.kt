@@ -336,8 +336,36 @@ object ScrollViewRenderer {
             detectVerticalDragGestures(onDragStart = { keyboardController?.hide() }) { _, _ -> }
         }
 
+        // Item spacing from the `gap-*` class. The flex engine lays out
+        // ordinary containers, but a lazy list arranges its own items, so the
+        // gap has to be applied here as Compose arrangement or it is silently
+        // dropped. iOS reads the same layout gap into LazyVStack/LazyHStack
+        // spacing — without this, `gap-2` on a scroll-view spaces on iOS and
+        // does nothing on Android.
+        val gap = (node.layout?.gap ?: 0f).dp
+
+        // Explicit index targeting (`auto-scroll-to`) wins over bottom
+        // anchoring when both are set — the author named a specific child,
+        // so honour that rather than yanking them to the end. -1 is the
+        // "unset" sentinel; out-of-range indices are ignored rather than
+        // throwing, so content that hasn't arrived yet is a no-op.
+        val autoScrollIndex = node.props.getInt("auto_scroll_to", -1)
+        val hasAutoScroll = autoScrollIndex >= 0
+
         if (horizontal) {
-            LazyRow(modifier = modifier) {
+            val rowState = rememberLazyListState()
+
+            LaunchedEffect(autoScrollIndex) {
+                if (autoScrollIndex in node.children.indices) {
+                    rowState.animateScrollToItem(autoScrollIndex)
+                }
+            }
+
+            LazyRow(
+                modifier = modifier,
+                state = rowState,
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
                 items(node.children, key = { it.id }) { child ->
                     NodeView(node = child)
                 }
@@ -351,24 +379,46 @@ object ScrollViewRenderer {
             // item with a max offset lands at the very bottom regardless of how
             // the content is nested. Hooks are called unconditionally to satisfy
             // Compose's rules; the work is gated on the prop.
-            val stickBottom = node.props.getString("scroll_anchor", "") == "bottom"
+            val stickBottom = !hasAutoScroll && node.props.getString("scroll_anchor", "") == "bottom"
             val listState = rememberLazyListState()
             val didInitialScroll = remember { mutableStateOf(false) }
             val contentSignal = if (stickBottom) totalDescendants(node) else 0
 
-            LaunchedEffect(stickBottom, contentSignal) {
-                if (stickBottom && node.children.isNotEmpty()) {
+            // A programmatic scroll emits no nested-scroll deltas, so a
+            // collapsing top bar never learns the content moved and a large
+            // title stays stranded fully expanded. Drive it explicitly.
+            val chromeScroll = LocalChromeScrollController.current
+
+            LaunchedEffect(stickBottom, contentSignal, autoScrollIndex) {
+                // Jump without animation the first time (opening at the target
+                // shouldn't look like a scroll), animate every move after.
+                if (hasAutoScroll) {
+                    if (autoScrollIndex in node.children.indices) {
+                        if (!didInitialScroll.value) {
+                            didInitialScroll.value = true
+                            listState.scrollToItem(autoScrollIndex)
+                        } else {
+                            listState.animateScrollToItem(autoScrollIndex)
+                            chromeScroll?.collapse()
+                        }
+                    }
+                } else if (stickBottom && node.children.isNotEmpty()) {
                     val lastIndex = node.children.size - 1
                     if (!didInitialScroll.value) {
                         didInitialScroll.value = true
                         listState.scrollToItem(lastIndex, Int.MAX_VALUE) // jump on open
                     } else {
                         listState.animateScrollToItem(lastIndex, Int.MAX_VALUE)
+                        chromeScroll?.collapse()
                     }
                 }
             }
 
-            LazyColumn(modifier = scrollModifier, state = listState) {
+            LazyColumn(
+                modifier = scrollModifier,
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(gap),
+            ) {
                 items(node.children, key = { it.id }) { child ->
                     NodeView(node = child)
                 }
