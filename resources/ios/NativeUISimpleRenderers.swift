@@ -188,45 +188,11 @@ struct NativeUIImageRenderer: View {
 
     @ViewBuilder
     private func tinted(_ image: Image, contentMode: ContentMode, tintArgb: Int, cornerRadius: CGFloat) -> some View {
-        let img = image
+        image
             .resizable()
             .aspectRatio(contentMode: contentMode)
-        let styled = Group {
-            if tintArgb != 0 {
-                img.foregroundStyle(Color(argb: tintArgb))
-            } else {
-                img
-            }
-        }
-
-        // `.fill` (cover/fill) spans the whole frame, so the frame-level
-        // rounded clip from NodeStyleModifier already rounds the visible
-        // pixels. `.fit` (contain/scale-down/none) letterboxes the image
-        // inside the frame, leaving the frame's rounded corners out in the
-        // transparent margin — so round the fitted image itself. Mirrors
-        // ClipRadiusModifier (RoundedRectangle; rounded-full → 9999 clamps
-        // to a capsule).
-        if contentMode == .fit && cornerRadius > 0 {
-            styled.clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        } else {
-            styled
-        }
-    }
-
-    /// HTML `<img alt>` semantics for VoiceOver: an `alt` prop makes the
-    /// image a labeled image element; no `alt` marks it decorative and hides
-    /// it from the accessibility tree entirely.
-    private struct ImageAltModifier: ViewModifier {
-        let alt: String
-        func body(content: Content) -> some View {
-            if alt.isEmpty {
-                content.accessibilityHidden(true)
-            } else {
-                content
-                    .accessibilityLabel(alt)
-                    .accessibilityAddTraits(.isImage)
-            }
-        }
+            .modifier(ImageTintModifier(tintArgb: tintArgb))
+            .modifier(FittedCornerModifier(contentMode: contentMode, cornerRadius: cornerRadius))
     }
 
     /// Resolves `src` to a local filesystem path when it points at an
@@ -241,12 +207,58 @@ struct NativeUIImageRenderer: View {
         }
         return nil
     }
+}
 
-    private func resolveContentMode(_ fit: Int) -> ContentMode {
-        switch fit {
-        case 2: return .fill
-        case 3: return .fill
-        default: return .fit
+/// Maps the `fit` ordinal to a SwiftUI content mode.
+private func resolveContentMode(_ fit: Int) -> ContentMode {
+    switch fit {
+    case 2: return .fill
+    case 3: return .fill
+    default: return .fit
+    }
+}
+
+/// HTML `<img alt>` semantics for VoiceOver: an `alt` prop makes the image a
+/// labeled image element; no `alt` marks it decorative and hides it from the
+/// accessibility tree entirely.
+private struct ImageAltModifier: ViewModifier {
+    let alt: String
+    func body(content: Content) -> some View {
+        if alt.isEmpty {
+            content.accessibilityHidden(true)
+        } else {
+            content
+                .accessibilityLabel(alt)
+                .accessibilityAddTraits(.isImage)
+        }
+    }
+}
+
+private struct ImageTintModifier: ViewModifier {
+    let tintArgb: Int
+    func body(content: Content) -> some View {
+        if tintArgb != 0 {
+            content.foregroundStyle(Color(argb: tintArgb))
+        } else {
+            content
+        }
+    }
+}
+
+/// `.fill` (cover/fill) spans the whole frame, so the frame-level rounded clip
+/// from NodeStyleModifier already rounds the visible pixels. `.fit`
+/// (contain/scale-down/none) letterboxes the content inside the frame, leaving
+/// the frame's rounded corners out in the transparent margin — so round the
+/// fitted content itself. Mirrors ClipRadiusModifier (RoundedRectangle;
+/// rounded-full → 9999 clamps to a capsule).
+private struct FittedCornerModifier: ViewModifier {
+    let contentMode: ContentMode
+    let cornerRadius: CGFloat
+    func body(content: Content) -> some View {
+        if contentMode == .fit && cornerRadius > 0 {
+            content.clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            content
         }
     }
 }
