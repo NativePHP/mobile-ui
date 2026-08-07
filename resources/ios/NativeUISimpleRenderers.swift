@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftDraw
 import UIKit
 
 struct NativeUIPressableRenderer: View {
@@ -157,7 +158,12 @@ struct NativeUIImageRenderer: View {
     private func imageContent(src: String, contentMode: ContentMode, tintArgb: Int, cornerRadius: CGFloat) -> some View {
         if src.isEmpty {
             Color.clear
-        } else if let path = Self.localFilePath(for: src) {
+        } else if isSVGSource(src) {
+            // Vectors never become bitmaps: SVGView draws through a Canvas and
+            // stays sharp at any size, so an 8pt viewBox blown up to 96pt is
+            // exact rather than an upscaled raster.
+            NativeUISVGContent(src: src, contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
+        } else if let path = localFilePath(for: src) {
             // Local device file — camera capture, gallery selection, etc.
             // `AsyncImage`/`URLSession` can't load `file://` or bare
             // filesystem paths, so decode directly with UIImage. Handles
@@ -195,17 +201,129 @@ struct NativeUIImageRenderer: View {
             .modifier(FittedCornerModifier(contentMode: contentMode, cornerRadius: cornerRadius))
     }
 
-    /// Resolves `src` to a local filesystem path when it points at an
-    /// on-device file (`file://…` URL or an absolute `/…` path), or nil
-    /// when it's a remote URL that should go through AsyncImage.
-    private static func localFilePath(for src: String) -> String? {
-        if src.hasPrefix("file://") {
-            return URL(string: src)?.path ?? String(src.dropFirst("file://".count))
+}
+
+/// Resolves `src` to a local filesystem path when it points at an on-device
+/// file (`file://…` URL or an absolute `/…` path), or nil when it's a remote
+/// URL that should go through AsyncImage.
+private func localFilePath(for src: String) -> String? {
+    if src.hasPrefix("file://") {
+        return URL(string: src)?.path ?? String(src.dropFirst("file://".count))
+    }
+    if src.hasPrefix("/") {
+        return src
+    }
+    return nil
+}
+
+/// Classifies `src` as SVG content, or nil when it isn't SVG. Inline markup
+/// and data URIs are recognised by their prefix; files and remote URLs by
+/// extension, since neither can be sniffed without reading them first.
+/// Detection and loading share this one classification, so every source the
+/// renderer routes to the SVG branch is one the loader knows how to fetch.
+private enum SVGSource {
+    case markup(String)
+    case dataURI(String)
+    case remote(URL)
+    case localFile(String)
+    case bundled(String)
+
+    init?(_ src: String) {
+        let trimmed = src.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.hasPrefix("<svg") || trimmed.hasPrefix("<?xml") {
+            self = .markup(trimmed)
+            return
         }
-        if src.hasPrefix("/") {
-            return src
+        if trimmed.hasPrefix("data:image/svg+xml") {
+            self = .dataURI(trimmed)
+            return
         }
-        return nil
+
+        let path = URL(string: trimmed)?.path ?? trimmed
+        guard (path as NSString).pathExtension.lowercased() == "svg" else {
+            return nil
+        }
+
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://"), let url = URL(string: trimmed) {
+            self = .remote(url)
+            return
+        }
+        if let filePath = localFilePath(for: trimmed) {
+            self = .localFile(filePath)
+            return
+        }
+        self = .bundled(trimmed)
+    }
+}
+
+private func isSVGSource(_ src: String) -> Bool {
+    SVGSource(src) != nil
+}
+
+/// Parses an SVG source off the main actor, then draws it with the same tint
+/// and corner treatment as a raster image. Parsing is a `task(id:)` rather
+/// than a computed value because a remote source has to be fetched.
+private struct NativeUISVGContent: View {
+    let src: String
+    let contentMode: ContentMode
+    let tintArgb: Int
+    let cornerRadius: CGFloat
+
+    @State private var svg: SVG?
+
+    var body: some View {
+        Group {
+            if let svg {
+                SVGView(svg: svg)
+                    .renderingMode(tintArgb != 0 ? .template : .original)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                // Covers "still loading" and "failed to parse" alike, matching
+                // the raster branch's empty result for an undecodable source.
+                Color.clear
+            }
+        }
+        .modifier(ImageTintModifier(tintArgb: tintArgb))
+        .modifier(FittedCornerModifier(contentMode: contentMode, cornerRadius: cornerRadius))
+        .task(id: src) {
+            svg = await Self.parse(src)
+        }
+    }
+
+    private static func parse(_ src: String) async -> SVG? {
+        guard let source = SVGSource(src) else { return nil }
+
+        switch source {
+        case .markup(let xml):
+            return SVG(xml: xml)
+        case .dataURI(let uri):
+            guard let data = decodeDataURI(uri) else { return nil }
+            return SVG(data: data)
+        case .remote(let url):
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+            return SVG(data: data)
+        case .localFile(let path):
+            return SVG(fileURL: URL(fileURLWithPath: path))
+        case .bundled(let name):
+            return SVG(named: name, in: .main)
+        }
+    }
+
+    /// RFC 2397: the payload is base64 when the media type carries the marker,
+    /// and percent-encoded text otherwise.
+    private static func decodeDataURI(_ src: String) -> Data? {
+        let parts = src.split(separator: ",", maxSplits: 1)
+        guard parts.count == 2 else { return nil }
+
+        let payload = String(parts[1])
+
+        if parts[0].contains("base64") {
+            return Data(base64Encoded: payload)
+        }
+
+        return payload.removingPercentEncoding?.data(using: .utf8)
     }
 }
 
