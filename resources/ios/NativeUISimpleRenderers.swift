@@ -194,7 +194,12 @@ struct NativeUIImageRenderer: View {
 
     @ViewBuilder
     private func tinted(_ image: Image, contentMode: ContentMode, tintArgb: Int, cornerRadius: CGFloat) -> some View {
-        image
+        // `foregroundStyle` only recolours a template image. A UIImage decoded
+        // from a file or a URL is `.original`, so the tint had nothing to act
+        // on and was dropped silently.
+        let source = tintArgb != 0 ? image.renderingMode(.template) : image
+
+        source
             .resizable()
             .aspectRatio(contentMode: contentMode)
             .modifier(ImageTintModifier(tintArgb: tintArgb))
