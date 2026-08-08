@@ -268,6 +268,11 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Multiline: the return/enter key always inserts a line break on both
+     * platforms (never submits), so `@submit` is not reachable from the
+     * keyboard — pair the field with a send/save button instead.
+     */
     public function multiline(bool $value = true): static
     {
         $this->inputProps['multiline'] = $value;
