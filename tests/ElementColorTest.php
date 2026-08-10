@@ -67,6 +67,18 @@ it('resolves activity indicator and bare input colors', function () {
         ->toBe('#334155');
 });
 
+it('resolves bare input placeholder colors independently of color', function () {
+    $props = collectProps('bare_text_input', [
+        'color' => 'slate-700',
+        'placeholder-color' => 'slate-400',
+        'dark-placeholder-color' => 'slate-500/50',
+    ]);
+
+    expect($props['color'])->toBe('#334155');
+    expect($props['placeholder_color'])->toBe('#94A3B8');
+    expect($props['dark_placeholder_color'])->toBe('#8064748B');
+});
+
 it('resolves list item color props', function () {
     $props = collectProps('list_item', [
         'headline' => 'Inbox',

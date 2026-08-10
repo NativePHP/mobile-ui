@@ -20,6 +20,10 @@ struct NativeUITextInputCore: View {
     let textSize: CGFloat
     let contentColor: Color
     let tintColor: Color
+    /// Bare-variant-only placeholder color override (`placeholder_color` /
+    /// `dark_placeholder_color`). `nil` for outlined/filled, which never
+    /// pass this — the placeholder then keeps the platform default gray.
+    var placeholderColor: Color? = nil
 
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
@@ -82,6 +86,13 @@ struct NativeUITextInputCore: View {
             fontSize: textSize,
             fontName: fontName
         )
+        // `placeholder` doubles as the field's accessibility title in every
+        // init below; `prompt` (when non-nil) is what actually renders as
+        // the placeholder, letting us recolor it independently of the typed
+        // text without touching accessibility. `nil` falls back to the
+        // platform's default placeholder styling — unchanged from before
+        // this prop existed.
+        let styledPrompt: Text? = placeholderColor.map { Text(placeholder).foregroundColor($0) }
 
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
@@ -91,7 +102,7 @@ struct NativeUITextInputCore: View {
             if secure {
                 // SecureField has no selection binding — caret reporting is
                 // intentionally never available for secure fields.
-                SecureField(placeholder, text: $text)
+                SecureField(placeholder, text: $text, prompt: styledPrompt)
                     .foregroundColor(contentColor)
                     .focused($isFocused)
             } else if multiline {
@@ -108,13 +119,13 @@ struct NativeUITextInputCore: View {
                 // (multiline) axis too. Kept as parallel branches so the
                 // feature-off path is byte-for-byte the original field.
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: styledPrompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text, axis: .vertical)
+                    TextField(placeholder, text: $text, prompt: styledPrompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,11 +133,11 @@ struct NativeUITextInputCore: View {
                 }
             } else {
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: styledPrompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text)
+                    TextField(placeholder, text: $text, prompt: styledPrompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 }
