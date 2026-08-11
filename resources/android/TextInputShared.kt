@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
@@ -50,6 +51,7 @@ internal data class TextInputProps(
     val minLines: Int,
     val maxLength: Int,
     val keyboard: KeyboardType,
+    val capitalization: KeyboardCapitalization?,
     val disabled: Boolean,
     val readOnly: Boolean,
     val isError: Boolean,
@@ -113,6 +115,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         minLines     = p.getInt("min_lines").let { if (it > 0) it else 1 },
         maxLength    = p.getInt("max_length"),
         keyboard     = resolveKeyboardType(p.getString("keyboard")),
+        capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getString("keyboard")),
         disabled     = p.getBool("disabled"),
         readOnly     = p.getBool("read_only"),
         isError      = p.getBool("is_error"),
@@ -167,8 +170,42 @@ internal fun resolveKeyboardType(kind: String): KeyboardType = when (kind.lowerc
     else             -> KeyboardType.Text
 }
 
+/**
+ * Capitalization from the explicit `autocapitalize` prop when the author set
+ * one, otherwise derived from the keyboard type. Null means "leave Compose's
+ * own default alone".
+ *
+ * Compose already defaults to no capitalization, so Android never had the iOS
+ * bug (mobile-air #304) — it got the right answer by accident rather than on
+ * purpose, and `autocapitalize` had no way to take effect at all.
+ *
+ * The plain-text case deliberately returns NULL rather than `Sentences`.
+ * Sentences is what iOS does and would make the platforms agree, but it would
+ * also silently start capitalizing every unclassified text field in every
+ * existing Android app. That default is a separate decision; this change only
+ * makes the prop work and pins the cases the keyboard type already implies.
+ *
+ * Unknown values fall through to the derived behaviour rather than erroring,
+ * matching `resolveKeyboardType`.
+ */
+internal fun resolveCapitalization(explicit: String, keyboard: String): KeyboardCapitalization? =
+    when (explicit.lowercase()) {
+        "none"       -> KeyboardCapitalization.None
+        "sentences"  -> KeyboardCapitalization.Sentences
+        "words"      -> KeyboardCapitalization.Words
+        "characters" -> KeyboardCapitalization.Characters
+        else -> when (keyboard.lowercase()) {
+            // Case-sensitive or non-alphabetic content — never capitalize.
+            "email", "url", "number", "decimal", "phone",
+            "numberpassword", "password" -> KeyboardCapitalization.None
+            else -> null
+        }
+    }
+
 internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions =
-    KeyboardOptions(keyboardType = props.keyboard)
+    props.capitalization
+        ?.let { KeyboardOptions(keyboardType = props.keyboard, capitalization = it) }
+        ?: KeyboardOptions(keyboardType = props.keyboard)
 
 /**
  * Outbound dispatch state machine. Call [onTextChanged] whenever local text

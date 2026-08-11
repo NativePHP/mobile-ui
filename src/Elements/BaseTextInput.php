@@ -19,7 +19,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -85,6 +85,9 @@ abstract class BaseTextInput extends Element
         // Behavior
         if (isset($attrs['keyboard'])) {
             $this->keyboard($attrs['keyboard']);
+        }
+        if (isset($attrs['autocapitalize']) || isset($attrs['autoCapitalize'])) {
+            $this->autocapitalize((string) ($attrs['autocapitalize'] ?? $attrs['autoCapitalize']));
         }
         if (! empty($attrs['secure'])) {
             $this->secure();
@@ -250,6 +253,26 @@ abstract class BaseTextInput extends Element
     public function keyboard(string|int $type): static
     {
         $this->inputProps['keyboard'] = $type;
+
+        return $this;
+    }
+
+    /**
+     * Autocapitalization — "none" | "sentences" | "words" | "characters".
+     * Mirrors HTML's `autocapitalize` vocabulary.
+     *
+     * Leave it unset and the field derives capitalization from its `keyboard`
+     * type, which is what you want almost always: an `email` or `url` field
+     * capitalizes nothing, a plain text field capitalizes sentences. This
+     * setter exists for the cases the keyboard type can't imply — a name field
+     * wanting `words`, or a reference-code field wanting `characters`.
+     *
+     * Unknown values are ignored natively and fall back to the derived
+     * behaviour rather than erroring.
+     */
+    public function autocapitalize(string $mode): static
+    {
+        $this->inputProps['autocapitalize'] = strtolower(trim($mode));
 
         return $this;
     }

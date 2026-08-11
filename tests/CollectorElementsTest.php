@@ -484,3 +484,32 @@ it('parses string booleans on the new sheet props via filter_var', function () {
     expect($tree['props']['permanent'])->toBeFalse();
     expect($tree['props']['background_interaction'])->toBeFalse();
 });
+
+// ── autocapitalize (mobile-air #304) ─────────────────────────────────────────
+
+it('serializes autocapitalize via the fluent API', function () {
+    $props = OutlinedTextInput::make()
+        ->autocapitalize('Words')
+        ->toArray(new CallbackRegistry)['props'];
+
+    // Normalized to lower case so the native resolvers can match on one form.
+    expect($props['autocapitalize'])->toBe('words');
+});
+
+it('serializes autocapitalize from both attribute spellings', function (string $attr) {
+    $el = OutlinedTextInput::make();
+    $el->applyAttributes([$attr => 'characters']);
+
+    expect($el->toArray(new CallbackRegistry)['props']['autocapitalize'])->toBe('characters');
+})->with(['autocapitalize', 'autoCapitalize']);
+
+it('omits autocapitalize entirely when the author did not set one', function () {
+    // Absent means "derive from the keyboard type" on both platforms — the
+    // native resolvers must not see an empty string as an explicit choice.
+    $props = OutlinedTextInput::make()
+        ->keyboard('email')
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($props)->not->toHaveKey('autocapitalize')
+        ->and($props['keyboard'])->toBe('email');
+});
