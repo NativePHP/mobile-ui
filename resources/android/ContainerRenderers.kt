@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -376,9 +377,51 @@ object ScrollViewRenderer {
                 }
             }
 
-            LazyColumn(modifier = scrollModifier, state = listState) {
-                items(node.children, key = { it.id }) { child ->
-                    NodeView(node = child)
+            // A `fill` / `h-full` DIRECT child asked to be at least as tall as
+            // the VIEWPORT — the "short screen centred, still scrolls when the
+            // keyboard appears" pattern. A LazyColumn measures its items with
+            // an unbounded main axis, so `fillMaxHeight()` inside one has
+            // nothing to resolve against and the child hugs its content,
+            // leaving `justify-center` no space to distribute.
+            //
+            // BoxWithConstraints supplies the viewport height, which is handed
+            // to those children as a MINIMUM: content taller than the viewport
+            // must still grow and scroll, exactly like CSS `min-height: 100%`.
+            //
+            // Direct children only — a nested descendant's fill resolves
+            // against ITS parent, which is ordinary flex behaviour.
+            //
+            // Gated so the common path keeps the original LazyColumn with no
+            // extra measurement pass around it.
+            val hasFillHeightChild = node.children.any {
+                it.layout?.heightMode == SizeMode.FILL
+            }
+
+            if (hasFillHeightChild) {
+                BoxWithConstraints(modifier = scrollModifier) {
+                    val viewport = maxHeight
+                    LazyColumn(state = listState) {
+                        items(node.children, key = { it.id }) { child ->
+                            if (child.layout?.heightMode == SizeMode.FILL) {
+                                // The min constraint passes through to the
+                                // child, so Compose measures it at
+                                // max(contentHeight, viewport) — no reliance on
+                                // fillMaxHeight resolving against an unbounded
+                                // parent.
+                                Box(modifier = Modifier.heightIn(min = viewport)) {
+                                    NodeView(node = child)
+                                }
+                            } else {
+                                NodeView(node = child)
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(modifier = scrollModifier, state = listState) {
+                    items(node.children, key = { it.id }) { child ->
+                        NodeView(node = child)
+                    }
                 }
             }
         }
