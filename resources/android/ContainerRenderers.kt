@@ -399,18 +399,45 @@ object ScrollViewRenderer {
 
             if (hasFillHeightChild) {
                 BoxWithConstraints(modifier = scrollModifier) {
-                    val viewport = maxHeight
+                    // Unbounded when the scroll view is itself content-sized
+                    // (no h-* and nothing constraining it). `heightIn(min =
+                    // Dp.Infinity)` would be catastrophic, so fall through to
+                    // the normal path — there is no viewport to fill against.
+                    val viewport = maxHeight.takeIf { it.value.isFinite() && it.value > 0f }
                     LazyColumn(state = listState) {
                         items(node.children, key = { it.id }) { child ->
-                            if (child.layout?.heightMode == SizeMode.FILL) {
-                                // The min constraint passes through to the
-                                // child, so Compose measures it at
-                                // max(contentHeight, viewport) — no reliance on
-                                // fillMaxHeight resolving against an unbounded
-                                // parent.
-                                Box(modifier = Modifier.heightIn(min = viewport)) {
-                                    NodeView(node = child)
+                            val layout = child.layout
+                            if (viewport != null && layout?.heightMode == SizeMode.FILL) {
+                                // The minimum goes on the CHILD's own modifier,
+                                // not on a wrapper. A Box RELAXES min
+                                // constraints for its children (only
+                                // `matchParentSize` opts back in), so wrapping
+                                // made the Box viewport-tall while the column
+                                // inside it kept hugging — the original bug,
+                                // one layer down.
+                                //
+                                // Compose enforces min constraints, so a column
+                                // measured at minHeight = viewport IS viewport
+                                // tall, and its own Arrangement.Center then has
+                                // slack to distribute.
+                                //
+                                // Width is reproduced here because
+                                // `overrideModifier` replaces NodeView's own
+                                // sizing block wholesale. Same pattern as
+                                // StackRenderer above.
+                                var childMod: Modifier = Modifier.heightIn(min = viewport)
+                                when (layout.widthMode) {
+                                    SizeMode.FILL -> childMod = childMod.fillMaxWidth()
+                                    SizeMode.FIXED -> if (layout.width > 0f) {
+                                        childMod = childMod.width(layout.width.dp)
+                                    }
+                                    SizeMode.PERCENT -> if (layout.width > 0f) {
+                                        childMod = childMod.fillMaxWidth(
+                                            (layout.width / 100f).coerceIn(0f, 1f)
+                                        )
+                                    }
                                 }
+                                NodeView(node = child, overrideModifier = childMod)
                             } else {
                                 NodeView(node = child)
                             }
