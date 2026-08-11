@@ -4,6 +4,13 @@ import UIKit
 struct NativeUIScrollViewRenderer: View {
     let node: NativeUINode
 
+    /// Whether the bottom anchor is currently on screen — i.e. whether the
+    /// list is still "stuck" to the bottom rather than scrolled up into
+    /// history. Only consulted for `scroll-anchor="bottom"`, and only to
+    /// decide whether a keyboard DISMISS should re-pin. Starts true because a
+    /// bottom-anchored list opens at the bottom.
+    @State private var atBottom: Bool = true
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
@@ -148,10 +155,16 @@ struct NativeUIScrollViewRenderer: View {
                             // reader) — this fires after the anchor has
                             // real geometry, so the pin always lands.
                             .onAppear {
+                                // The anchor being on screen IS the definition
+                                // of "still stuck to the bottom" — the keyboard
+                                // dismiss handler reads this to avoid dragging
+                                // a reader out of history.
+                                atBottom = true
                                 DispatchQueue.main.async {
                                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                                 }
                             }
+                            .onDisappear { atBottom = false }
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -171,24 +184,50 @@ struct NativeUIScrollViewRenderer: View {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
-            // The keyboard shrinks the scroll viewport (the screen shifts
-            // up for keyboard avoidance). Re-pin the latest message to the
-            // bottom so it stays visible just above the input row instead
-            // of hiding behind it, moving IN SYNC with the keyboard: a
-            // one-runloop `async` lets SwiftUI register the new (shrunk)
-            // safe area so `scrollTo` targets the final layout, and the
-            // scroll animates with the keyboard's own reported duration so
-            // both travel together.
+            // The keyboard resizes the scroll viewport in BOTH directions —
+            // it shrinks on the way in (the screen shifts up for keyboard
+            // avoidance) and grows back on the way out. Re-pin on each, so
+            // the latest message sits just above the input row while typing
+            // and back at the bottom edge afterwards. Handling only the show
+            // left the list stranded mid-screen with empty space beneath it
+            // once the keyboard closed.
+            //
+            // Both move IN SYNC with the keyboard: a one-runloop `async` lets
+            // SwiftUI register the new safe area so `scrollTo` targets the
+            // final layout, and the scroll animates with the keyboard's own
+            // reported duration so the two travel together.
             .onReceive(NotificationCenter.default.publisher(
                 for: UIResponder.keyboardWillShowNotification)
             ) { note in
-                guard stickBottom else { return }
-                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-                DispatchQueue.main.async {
-                    withAnimation(.easeOut(duration: duration)) {
-                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-                    }
-                }
+                repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
+            }
+            .onReceive(NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillHideNotification)
+            ) { note in
+                // Only when the list was actually sitting at the bottom.
+                // `scrollDismissesKeyboard(.interactively)` means dragging the
+                // list toward older messages is itself how you dismiss the
+                // keyboard — re-pinning unconditionally would yank the reader
+                // straight back down and undo the scroll that dismissed it.
+                guard atBottom else { return }
+                repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
+            }
+        }
+    }
+
+    /// Scroll the bottom anchor back into view, in step with the keyboard.
+    ///
+    /// Shared by the show and hide observers so the two transitions animate
+    /// identically — the only difference between them is the caller-side
+    /// guard on `atBottom`.
+    private func repinToBottom(stickBottom: Bool, proxy: ScrollViewProxy, note: Notification) {
+        guard stickBottom else { return }
+
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: duration)) {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
         }
     }
