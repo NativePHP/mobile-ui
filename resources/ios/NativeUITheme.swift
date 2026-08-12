@@ -316,3 +316,36 @@ extension Color {
         self = Color(red: r, green: g, blue: b, opacity: a)
     }
 }
+
+// MARK: - Platform colour names
+//
+// Three greys these renderers reach for that are not theme tokens, because they
+// are not the app's decision: a hairline, and the fill behind a piece of content
+// that has not arrived yet. UIKit and AppKit both have them and spell them
+// differently, so each one is named once here and the platform fork stays out of
+// the renderers.
+
+/// The platform's hairline colour — a divider, a rule under a row.
+var nuiSeparatorColor: Color {
+    #if canImport(UIKit)
+    Color(uiColor: .separator)
+    #else
+    Color(nsColor: .separatorColor)
+    #endif
+}
+
+/// The fill for a placeholder shape: an avatar whose image is still loading, a
+/// skeleton row in a windowed list.
+///
+/// Deliberately the same grey for both of what iOS spells `systemGray5` and
+/// `systemGray6`. They differ by about 2% lightness and are used here for the
+/// same job, and AppKit's nearest equivalent — a quaternary fill that follows the
+/// appearance — has one value rather than a numbered scale, so inventing two
+/// would be pretending to a distinction the platform does not draw.
+var nuiPlaceholderFill: Color {
+    #if canImport(UIKit)
+    Color(uiColor: .systemGray5)
+    #else
+    Color(nsColor: .quaternarySystemFill)
+    #endif
+}

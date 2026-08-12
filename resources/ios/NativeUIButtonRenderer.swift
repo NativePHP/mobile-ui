@@ -174,7 +174,7 @@ struct NativeUIButtonRenderer: View {
         // already has built-in press feedback through SwiftUI's button styles.
         // We still chain it through `.glassEffect()` underneath when set so
         // the user gets the explicit specular highlight on press.
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             if clear {
                 // No `.buttonStyle(.glassClear)` exists — drop to plain and
                 // apply `.glassEffect(.clear)` directly. Variant tint flows

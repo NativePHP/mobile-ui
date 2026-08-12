@@ -279,11 +279,21 @@ struct NativeUIDatePickerRenderer: View {
 private extension View {
     /// `display` → SwiftUI picker style. `wheel` has no Android counterpart
     /// (documented as falling back to inline there); on iOS it's native.
+    ///
+    /// macOS has no wheel either — `.wheel` is unavailable there rather than
+    /// merely ugly — so it falls back the same way Android does. Spelled as one
+    /// `case` list rather than two functions so the mapping stays readable as a
+    /// single table.
     @ViewBuilder
     func datePickerStyle(for display: String) -> some View {
         switch display {
         case "inline": self.datePickerStyle(.graphical)
-        case "wheel":  self.datePickerStyle(.wheel)
+        case "wheel":
+            #if os(macOS)
+            self.datePickerStyle(.graphical)
+            #else
+            self.datePickerStyle(.wheel)
+            #endif
         default:       self.datePickerStyle(.compact)
         }
     }

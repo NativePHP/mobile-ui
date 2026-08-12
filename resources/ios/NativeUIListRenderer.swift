@@ -201,7 +201,14 @@ private struct GroupedOrPlainListStyle: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if grouped {
+            // `.insetGrouped` is the iOS spelling and does not exist on macOS.
+            // `.inset` is the same idea there — inset rows with grouped section
+            // headers, which is what a Mac settings list looks like.
+            #if os(macOS)
+            content.listStyle(.inset)
+            #else
             content.listStyle(.insetGrouped)
+            #endif
         } else {
             content.listStyle(.plain)
         }

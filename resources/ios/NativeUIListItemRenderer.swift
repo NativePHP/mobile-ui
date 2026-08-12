@@ -140,7 +140,7 @@ struct NativeUIListItemRenderer: View {
             AsyncImage(url: URL(string: value)) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
-                Circle().fill(Color(.systemGray5))
+                Circle().fill(nuiPlaceholderFill)
             }
             .frame(width: 40, height: 40)
             .clipShape(Circle())
@@ -161,7 +161,7 @@ struct NativeUIListItemRenderer: View {
             AsyncImage(url: URL(string: value)) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
-                RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
+                RoundedRectangle(cornerRadius: 4).fill(nuiPlaceholderFill)
             }
             .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -203,7 +203,7 @@ struct NativeUIListItemRenderer: View {
 
         if changeCb != 0 {
             Button {
-                NativeUIBridge.sendCheckboxChangeEvent(changeCb, nodeId: node.id, value: sendValue)
+                NativeElementBridge.sendCheckboxChangeEvent(changeCb, nodeId: node.id, value: sendValue)
             } label: {
                 tinted.nuiMinTapTarget()
             }
@@ -280,7 +280,7 @@ struct NativeUIListItemRenderer: View {
                 Button(action: {
                     let onPressCb = node.props.getCallbackId("on_trailing_press")
                     if onPressCb != 0 {
-                        NativeUIBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                        NativeElementBridge.sendPressEvent(onPressCb, nodeId: node.id)
                     }
                 }) {
                     Image(systemName: getIconForName(value))
@@ -318,7 +318,7 @@ private func listItemMenuItem(_ item: NativeUINode) -> some View {
         let isDestructive = item.props.getBool("destructive")
         Button(role: isDestructive ? .destructive : nil) {
             if item.onPress != 0 {
-                NativeUIBridge.sendPressEvent(item.onPress, nodeId: item.id)
+                NativeElementBridge.sendPressEvent(item.onPress, nodeId: item.id)
             }
         } label: {
             if !icon.isEmpty {

@@ -118,7 +118,7 @@ private struct ChipBackgroundModifier: ViewModifier {
             content.overlay(shape.stroke(borderColor, lineWidth: 1))
         )
 
-        if glassEnabled, #available(iOS 26.0, *) {
+        if glassEnabled, #available(iOS 26.0, macOS 26.0, *) {
             if glassClear {
                 bordered.glassEffect(.clear.interactive(glassInteractive), in: shape)
             } else {

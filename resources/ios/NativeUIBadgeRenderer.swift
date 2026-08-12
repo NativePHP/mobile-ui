@@ -74,7 +74,7 @@ private struct BadgeBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
         let shape = Capsule()
 
-        if glassEnabled, #available(iOS 26.0, *) {
+        if glassEnabled, #available(iOS 26.0, macOS 26.0, *) {
             if glassClear {
                 content.glassEffect(.clear.interactive(glassInteractive), in: shape)
             } else {

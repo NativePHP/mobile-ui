@@ -30,7 +30,7 @@ struct NativeUIModalRenderer: View {
 
         Color.clear
             .frame(width: 0, height: 0)
-            .fullScreenCover(isPresented: .constant(visible), onDismiss: {
+            .nuiModalPresentation(isPresented: visible, onDismiss: {
                 // Fired by system swipe-to-dismiss (iOS sheets) or when the
                 // parent flips `visible` false via its own action. Intentional:
                 // system-driven dismissals still need to notify PHP so the
@@ -70,5 +70,29 @@ private struct A11yLabelModifier: ViewModifier {
     func body(content: Content) -> some View {
         if label.isEmpty { content }
         else { content.accessibilityLabel(label) }
+    }
+}
+
+private extension View {
+    /// Present the modal's content over everything else.
+    ///
+    /// `.fullScreenCover` is the iOS way and does not exist on macOS at all — a
+    /// Mac has windows, so covering the screen is not something an app asks for.
+    /// The platform's own answer is a sheet: it takes the same
+    /// `isPresented` / `onDismiss` / content, it is modal to the window, and
+    /// closing it calls `onDismiss` — so the element's contract ("dismiss fires
+    /// on an explicit user action, not on PHP flipping `visible`") holds either
+    /// way.
+    @ViewBuilder
+    func nuiModalPresentation<Modal: View>(
+        isPresented: Bool,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Modal
+    ) -> some View {
+        #if os(macOS)
+        sheet(isPresented: .constant(isPresented), onDismiss: onDismiss, content: content)
+        #else
+        fullScreenCover(isPresented: .constant(isPresented), onDismiss: onDismiss, content: content)
+        #endif
     }
 }

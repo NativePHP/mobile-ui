@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 struct NativeUIScrollViewRenderer: View {
     let node: NativeUINode
@@ -114,16 +116,11 @@ struct NativeUIScrollViewRenderer: View {
                 // safe area so `scrollTo` targets the final layout, and the
                 // scroll animates with the keyboard's own reported duration so
                 // both travel together.
-                .onReceive(NotificationCenter.default.publisher(
-                    for: UIResponder.keyboardWillShowNotification)
-                ) { note in
-                    guard stickBottom else { return }
-                    let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-                    DispatchQueue.main.async {
-                        withAnimation(.easeOut(duration: duration)) {
-                            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-                        }
-                    }
+                //
+                // Nothing to re-pin on a Mac: there is no software keyboard, so
+                // no viewport change to follow, and `UIResponder` is UIKit-only.
+                .nuiRepinOnKeyboard(enabled: stickBottom) {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
         }
@@ -140,5 +137,32 @@ struct NativeUIScrollViewRenderer: View {
             count += descendantCount(child)
         }
         return count
+    }
+}
+
+private extension View {
+    /// Re-run `repin` when the software keyboard appears, animated with the
+    /// keyboard's own reported duration so the pinned content travels with it.
+    ///
+    /// Extracted into a modifier purely so the platform fork is one place
+    /// instead of inline in the view body: `UIResponder` and its keyboard
+    /// notifications are UIKit, and macOS has no software keyboard to follow at
+    /// all — so there is nothing to re-pin rather than a different way of doing
+    /// it, and the macOS side is a pass-through by design.
+    @ViewBuilder
+    func nuiRepinOnKeyboard(enabled: Bool, repin: @escaping () -> Void) -> some View {
+        #if canImport(UIKit)
+        onReceive(NotificationCenter.default.publisher(
+            for: UIResponder.keyboardWillShowNotification)
+        ) { note in
+            guard enabled else { return }
+            let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: duration)) { repin() }
+            }
+        }
+        #else
+        self
+        #endif
     }
 }

@@ -23,7 +23,7 @@ struct NativeUIBottomSheetRenderer: View {
         Color.clear.frame(width: 0, height: 0)
             .sheet(isPresented: $isPresented, onDismiss: {
                 if onDismissCb != 0 {
-                    NativeUIBridge.sendSheetDismissEvent(onDismissCb, nodeId: node.id)
+                    NativeElementBridge.sendSheetDismissEvent(onDismissCb, nodeId: node.id)
                 }
             }) {
                 VStack(spacing: 0) {

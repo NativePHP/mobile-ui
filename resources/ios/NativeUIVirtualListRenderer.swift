@@ -77,7 +77,7 @@ private struct VirtualListBody: View {
                         NodeView(node: child).equatable()
                     } else {
                         // Placeholder skeleton — meaningless to VoiceOver.
-                        Color(.systemGray6)
+                        nuiPlaceholderFill
                             .frame(height: estimatedRowHeight)
                             .accessibilityHidden(true)
                     }

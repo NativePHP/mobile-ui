@@ -1,5 +1,38 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#else
+import AppKit
+#endif
+
+/// The children of a node that draws as a plain column of them.
+///
+/// On iOS and Android that is the column renderer, because the column renderer
+/// *is* the flex engine: `FlexContainer`, a custom SwiftUI `Layout` that lives in
+/// nativephp/mobile's own app sources. A desktop host has no such type — it lays
+/// rows and columns out itself — so there the children go through `RenderNode`,
+/// which is the host's own recursion and applies the host's layout and style
+/// modifiers to each child.
+///
+/// The two callers are `pressable` and `canvas`, and both are types the desktop
+/// shell has a renderer of its own for — and the host's own renderers win — so on
+/// a Mac this path is a fallback rather than what draws those screens. It still
+/// has to be a real body rather than nothing: the desktop compiler decides what a
+/// package contributes by looking for the renderer type in the text of the files
+/// it declared, so a type hidden behind `#if !os(macOS)` gets registered and then
+/// fails to link.
+@ViewBuilder
+private func nuiChildColumn(_ node: NativeUINode) -> some View {
+    #if os(macOS)
+    VStack(alignment: .leading, spacing: CGFloat(node.layout?.gap ?? 0)) {
+        ForEach(node.children) { child in
+            RenderNode(node: child)
+        }
+    }
+    #else
+    NativeUIColumnRenderer(node: node)
+    #endif
+}
 
 struct NativeUIPressableRenderer: View {
     let node: NativeUINode
@@ -16,11 +49,11 @@ struct NativeUIPressableRenderer: View {
                     pressableMenuItem(item)
                 }
             } label: {
-                NativeUIColumnRenderer(node: node)
+                nuiChildColumn(node)
                     .contentShape(Rectangle())
             }
         } else {
-            NativeUIColumnRenderer(node: node)
+            nuiChildColumn(node)
         }
     }
 }
@@ -53,7 +86,7 @@ private func pressableMenuItem(_ item: NativeUINode) -> some View {
 struct NativeUICanvasRenderer: View {
     let node: NativeUINode
     var body: some View {
-        NativeUIColumnRenderer(node: node)
+        nuiChildColumn(node)
     }
 }
 
@@ -73,7 +106,7 @@ struct NativeUIDividerRenderer: View {
     let node: NativeUINode
     var body: some View {
         let borderArgb = node.style?.borderColor ?? 0
-        let color: Color = borderArgb != 0 ? Color(argb: borderArgb) : Color(uiColor: .separator)
+        let color: Color = borderArgb != 0 ? Color(argb: borderArgb) : nuiSeparatorColor
         Rectangle().fill(color).frame(height: 1)
     }
 }
@@ -104,7 +137,7 @@ struct NativeUILineRenderer: View {
     let node: NativeUINode
     var body: some View {
         let borderArgb = node.style?.borderColor ?? 0
-        let color: Color = borderArgb != 0 ? Color(argb: borderArgb) : Color(uiColor: .separator)
+        let color: Color = borderArgb != 0 ? Color(argb: borderArgb) : nuiSeparatorColor
         let width = CGFloat(node.style?.borderWidth ?? 1)
         Path { path in
             path.move(to: .zero)
@@ -160,10 +193,10 @@ struct NativeUIImageRenderer: View {
         } else if let path = Self.localFilePath(for: src) {
             // Local device file — camera capture, gallery selection, etc.
             // `AsyncImage`/`URLSession` can't load `file://` or bare
-            // filesystem paths, so decode directly with UIImage. Handles
-            // HEIC/HEIF transparently (UIImage decodes them natively).
-            if let uiImage = UIImage(contentsOfFile: path) {
-                tinted(Image(uiImage: uiImage), contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
+            // filesystem paths, so decode the file directly. Handles HEIC/HEIF
+            // transparently (both platforms' image types decode them natively).
+            if let decoded = Self.decodeFile(at: path) {
+                tinted(decoded, contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
             } else {
                 Color.clear
             }
@@ -227,6 +260,22 @@ struct NativeUIImageRenderer: View {
                     .accessibilityAddTraits(.isImage)
             }
         }
+    }
+
+    /// Decode a file off disk into a SwiftUI `Image`, or nil if it isn't one.
+    ///
+    /// The only platform fork the image renderer needs: `UIImage` and `NSImage`
+    /// are the same capability under two names, and `Image` has an initializer
+    /// for each. Everything either side of this — the fit modes, the tint, the
+    /// rounded clip, the remote path through `AsyncImage` — is shared.
+    private static func decodeFile(at path: String) -> Image? {
+        #if canImport(UIKit)
+        guard let image = UIImage(contentsOfFile: path) else { return nil }
+        return Image(uiImage: image)
+        #else
+        guard let image = NSImage(contentsOfFile: path) else { return nil }
+        return Image(nsImage: image)
+        #endif
     }
 
     /// Resolves `src` to a local filesystem path when it points at an
