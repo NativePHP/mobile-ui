@@ -501,6 +501,7 @@
         "source_path": "resources/ios",
         "sources": [
             "NativeUITheme.swift",
+            "NativeUIThemeFunctions.swift",
             "NativeUIFontResolver.swift",
             "NativeUITextInputCore.swift",
             "NativeUIOutlinedTextInputRenderer.swift",
