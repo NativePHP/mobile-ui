@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Shared inner TextField core for both `outlined-text-input` and
 /// `filled-text-input` variants. Handles:
@@ -38,7 +40,7 @@ struct NativeUITextInputCore: View {
         let minLines      = p.getInt("min_lines")
         let disabled      = p.getBool("disabled")
         let readOnly      = p.getBool("read_only")
-        let keyboard      = resolveKeyboardType(p.getString("keyboard"))
+        let keyboard      = p.getString("keyboard")
         let onChangeCb    = p.getCallbackId("on_change")
         let onSubmitCb    = p.getCallbackId("on_submit")
         let syncMode      = p.getString("sync_mode", default: "live")
@@ -82,6 +84,7 @@ struct NativeUITextInputCore: View {
                     .focused($isFocused)
             }
         }
+        .nuiChromelessField()
         .nuiScaledFont(size: textSize, fontName: fontName.isEmpty ? nil : fontName)
         // NOTE: SwiftUI's editable TextField ignores `.lineSpacing` for its
         // typed text (unlike `Text`), so `leading-*` has no visible effect on
@@ -89,7 +92,7 @@ struct NativeUITextInputCore: View {
         // `<native:text>` and on Android inputs.
         .lineSpacing(lineSpacing)
         .tint(tintColor)
-        .keyboardType(keyboard)
+        .nuiKeyboardType(keyboard)
         .disabled(disabled || readOnly)
         .submitLabel(onSubmitCb != 0 ? .done : .return)
         .onAppear {
@@ -193,6 +196,49 @@ struct NativeUITextInputCore: View {
     }
 }
 
+// MARK: - Keyboard type
+//
+// `keyboardType` is a UIKit-only modifier: the concept is a software keyboard
+// that the OS chooses a layout for, and a Mac has a hardware one. Applied
+// through a modifier of our own rather than inline so the field above stays
+// platform-neutral, and so the string→enum mapping — the part that is genuinely
+// iOS-specific — is the only thing that has to disappear on macOS.
+//
+// Not a lost feature on the Mac: there is nothing for it to do there. The prop
+// keeps arriving from PHP and is ignored, which is what `keyboard` already means
+// on a platform with no software keyboard.
+
+private extension View {
+    /// Strip the platform's own text-field chrome, where it has any.
+    ///
+    /// The variant renderers wrapping this view draw the border, the fill and
+    /// the corner radius themselves — that is what makes an outlined field look
+    /// outlined and a bare one look bare. On iOS a plain `TextField` has no
+    /// chrome to begin with, so there is nothing to strip. AppKit's does: macOS
+    /// gives it a bezel and a focus ring, which land *inside* the renderer's
+    /// border and read as two nested boxes, one of them the wrong shape.
+    ///
+    /// `.plain` is not "less styled on macOS", it is the same starting point iOS
+    /// already gives — which is the only way one renderer can own its appearance
+    /// on both.
+    func nuiChromelessField() -> some View {
+        #if os(macOS)
+        return textFieldStyle(.plain)
+        #else
+        return self
+        #endif
+    }
+
+    func nuiKeyboardType(_ kind: String) -> some View {
+        #if canImport(UIKit)
+        return keyboardType(resolveKeyboardType(kind))
+        #else
+        return self
+        #endif
+    }
+}
+
+#if canImport(UIKit)
 /// Keyboard resolution — accepts string hints ("email", "number", etc.) that
 /// map to UIKeyboardType. Unknown/empty falls through to default.
 private func resolveKeyboardType(_ kind: String) -> UIKeyboardType {
@@ -206,3 +252,4 @@ private func resolveKeyboardType(_ kind: String) -> UIKeyboardType {
     default:               return .default
     }
 }
+#endif

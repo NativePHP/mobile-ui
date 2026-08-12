@@ -1,7 +1,11 @@
 import SwiftUI
-import UIKit
 import CoreGraphics
 import CoreText
+#if canImport(UIKit)
+import UIKit
+#else
+import AppKit
+#endif
 
 /// Resolves a custom-font token (a font file's basename, e.g. "Inter-Bold")
 /// to a usable SwiftUI `Font`. Fonts are bundled into the app's Resources by
@@ -54,21 +58,33 @@ enum NativeUIFontResolver {
     static func font(_ token: String, size: CGFloat, italic: Bool = false) -> Font? {
         guard let name = postScriptName(for: token) else { return nil }
 
+        #if canImport(UIKit)
         if italic, !supportsItalicTrait(name) {
             let matrix = CGAffineTransform(a: 1, b: 0, c: obliqueSkew, d: 1, tx: 0, ty: 0)
             let descriptor = UIFontDescriptor(name: name, matrix: matrix)
             return Font(UIFont(descriptor: descriptor, size: size))
         }
+        #endif
 
         return Font.custom(name, size: size)
     }
 
     /// Whether an italic request for this token needs a synthesized oblique
     /// (custom font resolves, but its family has no real italic face).
+    ///
+    /// Answered as "no" where there is no UIKit. The synthesis below is built on
+    /// UIKit font metrics, so claiming a synthetic oblique is needed would
+    /// promise a slant that `obliqueTransform` cannot then produce — an upright
+    /// glyph is the honest outcome and the same one SwiftUI's own `.italic()`
+    /// gives for a single-style font.
     static func needsSyntheticOblique(_ token: String) -> Bool {
+        #if canImport(UIKit)
         guard let name = postScriptName(for: token) else { return false }
 
         return !supportsItalicTrait(name)
+        #else
+        return false
+        #endif
     }
 
     /// View-space skew for a synthetic oblique on LEAF text: the Text keeps
@@ -79,7 +95,10 @@ enum NativeUIFontResolver {
     /// put and glyph tops lean right. On wrapped text later baselines sit
     /// lower and drift slightly left — the trade against the font-matrix
     /// path's hard clip at every line end.
+    /// Unreachable where `needsSyntheticOblique` is always false, so it returns
+    /// the transform that changes nothing rather than a differently-wrong slant.
     static func obliqueTransform(_ token: String, size: CGFloat) -> CGAffineTransform {
+        #if canImport(UIKit)
         let ascent: CGFloat = {
             if let name = postScriptName(for: token), let font = UIFont(name: name, size: size) {
                 return font.ascender
@@ -88,6 +107,9 @@ enum NativeUIFontResolver {
         }()
 
         return CGAffineTransform(a: 1, b: 0, c: -obliqueSkew, d: 1, tx: obliqueSkew * ascent, ty: 0)
+        #else
+        return .identity
+        #endif
     }
 
     /// Whether CoreText can produce a genuinely italic face for this
@@ -121,16 +143,35 @@ enum NativeUIFontResolver {
         let target: CGFloat = px > 0 ? CGFloat(px) : (mult > 0 ? CGFloat(mult) * fontSize : 0)
         guard target > 0 else { return 0 }
 
-        let natural: CGFloat = {
-            if !fontName.isEmpty,
-               let ps = postScriptName(for: fontName),
-               let uiFont = UIFont(name: ps, size: fontSize) {
-                return uiFont.lineHeight
+        return target - naturalLineHeight(fontName: fontName, size: fontSize)
+    }
+
+    /// The font's own line box height, which `.lineSpacing` adds on top of.
+    ///
+    /// UIKit exposes it directly. AppKit's `NSFont` has no `lineHeight` at all —
+    /// on the Mac that number belongs to the layout manager rather than the font
+    /// — so it is assembled from the three metrics UIKit derives it from, which
+    /// is the same arithmetic and the same answer.
+    private static func naturalLineHeight(fontName: String, size: CGFloat) -> CGFloat {
+        let resolved: String? = fontName.isEmpty ? nil : postScriptName(for: fontName)
+
+        #if canImport(UIKit)
+        if let resolved, let font = UIFont(name: resolved, size: size) {
+            return font.lineHeight
+        }
+
+        return UIFont.systemFont(ofSize: size).lineHeight
+        #else
+        let font: NSFont = {
+            if let resolved, let named = NSFont(name: resolved, size: size) {
+                return named
             }
-            return UIFont.systemFont(ofSize: fontSize).lineHeight
+
+            return NSFont.systemFont(ofSize: size)
         }()
 
-        return target - natural
+        return font.ascender - font.descender + font.leading
+        #endif
     }
 
     /// PostScript name for a bundled token, registering it on first use.

@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // MARK: - Theme Tokens
 
@@ -158,7 +160,16 @@ final class NativeUITheme: ObservableObject {
     /// this composes safely; bars pick it up on creation (theme lands at boot,
     /// before the first screen). Tab-bar labels are excluded — core's tabs
     /// renderer manages its own `UITabBarAppearance`.
+    ///
+    /// Nothing to do where there is no `UINavigationBar`. A Mac window's title
+    /// bar is drawn by AppKit with no equivalent appearance proxy, and the app's
+    /// own chrome there is menus and toolbars, which the desktop shell owns
+    /// rather than this package. So the tokens still apply to every element this
+    /// package draws; only the system chrome is left alone.
     private func applyChromeFont(_ family: String) {
+        #if !canImport(UIKit)
+        return
+        #else
         if family.isEmpty || family == "System" {
             UINavigationBar.appearance().titleTextAttributes = nil
             UINavigationBar.appearance().largeTitleTextAttributes = nil
@@ -173,6 +184,7 @@ final class NativeUITheme: ObservableObject {
         if let large = UIFont(name: psName, size: 34) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
         }
+        #endif
     }
 }
 

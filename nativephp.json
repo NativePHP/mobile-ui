@@ -496,6 +496,18 @@
             "pods": []
         }
     },
+    "macos": {
+        "min_version": 14.0,
+        "source_path": "resources/ios",
+        "sources": [
+            "NativeUITheme.swift",
+            "NativeUIFontResolver.swift",
+            "NativeUITextInputCore.swift",
+            "NativeUIOutlinedTextInputRenderer.swift",
+            "NativeUIFilledTextInputRenderer.swift",
+            "NativeUIBareTextInputRenderer.swift"
+        ]
+    },
     "hooks": {
         "copy_assets": "nativephp:native-ui:copy-fonts"
     }
