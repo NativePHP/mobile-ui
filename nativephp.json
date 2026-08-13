@@ -502,6 +502,7 @@
         "sources": [
             "NativeUITheme.swift",
             "NativeUIThemeFunctions.swift",
+            "NativeUITransitionFunctions.swift",
             "NativeUIFontResolver.swift",
             "NativeUIFillWidthHelper.swift",
             "NativeUITextInputCore.swift",
