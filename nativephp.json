@@ -535,7 +535,8 @@
             "NativeUITabRowRenderer.swift",
             "NativeUITextRenderer.swift",
             "NativeUIToggleRenderer.swift",
-            "NativeUIVirtualListRenderer.swift"
+            "NativeUIVirtualListRenderer.swift",
+            "NativeUIWebviewRendererMac.swift"
         ]
     },
     "hooks": {
