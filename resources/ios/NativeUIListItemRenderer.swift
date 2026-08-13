@@ -275,6 +275,7 @@ struct NativeUIListItemRenderer: View {
                         .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
                         .nuiMinTapTarget()
                 }
+                .nuiCompactMenu()
                 .accessibilityLabel(effectiveTrailingA11y)
             } else {
                 Button(action: {

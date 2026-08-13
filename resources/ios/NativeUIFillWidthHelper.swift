@@ -42,3 +42,34 @@ private struct FillWidthIfRequestedModifier: ViewModifier {
         }
     }
 }
+
+/// A `Menu` that is an *affordance* rather than a control — its label is
+/// already the whole of what the user should see.
+///
+/// The two platforms disagree about what a bare `Menu` looks like, and the
+/// disagreement is not cosmetic. On iOS a `Menu` is invisible until tapped: the
+/// label is drawn exactly as given. On macOS the default menu style is a
+/// **pull-down button** — a bordered box with a chevron — because that is what a
+/// menu in the content area usually is on a Mac. Applied to a list row's
+/// trailing ellipsis, that turned every row of `/explore/menus` into a row with
+/// a full pop-up button sitting in it.
+///
+/// So macOS gets the borderless style and no indicator, which draws the label
+/// and nothing else, and iOS is left completely alone. This is only for menus
+/// whose label carries its own affordance (an ellipsis glyph, a styled
+/// pressable). A menu that should look like a Mac pull-down button — one built
+/// from a `<button :menu>` — must NOT use this: it wants the chevron.
+extension View {
+    @ViewBuilder
+    func nuiCompactMenu() -> some View {
+        #if os(macOS)
+        // `.fixedSize()` as well as the style: a macOS `Menu` is a control, and
+        // a control takes all the width it is offered. In a list row's trailing
+        // slot that is whatever the headline left over, which both moves the
+        // glyph away from the end of the row and widens the pop-up to match.
+        self.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        #else
+        self
+        #endif
+    }
+}
