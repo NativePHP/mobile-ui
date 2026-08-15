@@ -141,7 +141,7 @@ struct NativeUITextRenderer: View {
             .frame(maxWidth: .infinity, alignment: frameAlignment(from: p.getInt("text_align")))
             .fixedSize(horizontal: false, vertical: true)
             // Taps on pressable runs arrive as our custom-scheme link;
-            // anything else keeps the system's URL behaviour.
+            // every other URL keeps the system's own behaviour.
             .environment(\.openURL, OpenURLAction { url in
                 guard url.scheme == "nativephp-press" else { return .systemAction }
                 let parts = url.pathComponents.filter { $0 != "/" }
@@ -178,8 +178,8 @@ struct NativeUITextRenderer: View {
         ctx.letterSpacingEm = p.getFloat("letter_spacing", default: inherited.letterSpacingEm)
         ctx.textTransform = p.getInt("text_transform", default: inherited.textTransform)
 
-        // The innermost @press wins for this run and everything under it,
-        // mirroring the Android renderer's link-wrapped subtree.
+        // The innermost @press wins for this run and its whole subtree,
+        // matching the flat per-span links the Android renderer emits.
         if node.onPress != 0 {
             ctx.pressCallbackId = node.onPress
             ctx.pressNodeId = node.id
@@ -247,9 +247,9 @@ struct NativeUITextRenderer: View {
         }
         if ctx.letterSpacingEm != 0 { run.kern = CGFloat(ctx.letterSpacingEm) * CGFloat(ctx.fontSize) }
 
-        // A pressable run rides a custom-scheme link; composedBody's
-        // OpenURLAction intercepts it and fires the ordinary press
-        // event, so PHP sees the same dispatch a standalone tap sends.
+        // A pressable run rides a custom-scheme link that composedBody's
+        // OpenURLAction intercepts and forwards as an ordinary press,
+        // so PHP sees the same dispatch a standalone tap sends.
         if ctx.pressCallbackId != 0 {
             run.link = URL(string: "nativephp-press://run/\(ctx.pressCallbackId)/\(ctx.pressNodeId)")
         }
