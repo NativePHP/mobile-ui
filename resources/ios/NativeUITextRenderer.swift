@@ -105,13 +105,15 @@ struct NativeUITextRenderer: View {
         var italic: Bool
         var letterSpacingEm: Float
         var textTransform: Int
+        var pressCallbackId: Int
+        var pressNodeId: Int
 
         /// Root defaults — mirror the leaf path (16pt, regular, black, no dark
         /// override, no custom font, no decoration/kerning/transform).
         static let root = RunContext(
             fontSize: 16, fontWeightInt: 0, fontFamilyInt: 0, fontName: "",
             colorArgb: 0xFF000000, darkColorArgb: 0, italic: false,
-            letterSpacingEm: 0, textTransform: 0
+            letterSpacingEm: 0, textTransform: 0, pressCallbackId: 0, pressNodeId: 0
         )
     }
 
@@ -138,6 +140,16 @@ struct NativeUITextRenderer: View {
             // string wraps at the container width and grows vertically.
             .frame(maxWidth: .infinity, alignment: frameAlignment(from: p.getInt("text_align")))
             .fixedSize(horizontal: false, vertical: true)
+            // Taps on pressable runs arrive as our custom-scheme link;
+            // anything else keeps the system's URL behaviour.
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == "nativephp-press" else { return .systemAction }
+                let parts = url.pathComponents.filter { $0 != "/" }
+                if parts.count == 2, let cb = Int(parts[0]), let nodeId = Int(parts[1]), cb != 0 {
+                    NativeElementBridge.sendPressEvent(cb, nodeId: nodeId)
+                }
+                return .handled
+            })
     }
 
     /// Build the composed attributed string outside the `@ViewBuilder` — the
@@ -165,6 +177,13 @@ struct NativeUITextRenderer: View {
         ctx.italic = p.getInt("font_style", default: inherited.italic ? 1 : 0) == 1
         ctx.letterSpacingEm = p.getFloat("letter_spacing", default: inherited.letterSpacingEm)
         ctx.textTransform = p.getInt("text_transform", default: inherited.textTransform)
+
+        // The innermost @press wins for this run and everything under it,
+        // mirroring the Android renderer's link-wrapped subtree.
+        if node.onPress != 0 {
+            ctx.pressCallbackId = node.onPress
+            ctx.pressNodeId = node.id
+        }
 
         let ownText = p.getString("text")
         if !ownText.isEmpty {
@@ -227,6 +246,13 @@ struct NativeUITextRenderer: View {
             if node.props.getInt("line_through") == 1 { run.strikethroughStyle = .single }
         }
         if ctx.letterSpacingEm != 0 { run.kern = CGFloat(ctx.letterSpacingEm) * CGFloat(ctx.fontSize) }
+
+        // A pressable run rides a custom-scheme link; composedBody's
+        // OpenURLAction intercepts it and fires the ordinary press
+        // event, so PHP sees the same dispatch a standalone tap sends.
+        if ctx.pressCallbackId != 0 {
+            run.link = URL(string: "nativephp-press://run/\(ctx.pressCallbackId)/\(ctx.pressNodeId)")
+        }
 
         return run
     }
