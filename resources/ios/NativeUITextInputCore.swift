@@ -92,7 +92,7 @@ struct NativeUITextInputCore: View {
         // text without touching accessibility. `nil` falls back to the
         // platform's default placeholder styling — unchanged from before
         // this prop existed.
-        let styledPrompt: Text? = placeholderColor.map { Text(placeholder).foregroundColor($0) }
+        let styledPrompt: Text? = placeholderColor.map { Text(placeholder).foregroundStyle($0) }
 
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
@@ -105,6 +105,11 @@ struct NativeUITextInputCore: View {
                 SecureField(placeholder, text: $text, prompt: styledPrompt)
                     .foregroundColor(contentColor)
                     .focused($isFocused)
+                    // `prompt` (when non-nil) turns `placeholder` into this
+                    // field's label — visibly rendered by containers like
+                    // `List`/`Form`. `.labelsHidden()` keeps it invisible
+                    // (a no-op when `prompt == nil`, i.e. outlined/filled).
+                    .labelsHidden()
             } else if multiline {
                 // A vertical-axis TextField reports a ~0 intrinsic width when
                 // empty and won't expand to fill an ancestor's `maxWidth:
@@ -124,22 +129,26 @@ struct NativeUITextInputCore: View {
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
+                        .labelsHidden()
                 } else {
                     TextField(placeholder, text: $text, prompt: styledPrompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
+                        .labelsHidden()
                 }
             } else {
                 if selectionEnabled {
                     TextField(placeholder, text: $text, selection: $selection, prompt: styledPrompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
+                        .labelsHidden()
                 } else {
                     TextField(placeholder, text: $text, prompt: styledPrompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
+                        .labelsHidden()
                 }
             }
         }

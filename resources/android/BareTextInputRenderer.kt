@@ -74,12 +74,19 @@ object BareTextInputRenderer {
         // so it's a plain sibling attribute, same shape as `Icon`'s
         // `dark-color`) wins outright; otherwise fall back to the `color`
         // override faded ~60% so a dark-text input on a light pill still
-        // gets a readable placeholder in the same family.
+        // gets a readable placeholder in the same family. The two explicit
+        // overrides get the same disabled fade as `displayedTextColor`
+        // above, matching iOS's field-wide `.opacity(0.6)` when disabled.
         val darkPlaceholderOverrideArgb = if (isDark) node.props.getColor("dark_placeholder_color", 0) else 0
         val placeholderOverrideArgb = node.props.getColor("placeholder_color", 0)
+        val disabledFade = props.disabled
         val placeholderColor = when {
-            darkPlaceholderOverrideArgb != 0 -> argbToComposeColor(darkPlaceholderOverrideArgb)
-            placeholderOverrideArgb != 0 -> argbToComposeColor(placeholderOverrideArgb)
+            darkPlaceholderOverrideArgb != 0 -> argbToComposeColor(darkPlaceholderOverrideArgb).let {
+                if (disabledFade) it.copy(alpha = it.alpha * 0.6f) else it
+            }
+            placeholderOverrideArgb != 0 -> argbToComposeColor(placeholderOverrideArgb).let {
+                if (disabledFade) it.copy(alpha = it.alpha * 0.6f) else it
+            }
             colorArgb != 0 || darkOverrideArgb != 0 -> effectiveTextColor.copy(alpha = 0.6f)
             else -> theme.onSurfaceVariant
         }
