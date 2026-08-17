@@ -213,6 +213,15 @@ struct NativeUITextInputCore: View {
             scheduleSelectionEmit(text: text, cb: onSelectionCb, debounceMs: selDebounceMs)
         }
         .onChange(of: isFocused) { _, focused in
+            // Lets interactive taps elsewhere honor this field's
+            // keep-focus-on-submit, and gives press dispatch a
+            // flush hook so a tap-committed autocorrection's
+            // change reaches PHP first (mobile-air #335).
+            KeyboardFocusPolicy.focusedFieldKeepsFocus = focused && keepFocus
+            KeyboardFocusPolicy.focusedFieldActive = focused
+            KeyboardFocusPolicy.flushFocusedField = focused
+                ? { flushPending(onChangeCb: onChangeCb) }
+                : nil
             // On blur, flush any pending change — covers both `blur` mode
             // (never dispatched mid-typing) and `debounce` mode (in-flight
             // timer that should commit immediately rather than race with
