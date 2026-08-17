@@ -18,9 +18,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -79,6 +81,7 @@ object BareTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
+        val focusManager = LocalFocusManager.current
 
         // Caret / selection reporter — independent of the direct change/submit
         // dispatchers; no-op unless `on_selection_change` is wired and the
@@ -123,11 +126,15 @@ object BareTextInputRenderer {
             // layout mode) still wins since it comes later in the chain.
             // onFocusChanged is Bare's blur hook (no InteractionSource here):
             // flush the pending selection on the focused → unfocused edge.
+            // The KeyboardFocusPolicy flag lets interactive taps elsewhere
+            // honor this field's keep-focus-on-submit (mobile-air #335).
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
+                    KeyboardFocusPolicy.focusedFieldKeepsFocus =
+                        state.isFocused && props.keepFocusOnSubmit
                 }
                 .then(modifier),
             enabled = !props.disabled,
@@ -160,6 +167,12 @@ object BareTextInputRenderer {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 props.dispatchSubmit?.invoke(value.text)
+                // Supplying KeyboardActions replaces Compose's default
+                // hide-on-Done, so dismissal is restored here to match
+                // the iOS renderer and the documented default (#335).
+                if (!props.keepFocusOnSubmit) {
+                    focusManager.clearFocus()
+                }
             })
         )
     }
