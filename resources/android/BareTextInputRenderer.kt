@@ -146,6 +146,7 @@ object BareTextInputRenderer {
                 }
             ),
             singleLine = !props.multiline,
+            visualTransformation = props.visualTransformation,
             decorationBox = { innerTextField ->
                 if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
                     Text(
