@@ -1,15 +1,14 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
+import com.nativephp.mobile.ui.nativerender.nodeShape
 
 object ImageRenderer {
     @Composable
@@ -21,10 +20,13 @@ object ImageRenderer {
         val tintArgb = p.getColor("tint_color", 0)
         val radius = node.style?.borderRadius ?: 0f
 
-        // Images need explicit clip for rounded corners (nodeStyle doesn't clip globally)
-        val imgModifier = if (radius > 0f) {
-            modifier.clip(RoundedCornerShape(radius.dp))
-        } else modifier
+        // Images need an explicit clip for rounded corners: nodeStyle shapes the
+        // background and border but never clips content. `nodeShape` is the same
+        // helper containers use, so per-corner classes (`rounded-br-none`) land
+        // on an image exactly as they do on a column. A node carrying only
+        // per-corner radii has no uniform radius, hence the props check.
+        val hasCorners = p.has("radius_tl") || radius > 0f
+        val imgModifier = if (hasCorners) modifier.clip(nodeShape(radius, p)) else modifier
 
         if (src.isNotEmpty()) {
             AsyncImage(
