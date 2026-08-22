@@ -17,19 +17,20 @@ import SwiftUI
 // that a page embedded in a Mac app is sandboxed exactly as tightly as the same
 // markup is on a phone.
 //
-// ## What is not here
+// ## `php` mode
 //
-// `php` mode — the enriched form, where the webview is served by the app's own
-// embedded PHP runtime over the `php://` scheme with a shared Laravel session and
-// the `window.Native` bridge. On iOS that is four shell-owned types
-// (`WebviewPHPRuntime`, `PHPSchemeHandler`, `WebView`, `SharedWebView`), one of
-// which spins up a dedicated interpreter thread per webview. The desktop shell
-// has no equivalent yet: its single embedded runtime is parked in the surface
-// coordinator's event loop and cannot answer a scheme handler's requests while it
-// is waiting there.
+// The enriched form, where the webview is served by the app's own embedded PHP
+// runtime over the `php://` scheme, sharing the app's Laravel session. It works
+// here now, on the same principle as iOS: the element runtime's thread is parked
+// inside `nativephp_element_wait_event()` for the app's whole life and can never
+// answer a page request, so the webview gets an interpreter of its own on a
+// thread of its own. The two shell types that do it are `WebviewPHPRuntime` (the
+// interpreter) and `WebviewSchemeHandler` (the routing), and the long comments
+// on both are where the reasoning lives.
 //
-// So `php` mode says so, on the screen, rather than loading nothing and leaving
-// the developer to guess whether the attribute is wrong or the page is blank.
+// What this does not have, and iOS does, is the `window.Native` bridge inside
+// the page — that is a mobile shell type with no desktop counterpart yet. A page
+// that checks for `window.Native` will find nothing.
 
 /// Locked-down `WKWebView` primitive.
 ///
@@ -46,7 +47,7 @@ struct NativeUIWebviewRenderer: View {
     var body: some View {
         let content = Group {
             if node.props.getBool("php", default: false) {
-                UnsupportedPHPWebview()
+                MacPHPWebViewContainer(node: node)
             } else {
                 MacWebViewContainer(node: node)
             }
@@ -63,29 +64,180 @@ struct NativeUIWebviewRenderer: View {
     }
 }
 
-/// What `php` mode draws here, until the desktop shell can serve `php://`.
+/// Enriched-mode container: the app's own Laravel, in a webview.
 ///
-/// A message rather than an empty rectangle. The failure this replaces is the
-/// worst kind: the element lays out correctly, so the screen looks finished and
-/// simply has nothing in the frame, and there is no way to tell that from a page
-/// that returned a blank body.
-private struct UnsupportedPHPWebview: View {
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "rectangle.on.rectangle.slash")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text("`php` mode is iOS-only for now")
-                .font(.system(size: 13, weight: .semibold))
-            Text("A `php` webview is served by the app's own embedded runtime over php://.\nThe desktop shell has one runtime and it is busy rendering this window.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+/// Every request the page makes — the page itself, its stylesheets, its
+/// `fetch()` calls — is answered by `WebviewSchemeHandler` out of an interpreter
+/// this view owns, and stops existing when the view does. Two `php` webviews on
+/// screen are two interpreters; neither is the element runtime, and neither can
+/// block it.
+///
+/// `src` is an app route path (`/dashboard`), not a URL. Anything that doesn't
+/// start with `/` is treated as the app root, which is the same rule iOS uses.
+private struct MacPHPWebViewContainer: NSViewRepresentable {
+    let node: NativeUINode
+
+    /// Shared so that two `php` webviews are one browsing context as far as
+    /// caching goes. Non-persistent because the state that actually matters —
+    /// the session — lives in `WebviewCookieJar` on the native side; WebKit
+    /// gives a custom scheme no cookie handling and no local storage anyway.
+    private static let dataStore = WKWebsiteDataStore.nonPersistent()
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(navigatedCallbackId: node.props.getCallbackId("on_navigated"),
+                    nodeId: node.id)
+    }
+
+    /// The interpreter goes when the view goes. A `php` webview costs a thread
+    /// and a booted Laravel; leaving one running behind a screen the user
+    /// navigated away from is a leak with a heartbeat.
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        coordinator.runtime?.release()
+        coordinator.runtime = nil
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = Self.dataStore
+
+        // On, and not an opt-in like the sandboxed container's. This is the
+        // app's own markup being rendered by the app's own runtime; a Blade view
+        // that can't run its own script is not the thing the developer asked
+        // for.
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = prefs
+
+        guard let runtime = WebviewPHPRuntime() else {
+            // No bootstrap in the bundle — nothing can serve this. Return an
+            // empty webview showing why, rather than a blank rectangle.
+            let webView = WKWebView(frame: .zero, configuration: config)
+            webView.loadHTMLString(Self.unavailableHTML, baseURL: nil)
+            return webView
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            NSLog("NativeUIWebviewRenderer: `php` mode is not implemented on macOS — the element rendered an explanatory panel instead.")
+
+        context.coordinator.runtime = runtime
+        config.setURLSchemeHandler(WebviewSchemeHandler(runtime: runtime),
+                                   forURLScheme: WebviewSchemeHandler.scheme)
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsBackForwardNavigationGestures = false
+        webView.allowsLinkPreview = false
+
+        let path = startPath()
+        context.coordinator.lastPath = path
+        load(path, into: webView)
+
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        let path = startPath()
+
+        if context.coordinator.lastPath != path {
+            context.coordinator.lastPath = path
+            load(path, into: webView)
+        }
+
+        context.coordinator.navigatedCallbackId = node.props.getCallbackId("on_navigated")
+        context.coordinator.nodeId = node.id
+    }
+
+    private func startPath() -> String {
+        let src = node.props.getString("src")
+
+        return src.hasPrefix("/") ? src : "/"
+    }
+
+    private func load(_ path: String, into webView: WKWebView) {
+        let base = "\(WebviewSchemeHandler.scheme)://\(WebviewSchemeHandler.host)"
+
+        guard let url = URL(string: base + path) else {
+            NSLog("NativeUIWebviewRenderer: php mode — unloadable path '\(path)'")
+            return
+        }
+
+        webView.load(URLRequest(url: url))
+    }
+
+    private static let unavailableHTML = """
+    <!doctype html><meta charset="utf-8">
+    <body style="font:13px -apple-system,system-ui;padding:24px;color:#444">
+    <p><strong>This webview has no PHP runtime.</strong></p>
+    <p>The shell could not find <code>Resources/php/webview.php</code> in the app bundle,
+    so there is nothing to serve <code>php://</code> requests with.</p>
+    </body>
+    """
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        var navigatedCallbackId: Int
+        var nodeId: Int
+        var lastPath: String = ""
+        var runtime: WebviewPHPRuntime?
+
+        init(navigatedCallbackId: Int, nodeId: Int) {
+            self.navigatedCallbackId = navigatedCallbackId
+            self.nodeId = nodeId
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            let isTopFrame = navigationAction.targetFrame?.isMainFrame ?? true
+
+            guard isTopFrame else {
+                decisionHandler(.allow)
+                return
+            }
+
+            switch url.scheme?.lowercased() {
+            case WebviewSchemeHandler.scheme, "about", "data":
+                decisionHandler(.allow)
+            default:
+                // A link out of the app goes to the user's browser, where a
+                // link out of an app belongs. Same rule the classic webview
+                // has always followed.
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+            }
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            guard navigatedCallbackId != 0,
+                  let url = webView.url?.absoluteString else { return }
+
+            NativeElementBridge.sendTextChangeEvent(navigatedCallbackId, nodeId: nodeId, text: url)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            NSLog("NativeUIWebviewRenderer: php mode — provisional load failed: \(error.localizedDescription)")
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            NSLog("NativeUIWebviewRenderer: php mode — load failed: \(error.localizedDescription)")
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            NSLog("NativeUIWebviewRenderer: php mode — content process terminated, reloading")
+            webView.reload()
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            nil
         }
     }
 }
