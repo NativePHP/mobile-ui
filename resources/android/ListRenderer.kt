@@ -16,9 +16,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.foundation.clickable
@@ -110,6 +112,12 @@ object ListRenderer {
                             val footer = child.props.getString("footer", "")
                             if (header.isNotEmpty()) {
                                 stickyHeader(key = "h_${child.id}") { SectionHeader(header) }
+                            } else if (grouped) {
+                                // A headerless grouped section still needs the gap a
+                                // header's top padding would have given it — otherwise
+                                // its card butts against the previous section's card
+                                // (iOS `.insetGrouped` always spaces sections).
+                                item(key = "s_${child.id}") { SectionGap() }
                             }
                             child.children.forEachIndexed { i, row ->
                                 item(key = row.id) {
@@ -199,6 +207,9 @@ private fun ListRow(child: NativeUINode) {
     }
 }
 
+/** Space above a section: a header's top padding, or a bare gap without one. */
+private val SECTION_TOP_GAP = 20.dp
+
 /**
  * A section's sticky header — a small uppercase label that pins to the
  * top while the section's rows scroll beneath it (mirroring SwiftUI's
@@ -211,7 +222,7 @@ private fun SectionHeader(text: String) {
         Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp)
+            .padding(start = 16.dp, end = 16.dp, top = SECTION_TOP_GAP, bottom = 6.dp)
     ) {
         Text(
             text = text.uppercase(),
@@ -222,6 +233,12 @@ private fun SectionHeader(text: String) {
             letterSpacing = 0.5.sp,
         )
     }
+}
+
+/** The breathing room above a grouped section that has no header to provide it. */
+@Composable
+private fun SectionGap() {
+    Spacer(Modifier.fillMaxWidth().height(SECTION_TOP_GAP))
 }
 
 /**
