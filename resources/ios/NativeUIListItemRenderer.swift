@@ -57,11 +57,17 @@ struct NativeUIListItemRenderer: View {
         let trailingValue = p.getString("trailing_value")
         let trailingIcon = p.getString("trailing_icon")
         let trailingTextColor = p.getColor("trailing_text_color", default: 0)
+        // Opt-in cross-platform trailing props. Unset keeps this platform's
+        // default (centred slots, 17pt trailing text); set, both platforms
+        // draw the same thing — `top` mirrors Material's three-line rows,
+        // `label` its small trailing label.
+        let trailingAlign = p.getString("trailing_align", default: "")
+        let trailingTextStyle = p.getString("trailing_text_style", default: "")
         let trailingIconColor = p.getColor("trailing_icon_color", default: 0)
         let trailingChecked = p.getBool("trailing_checked")
         let onTrailingChangeCb = p.getCallbackId("on_trailing_change")
 
-        HStack(spacing: 16) {
+        HStack(alignment: trailingAlign == "top" ? .top : .center, spacing: 16) {
             // Leading content
             buildLeadingContent(
                 type: leadingType.isEmpty ? (leadingIcon.isEmpty ? "" : "icon") : leadingType,
@@ -106,6 +112,7 @@ struct NativeUIListItemRenderer: View {
                     value: trailingValue.isEmpty ? trailingIcon : trailingValue,
                     iconColor: trailingIconColor,
                     textColor: trailingTextColor,
+                    textStyle: trailingTextStyle,
                     checked: trailingChecked,
                     changeCb: onTrailingChangeCb
                 )
@@ -240,15 +247,17 @@ struct NativeUIListItemRenderer: View {
     }
 
     @ViewBuilder
-    private func buildTrailingContent(type: String, value: String, iconColor: Int, textColor: Int, checked: Bool = false, changeCb: Int = 0) -> some View {
+    private func buildTrailingContent(type: String, value: String, iconColor: Int, textColor: Int, textStyle: String = "", checked: Bool = false, changeCb: Int = 0) -> some View {
         switch type {
         case "icon":
             Image(systemName: getIconForName(value))
                 .frame(width: 24, height: 24)
                 .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
         case "text":
+            // `label` mirrors Material's small trailing label; default and
+            // `headline` keep the headline-sized text iOS has always drawn.
             Text(value)
-                .nuiScaledFont(size: 17)
+                .nuiScaledFont(size: textStyle == "label" ? 13 : 17)
                 .foregroundColor(textColor != 0 ? Color(argb: textColor) : .secondary)
         case "icon_button":
             // Spoken name for the icon-only trailing button: explicit
