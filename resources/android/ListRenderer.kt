@@ -110,8 +110,15 @@ object ListRenderer {
                         if (child.type == "list_section") {
                             val header = child.props.getString("header", "")
                             val footer = child.props.getString("footer", "")
-                            if (header.isNotEmpty()) {
-                                stickyHeader(key = "h_${child.id}") { SectionHeader(header) }
+                            if (header.isNotEmpty() && grouped) {
+                                // iOS `.insetGrouped` headers scroll with their
+                                // section and paint nothing; only plain-style
+                                // headers pin. A pinned, opaque header here
+                                // showed as a coloured band on any screen whose
+                                // background differs from the theme's.
+                                item(key = "h_${child.id}") { SectionHeader(header, pinned = false) }
+                            } else if (header.isNotEmpty()) {
+                                stickyHeader(key = "h_${child.id}") { SectionHeader(header, pinned = true) }
                             } else if (grouped) {
                                 // A headerless grouped section still needs the gap a
                                 // header's top padding would have given it — otherwise
@@ -211,17 +218,18 @@ private fun ListRow(child: NativeUINode) {
 private val SECTION_TOP_GAP = 20.dp
 
 /**
- * A section's sticky header — a small uppercase label that pins to the
- * top while the section's rows scroll beneath it (mirroring SwiftUI's
- * sticky `Section` header). The opaque background keeps rows from
- * showing through while pinned.
+ * A section header — a small uppercase label. In a plain list it pins to
+ * the top while the section's rows scroll beneath it (mirroring SwiftUI's
+ * sticky plain-style header), so it gets an opaque background to keep rows
+ * from showing through. In a grouped list it scrolls with its section and
+ * paints nothing, as on iOS.
  */
 @Composable
-private fun SectionHeader(text: String) {
+private fun SectionHeader(text: String, pinned: Boolean) {
     Box(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
+            .then(if (pinned) Modifier.background(MaterialTheme.colorScheme.background) else Modifier)
             .padding(start = 16.dp, end = 16.dp, top = SECTION_TOP_GAP, bottom = 6.dp)
     ) {
         Text(
