@@ -16,7 +16,11 @@ object ImageRenderer {
     fun Render(node: NativeUINode, modifier: Modifier) {
         val p = node.props
         val src = p.getString("src")
-        val fit = p.getInt("fit")
+        // No `fit` prop means no `object-*` class. Default to Fit (1) so
+        // an unclassed image scales into its frame like iOS does, instead
+        // of ContentScale.None painting the bitmap at intrinsic size and
+        // center-cropping it to the frame.
+        val fit = p.getInt("fit", 1)
         val alt = p.getString("alt")
         val tintArgb = p.getColor("tint_color", 0)
         val radius = node.style?.borderRadius ?: 0f
