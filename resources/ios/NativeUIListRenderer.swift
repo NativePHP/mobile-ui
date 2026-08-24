@@ -91,12 +91,12 @@ struct NativeUIListRenderer: View {
             // the supported route (iOS 16+).
             .scrollIndicators(showsIndicators ? .automatic : .hidden)
             .scrollDismissesKeyboard(.interactively)
-            .refreshable {
-                if onRefreshCb != 0 {
-                    NativeElementBridge.sendPressEvent(onRefreshCb, nodeId: nodeId)
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                }
-            }
+            // Attach the refresh control only when the list declares an
+            // on-refresh handler — an unconditional .refreshable installs
+            // pull-to-refresh (spinner and all) on every list, including
+            // static settings/forms where it does nothing. Android's renderer
+            // already gates its PullToRefreshBox the same way.
+            .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId))
         }
     }
 
@@ -229,6 +229,24 @@ private struct ListBackgroundModifier: ViewModifier {
             content
                 .scrollContentBackground(.hidden)
                 .background(Color(argb: argb))
+        } else {
+            content
+        }
+    }
+}
+
+/// Conditionally attaches pull-to-refresh: only lists with an `on_refresh`
+/// callback get the control; every other list scrolls plainly.
+private struct ListRefreshModifier: ViewModifier {
+    let onRefreshCb: Int
+    let nodeId: Int
+
+    func body(content: Content) -> some View {
+        if onRefreshCb != 0 {
+            content.refreshable {
+                NativeElementBridge.sendPressEvent(onRefreshCb, nodeId: nodeId)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         } else {
             content
         }
