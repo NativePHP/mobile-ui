@@ -296,7 +296,10 @@ struct NativeUIListItemRenderer: View {
                 .accessibilityLabel(effectiveTrailingA11y)
             }
         case "switch":
-            EmptyView() // Switch requires state management - handled at a higher level
+            // Real Toggle with local state + echo prevention (same pattern as
+            // NativeUIToggleRenderer). Android has always rendered a Material
+            // Switch for this trailing type; this brings iOS to parity.
+            ListItemTrailingSwitch(node: node, serverValue: checked, changeCb: changeCb)
         case "checkbox":
             selectionControl(
                 glyph: checked ? "checkmark.square.fill" : "square",
@@ -333,5 +336,54 @@ private func listItemMenuItem(_ item: NativeUINode) -> some View {
             }
         }
         .tint(isDestructive ? .red : nil)
+    }
+}
+
+/// Trailing switch for `trailingSwitch()` rows. Holds its own on/off state so
+/// the thumb animates instantly on tap, syncs from the server value with the
+/// same echo-prevention as `NativeUIToggleRenderer`, and reports changes over
+/// the row's `on_trailing_change` callback (bool payload — identical to what
+/// the Android renderer has always sent).
+private struct ListItemTrailingSwitch: View {
+    let node: NativeUINode
+    let serverValue: Bool
+    let changeCb: Int
+
+    @ObservedObject private var themeStore = NativeUITheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var isOn: Bool = false
+    @State private var lastSentValue: Bool = false
+    @State private var initialized: Bool = false
+
+    var body: some View {
+        let theme = themeStore.resolve(for: colorScheme)
+
+        Toggle("", isOn: $isOn)
+            .labelsHidden()
+            .tint(theme.primary)
+            .disabled(node.props.getBool("disabled") || changeCb == 0)
+            .onAppear {
+                if !initialized {
+                    isOn = serverValue
+                    lastSentValue = serverValue
+                    initialized = true
+                }
+            }
+            .onChange(of: serverValue) { _, new in
+                // Ignore server pushes that echo our last commit; accept
+                // genuine programmatic updates.
+                if new != lastSentValue {
+                    isOn = new
+                    lastSentValue = new
+                }
+            }
+            .onChange(of: isOn) { _, new in
+                guard new != lastSentValue else { return }
+                lastSentValue = new
+                if changeCb != 0 {
+                    NativeUIBridge.sendToggleChangeEvent(changeCb, nodeId: node.id, value: new)
+                }
+            }
     }
 }
