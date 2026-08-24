@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUINode
@@ -169,6 +170,14 @@ object OutlinedTextInputRenderer {
                 // target field. A missing target is a no-op.
                 if (props.nextFocus.isNotEmpty()) {
                     NativeUIFocusRegistry.request(props.nextFocus)
+                } else {
+                    // Consuming the IME action suppresses its platform
+                    // default, so Done/Go/Send/Search left the keyboard up.
+                    // Restore it — close the keyboard like the platform (and
+                    // iOS's return key) does. Next keeps the keyboard: the
+                    // chain moved it, or the target is gone and there is
+                    // nothing sensible to do.
+                    defaultKeyboardAction(ImeAction.Done)
                 }
             }),
             textStyle = TextStyle(fontSize = textSize, color = theme.onSurface, fontFamily = customFontFamily, lineHeight = lineHeight),
