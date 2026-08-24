@@ -102,6 +102,9 @@ abstract class BaseTextInput extends Element
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
         }
+        if (! empty($attrs['autofocus'])) {
+            $this->autofocus();
+        }
         if (isset($attrs['submit-label']) || isset($attrs['submitLabel'])) {
             $this->submitLabel((string) ($attrs['submit-label'] ?? $attrs['submitLabel']));
         }
@@ -386,6 +389,23 @@ abstract class BaseTextInput extends Element
      *
      * Blade: `next-focus` (or `nextFocus`).
      */
+    /**
+     * Focus this input (and raise the keyboard) when it first appears —
+     * the opening field of a form the user came here to fill. Fires once
+     * per appearance, only on mount: a re-render that moves the attribute
+     * to an already-mounted field never steals focus mid-edit.
+     *
+     * Blade: `autofocus` / `:autofocus="$bool"`.
+     */
+    public function autofocus(bool $value = true): static
+    {
+        if ($value) {
+            $this->inputProps['autofocus'] = true;
+        }
+
+        return $this;
+    }
+
     public function nextFocus(string $ref): static
     {
         $ref = trim($ref);

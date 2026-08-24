@@ -81,7 +81,7 @@ object BareTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
-        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
 
         // Caret / selection reporter — independent of the direct change/submit
         // dispatchers; no-op unless `on_selection_change` is wired and the

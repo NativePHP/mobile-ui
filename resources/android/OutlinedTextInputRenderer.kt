@@ -93,7 +93,7 @@ object OutlinedTextInputRenderer {
         // modes. Passing our own source also means we don't pay for M3's
         // default ripple-focus-hover machinery elsewhere.
         val interactionSource = remember { MutableInteractionSource() }
-        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->

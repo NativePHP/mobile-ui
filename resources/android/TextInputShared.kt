@@ -4,6 +4,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -59,6 +60,7 @@ internal data class TextInputProps(
     val submitLabel: String,
     val focusRef: String,
     val nextFocus: String,
+    val autofocus: Boolean,
     val disabled: Boolean,
     val readOnly: Boolean,
     val isError: Boolean,
@@ -126,6 +128,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         submitLabel  = p.getString("submit_label"),
         focusRef     = p.getString("focus_ref"),
         nextFocus    = p.getString("next_focus"),
+        autofocus    = p.getBool("autofocus"),
         disabled     = p.getBool("disabled"),
         readOnly     = p.getBool("read_only"),
         isError      = p.getBool("is_error"),
@@ -316,7 +319,7 @@ internal object NativeUIFocusRegistry {
  * plain, unregistered requester.
  */
 @Composable
-internal fun rememberRegisteredFocusRequester(focusRef: String): FocusRequester {
+internal fun rememberRegisteredFocusRequester(focusRef: String, autofocus: Boolean = false): FocusRequester {
     val requester = remember { FocusRequester() }
     DisposableEffect(focusRef) {
         if (focusRef.isNotEmpty()) {
@@ -326,6 +329,17 @@ internal fun rememberRegisteredFocusRequester(focusRef: String): FocusRequester 
             if (focusRef.isNotEmpty()) {
                 NativeUIFocusRegistry.unregister(focusRef, requester)
             }
+        }
+    }
+    // `autofocus`: focus (and raise the IME on) the field the user came to
+    // fill, once per composition — a re-render that moves the attribute to
+    // an already-composed field never steals focus mid-edit. The short
+    // delay lets the host (screen push, bottom sheet) finish laying out;
+    // requesting focus on an unplaced node is silently dropped.
+    if (autofocus) {
+        LaunchedEffect(Unit) {
+            delay(200)
+            runCatching { requester.requestFocus() }
         }
     }
     return requester

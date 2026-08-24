@@ -30,12 +30,11 @@ struct NativeUIBottomSheetRenderer: View {
                     NativeUIBridge.sendSheetDismissEvent(onDismissCb, nodeId: node.id)
                 }
             }) {
-                // NavigationStack (bar hidden) is the toolbar host: SwiftUI
-                // drops `.toolbar(placement: .keyboard)` items — the text
-                // inputs' pad-keyboard accessory bar — for fields presented
-                // in a bare `.sheet`. Wrapping the content gives them a
-                // host; with the bar hidden the sheet looks identical.
-                NavigationStack {
+                // The sheet hosts its own keyboard accessory bar — the
+                // screen-root host's bar sits BEHIND a presented sheet, so
+                // fields inside the sheet publish to this copy instead
+                // (`sheetDepth` makes the root host yield while we're up).
+                NativeUIKeyboardAccessoryHost {
                     VStack(spacing: 0) {
                         ForEach(node.children) { child in
                             NodeView(node: child).equatable()
@@ -43,8 +42,9 @@ struct NativeUIBottomSheetRenderer: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(theme.surface)
-                    .toolbar(.hidden, for: .navigationBar)
                 }
+                .onAppear { NativeUIKeyboardAccessoryState.shared.sheetDepth += 1 }
+                .onDisappear { NativeUIKeyboardAccessoryState.shared.sheetDepth -= 1 }
                 .presentationDetents(resolveDetents(detentsStr))
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(permanent)

@@ -52,6 +52,10 @@ struct NativeUITextInputCore: View {
     // `NativeUIFocusRegistry`); nil when the element carries no ref.
     @State private var focusRegistryToken: UUID? = nil
 
+    // Stable identity of this field's claim on the shared keyboard
+    // accessory bar (pad keyboards only — see NativeUIKeyboardAccessoryBar).
+    @State private var accessoryToken = UUID()
+
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
@@ -149,14 +153,18 @@ struct NativeUITextInputCore: View {
         }
         // Pad-style keyboards (number / decimal / phone) have NO return key,
         // so the submit label, `next-focus` chain and `@submit` are physically
-        // unreachable from them. Surface the missing key as a keyboard
-        // accessory button wired into the same submit path.
+        // unreachable from them. Surface the missing key as the shared
+        // accessory BAR above the keyboard (NativeUIKeyboardAccessoryBar):
+        // this field claims the bar while focused and hands it the same
+        // submit path as the return key. Refreshed from body every render so
+        // the action never goes stale while focused.
         let padKeyboard = ["number", "decimal", "numberpassword", "phone"].contains(keyboardKind.lowercased())
         let wantsAccessory = padKeyboard && !multiline
             && (onSubmitCb != 0 || !nextFocus.isEmpty || !submitLabelKind.isEmpty)
         let accessoryTitle = accessoryButtonTitle(
             explicit: submitLabelKind, hasSubmit: onSubmitCb != 0, nextFocus: nextFocus
         )
+        let _ = refreshAccessoryClaim(wantsAccessory, title: accessoryTitle, perform: performSubmit)
 
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
@@ -233,12 +241,24 @@ struct NativeUITextInputCore: View {
                     binding.wrappedValue = true
                 }
             }
+            // `autofocus`: raise the keyboard on the field the user came to
+            // fill. Fires per appearance (a fresh sheet presentation is a
+            // fresh appearance); a re-render that moves the prop to an
+            // already-mounted field never steals focus. The delay lets a
+            // presenting sheet's animation settle — focusing mid-transition
+            // is silently dropped by SwiftUI.
+            if p.getBool("autofocus") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    isFocused = true
+                }
+            }
         }
         .onDisappear {
             if let token = focusRegistryToken, !focusRef.isEmpty {
                 NativeUIFocusRegistry.shared.unregister(focusRef, token: token)
                 focusRegistryToken = nil
             }
+            NativeUIKeyboardAccessoryState.shared.release(id: accessoryToken)
         }
         .onChange(of: serverValue) { _, newServerValue in
             // Only sync from server when the incoming value differs from what
@@ -293,34 +313,38 @@ struct NativeUITextInputCore: View {
             scheduleSelectionEmit(text: text, cb: onSelectionCb, debounceMs: selDebounceMs)
         }
         .onChange(of: isFocused) { _, focused in
+            if focused {
+                if wantsAccessory {
+                    NativeUIKeyboardAccessoryState.shared.claim(
+                        id: accessoryToken, title: accessoryTitle, perform: performSubmit
+                    )
+                }
+                return
+            }
             // On blur, flush any pending change — covers both `blur` mode
             // (never dispatched mid-typing) and `debounce` mode (in-flight
             // timer that should commit immediately rather than race with
             // focus loss / keyboard dismiss).
-            if !focused {
-                flushPending(onChangeCb: onChangeCb)
-                // Flush any coalesced selection emit immediately on blur so the
-                // final caret state isn't stranded in the debounce window.
-                if selectionEnabled {
-                    flushSelection(cb: onSelectionCb)
-                }
+            flushPending(onChangeCb: onChangeCb)
+            // Flush any coalesced selection emit immediately on blur so the
+            // final caret state isn't stranded in the debounce window.
+            if selectionEnabled {
+                flushSelection(cb: onSelectionCb)
             }
+            NativeUIKeyboardAccessoryState.shared.release(id: accessoryToken)
         }
         .onSubmit {
             performSubmit()
         }
-        .toolbar {
-            // Content is gated on THIS field's focus: SwiftUI merges keyboard
-            // toolbars from every view that declares one, so an ungated item
-            // would render once per field on screen.
-            ToolbarItemGroup(placement: .keyboard) {
-                if wantsAccessory && isFocused {
-                    Spacer()
-                    Button(accessoryTitle) { performSubmit() }
-                        .font(.body.weight(.semibold))
-                }
-            }
-        }
+    }
+
+    /// Body-time refresh of this field's accessory-bar claim — keeps the
+    /// bar's action and title current while focused (props can change under
+    /// a focused field when PHP republishes). No-op unless focused and
+    /// accessory-worthy; the state object defers any published change.
+    private func refreshAccessoryClaim(_ wants: Bool, title: String, perform: @escaping () -> Void) {
+        guard wants, isFocused else { return }
+        NativeUIKeyboardAccessoryState.shared.refresh(id: accessoryToken, title: title, perform: perform)
     }
 
     // ─── Dispatch policy ─────────────────────────────────────────────────────
