@@ -104,6 +104,60 @@ struct NativeUITextInputCore: View {
             fontName: fontName
         )
 
+        // One submit routine for both entry points: the keyboard's return key
+        // (`.onSubmit`) and the accessory-bar button below. Reading `text` /
+        // `isFocused` inside resolves the live @State values at call time.
+        let performSubmit = {
+            // Submit also acts as a commit point — flush pending, then dispatch.
+            flushPending(onChangeCb: onChangeCb)
+            // Selection is flushed BEFORE the submit event so PHP sees the final
+            // caret/selection state ahead of (or alongside) the submit.
+            if selectionEnabled {
+                flushSelection(cb: onSelectionCb)
+            }
+            if onSubmitCb != 0 {
+                NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
+            }
+            // Focus routing after submit. `next-focus` wins over
+            // `keep-focus-on-submit` — moving the keyboard to the chained
+            // field IS keeping it up; keepFocus is only the fallback when the
+            // target isn't on screen (recycled row, conditional render,
+            // typo'd ref). Both run async because SwiftUI resigns first
+            // responder on return before this handler's effects settle.
+            if !nextFocus.isEmpty {
+                DispatchQueue.main.async {
+                    if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
+                        isFocused = true
+                    }
+                }
+            } else if keepFocus {
+                // Chat "send and keep typing": SwiftUI resigns first responder
+                // on return by default. Re-assert focus so the keyboard stays
+                // up. NOTE: this causes a small keyboard "bounce" on return
+                // (resign → refocus) that the send button doesn't have — the
+                // smooth fix needs a UIKit-backed field (see notes), not the
+                // multiline workaround which mis-sized the field in the flex
+                // layout.
+                DispatchQueue.main.async { isFocused = true }
+            } else {
+                // Accessory-button path: unlike the return key, tapping the
+                // bar doesn't resign first responder — dismiss explicitly so
+                // "Done" behaves like Done. No-op on the return-key path
+                // (focus is already gone by the time this runs).
+                isFocused = false
+            }
+        }
+        // Pad-style keyboards (number / decimal / phone) have NO return key,
+        // so the submit label, `next-focus` chain and `@submit` are physically
+        // unreachable from them. Surface the missing key as a keyboard
+        // accessory button wired into the same submit path.
+        let padKeyboard = ["number", "decimal", "numberpassword", "phone"].contains(keyboardKind.lowercased())
+        let wantsAccessory = padKeyboard && !multiline
+            && (onSubmitCb != 0 || !nextFocus.isEmpty || !submitLabelKind.isEmpty)
+        let accessoryTitle = accessoryButtonTitle(
+            explicit: submitLabelKind, hasSubmit: onSubmitCb != 0, nextFocus: nextFocus
+        )
+
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
         // reliably pick up `.foregroundStyle` for the input text on older
@@ -253,37 +307,18 @@ struct NativeUITextInputCore: View {
             }
         }
         .onSubmit {
-            // Submit also acts as a commit point — flush pending, then dispatch.
-            flushPending(onChangeCb: onChangeCb)
-            // Selection is flushed BEFORE the submit event so PHP sees the final
-            // caret/selection state ahead of (or alongside) the submit.
-            if selectionEnabled {
-                flushSelection(cb: onSelectionCb)
-            }
-            if onSubmitCb != 0 {
-                NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
-            }
-            // Focus routing after submit. `next-focus` wins over
-            // `keep-focus-on-submit` — moving the keyboard to the chained
-            // field IS keeping it up; keepFocus is only the fallback when the
-            // target isn't on screen (recycled row, conditional render,
-            // typo'd ref). Both run async because SwiftUI resigns first
-            // responder on return before this handler's effects settle.
-            if !nextFocus.isEmpty {
-                DispatchQueue.main.async {
-                    if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
-                        isFocused = true
-                    }
+            performSubmit()
+        }
+        .toolbar {
+            // Content is gated on THIS field's focus: SwiftUI merges keyboard
+            // toolbars from every view that declares one, so an ungated item
+            // would render once per field on screen.
+            ToolbarItemGroup(placement: .keyboard) {
+                if wantsAccessory && isFocused {
+                    Spacer()
+                    Button(accessoryTitle) { performSubmit() }
+                        .font(.body.weight(.semibold))
                 }
-            } else if keepFocus {
-                // Chat "send and keep typing": SwiftUI resigns first responder
-                // on return by default. Re-assert focus so the keyboard stays
-                // up. NOTE: this causes a small keyboard "bounce" on return
-                // (resign → refocus) that the send button doesn't have — the
-                // smooth fix needs a UIKit-backed field (see notes), not the
-                // multiline workaround which mis-sized the field in the flex
-                // layout.
-                DispatchQueue.main.async { isFocused = true }
             }
         }
     }
@@ -486,6 +521,24 @@ private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bo
         if !nextFocus.isEmpty { return .next }
     }
     return hasSubmit ? .done : .return
+}
+
+/// Title for the keyboard accessory button shown above pad-style keyboards
+/// (which have no return key to carry the submit label). Same precedence as
+/// `resolveSubmitLabel`: the explicit prop wins, then a `next_focus` chain
+/// implies "Next", then `@submit` implies "Done".
+private func accessoryButtonTitle(explicit: String, hasSubmit: Bool, nextFocus: String) -> String {
+    switch explicit.lowercased() {
+    case "next":   return "Next"
+    case "done":   return "Done"
+    case "go":     return "Go"
+    case "search": return "Search"
+    case "send":   return "Send"
+    case "return": return "Done"
+    default:       break
+    }
+    if !nextFocus.isEmpty { return "Next" }
+    return "Done"
 }
 
 /// Keyboard resolution — accepts string hints ("email", "number", etc.) that
