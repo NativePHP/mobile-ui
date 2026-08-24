@@ -126,9 +126,20 @@ struct NativeUITextInputCore: View {
             // `keep-focus-on-submit` — moving the keyboard to the chained
             // field IS keeping it up; keepFocus is only the fallback when the
             // target isn't on screen (recycled row, conditional render,
-            // typo'd ref). Both run async because SwiftUI resigns first
-            // responder on return before this handler's effects settle.
+            // typo'd ref).
+            //
+            // The hop runs TWICE. Synchronously first: focus moving to the
+            // target inside the same transaction as the return key's resign
+            // reads as focus MOVING between fields, so the keyboard stays up
+            // instead of playing a down-and-back-up bounce (what UIKit's
+            // becomeFirstResponder-in-shouldReturn always did). Then again
+            // async as a safety net: on paths where the system's resign
+            // still wins after this handler returns, the re-assert restores
+            // focus exactly as the async-only version did — a bounce, but
+            // never a lost keyboard. Focusing an already-focused field is a
+            // no-op, so the second pass costs nothing when the first stuck.
             if !nextFocus.isEmpty {
+                NativeUIFocusRegistry.shared.focus(nextFocus)
                 DispatchQueue.main.async {
                     if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
                         isFocused = true
