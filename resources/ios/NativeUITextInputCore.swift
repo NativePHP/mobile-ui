@@ -147,12 +147,18 @@ struct NativeUITextInputCore: View {
             // never a lost keyboard. Focusing an already-focused field is a
             // no-op, so the second pass costs nothing when the first stuck.
             if !nextFocus.isEmpty {
+                // The bridge takes first responder BEFORE focus moves, so
+                // UIKit sees back-to-back responder handoffs and the
+                // keyboard never dismisses — see NativeUIKeyboardBridge for
+                // why no SwiftUI-only ordering can achieve this.
+                NativeUIKeyboardBridge.shared.hold(keyboardType: keyboard, autocorrect: autocorrect)
                 NativeUIFocusRegistry.shared.focus(nextFocus)
                 DispatchQueue.main.async {
                     if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
                         isFocused = true
                     }
                 }
+                NativeUIKeyboardBridge.shared.settle()
             } else if keepFocus {
                 // Chat "send and keep typing": SwiftUI resigns first responder
                 // on return by default. Re-assert focus so the keyboard stays
