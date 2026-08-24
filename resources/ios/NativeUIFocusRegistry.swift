@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Screen-wide focus routing for text inputs — the `next-focus` prop.
 ///
@@ -25,6 +26,7 @@ final class NativeUIFocusRegistry {
     private struct Entry {
         let token: UUID
         let focus: () -> Void
+        weak var backingField: UITextField?
     }
 
     private var entries: [String: Entry] = [:]
@@ -46,12 +48,30 @@ final class NativeUIFocusRegistry {
         }
     }
 
+    /// Attach the UIKit text field backing the SwiftUI field registered
+    /// under `ref` (found by the return-key interceptor's introspection).
+    /// A hop can then be a direct responder handoff — the only transition
+    /// that keeps the keyboard perfectly still. Weak: the entry outlives
+    /// nothing; a recreated backing re-attaches on its next render.
+    func attachBackingField(_ ref: String, field: UITextField) {
+        entries[ref]?.backingField = field
+    }
+
     /// Focus the field registered under `ref`. Returns whether a target
     /// existed — a missing target (off-screen, recycled row, typo'd ref)
     /// is a no-op, never a crash.
+    ///
+    /// Prefers a UIKit responder handoff to the target's backing field:
+    /// with no dismissal queued (the return key was intercepted), UIKit
+    /// moves the keyboard between fields without any hide/show. The
+    /// SwiftUI FocusState closure is the fallback for fields whose
+    /// backing hasn't been introspected yet.
     @discardableResult
     func focus(_ ref: String) -> Bool {
         guard let entry = entries[ref] else { return false }
+        if let tf = entry.backingField, tf.window != nil, tf.becomeFirstResponder() {
+            return true
+        }
         entry.focus()
         return true
     }

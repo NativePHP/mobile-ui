@@ -56,13 +56,10 @@ struct NativeUITextInputCore: View {
     // accessory bar (pad keyboards only — see NativeUIKeyboardAccessoryBar).
     @State private var accessoryToken = UUID()
 
-    // Screen-scoped shared focus (see NativeUIFocusScopeKey): one String? of
-    // the focused field's key for the whole screen, so a next-focus hop is a
-    // single atomic write — SwiftUI then MOVES focus instead of resigning
-    // and re-acquiring, and the keyboard stays up. `focusKey` is this
-    // field's identity in that scope; a @State UUID survives republishes.
-    @Environment(\.nativeUIFocusScope) private var focusScope
-    @State private var focusKey = UUID().uuidString
+    // Channel to the UIKit return-key interceptor (see
+    // NativeUIReturnKeyInterceptor.swift) — refreshed every render so the
+    // proxy always runs the CURRENT submit path and chain state.
+    @State private var returnKeyBox = NativeUIReturnKeyBox()
 
     var body: some View {
         let p = node.props
@@ -147,18 +144,17 @@ struct NativeUITextInputCore: View {
             // never a lost keyboard. Focusing an already-focused field is a
             // no-op, so the second pass costs nothing when the first stuck.
             if !nextFocus.isEmpty {
-                // The bridge takes first responder BEFORE focus moves, so
-                // UIKit sees back-to-back responder handoffs and the
-                // keyboard never dismisses — see NativeUIKeyboardBridge for
-                // why no SwiftUI-only ordering can achieve this.
-                NativeUIKeyboardBridge.shared.hold(keyboardType: keyboard, autocorrect: autocorrect)
+                // With the return key intercepted (no dismissal queued),
+                // this is a plain responder handoff to the target's backing
+                // UITextField — the keyboard stays perfectly still. The
+                // async pass is the safety net for a target whose backing
+                // isn't introspected yet.
                 NativeUIFocusRegistry.shared.focus(nextFocus)
                 DispatchQueue.main.async {
                     if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
                         isFocused = true
                     }
                 }
-                NativeUIKeyboardBridge.shared.settle()
             } else if keepFocus {
                 // Chat "send and keep typing": SwiftUI resigns first responder
                 // on return by default. Re-assert focus so the keyboard stays
@@ -190,6 +186,7 @@ struct NativeUITextInputCore: View {
             explicit: submitLabelKind, hasSubmit: onSubmitCb != 0, nextFocus: nextFocus
         )
         let _ = refreshAccessoryClaim(wantsAccessory, title: accessoryTitle, perform: performSubmit)
+        let _ = syncReturnKeyBox(chains: !nextFocus.isEmpty && !multiline, perform: performSubmit)
 
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
@@ -241,11 +238,10 @@ struct NativeUITextInputCore: View {
             }
         }
         .nuiScaledFont(size: textSize, fontName: fontName.isEmpty ? nil : fontName)
-        // Second focus binding, into the screen's shared scope. Coexists
-        // with the per-field bool above: the system keeps both in sync, the
-        // bool drives this field's own logic, the scope makes cross-field
-        // hops atomic.
-        .modifier(SharedFocusScopeModifier(key: focusKey))
+        // Invisible introspection anchor: finds the UIKit field backing
+        // this TextField, reroutes its return key through `returnKeyBox`,
+        // and registers the backing field for direct responder handoffs.
+        .background(ReturnKeyInterceptorAnchor(box: returnKeyBox, focusRef: focusRef))
         // NOTE: SwiftUI's editable TextField ignores `.lineSpacing` for its
         // typed text (unlike `Text`), so `leading-*` has no visible effect on
         // iOS inputs. Kept for intent / forward-compat; leading works on
@@ -264,18 +260,13 @@ struct NativeUITextInputCore: View {
                 initialized = true
             }
             // Make this field focus-addressable. Capturing the FocusState
-            // bindings keeps the registry free of any view reference. The
-            // scope write is what makes a chained hop bounce-free (one
-            // atomic focus move); the bool write is the fallback when no
-            // host provides a scope, and a harmless no-op otherwise.
+            // binding keeps the registry free of any view reference. This
+            // closure is the fallback hop — the registry prefers a direct
+            // responder handoff to the backing UITextField attached by the
+            // return-key interceptor, which is what keeps the keyboard up.
             if !focusRef.isEmpty {
                 let binding = $isFocused
-                let scope = focusScope
-                let key = focusKey
                 focusRegistryToken = NativeUIFocusRegistry.shared.register(focusRef) {
-                    if let scope {
-                        scope.wrappedValue = key
-                    }
                     binding.wrappedValue = true
                 }
             }
@@ -376,23 +367,12 @@ struct NativeUITextInputCore: View {
         }
     }
 
-    // ─── Shared focus scope ──────────────────────────────────────────────────
-
-    /// Applies the screen's shared focus binding when a host provides one.
-    /// Without a host (no accessory host wrapping this context) the field
-    /// runs on its per-field bool alone, exactly as before.
-    private struct SharedFocusScopeModifier: ViewModifier {
-        let key: String
-
-        @Environment(\.nativeUIFocusScope) private var scope
-
-        func body(content: Content) -> some View {
-            if let scope {
-                content.focused(scope, equals: key)
-            } else {
-                content
-            }
-        }
+    /// Body-time refresh of the return-key interceptor's channel — the
+    /// proxy reads it at key-press time, so the submit closure and chain
+    /// state can never go stale under republishes.
+    private func syncReturnKeyBox(chains: Bool, perform: @escaping () -> Void) {
+        returnKeyBox.chains = chains
+        returnKeyBox.perform = perform
     }
 
     /// Body-time refresh of this field's accessory-bar claim — keeps the

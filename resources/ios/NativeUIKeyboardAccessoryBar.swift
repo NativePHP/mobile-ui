@@ -38,8 +38,13 @@ final class NativeUIKeyboardAccessoryState: ObservableObject {
 
     private var perform: () -> Void = {}
 
+    /// Monotonic claim counter — a deferred release only lands when no
+    /// claim happened after it was scheduled (see `release`).
+    private var claimSeq = 0
+
     /// Called when a field gains focus (or its accessory title changes).
     func claim(id: UUID, title: String, perform: @escaping () -> Void) {
+        claimSeq += 1
         self.perform = perform
         if info?.id != id || info?.title != title {
             info = Info(id: id, title: title)
@@ -60,13 +65,19 @@ final class NativeUIKeyboardAccessoryState: ObservableObject {
         }
     }
 
-    /// Called on blur / disappear. Identity-guarded: a field losing focus
-    /// because ANOTHER field claimed the bar must not tear the new claim
-    /// down (focus handoff order is not guaranteed).
+    /// Called on blur / disappear. Deferred one runloop and guarded both
+    /// ways: a field losing focus because ANOTHER field claimed the bar
+    /// must not tear the new claim down, and during a pad-keyboard hop
+    /// the release must not remove the bar for a frame between the old
+    /// field's blur and the new field's claim (a visible 44pt safe-area
+    /// jump that reads as a keyboard dip).
     func release(id: UUID) {
-        guard info?.id == id else { return }
-        info = nil
-        perform = {}
+        let seq = claimSeq
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.claimSeq == seq, self.info?.id == id else { return }
+            self.info = nil
+            self.perform = {}
+        }
     }
 
     func submit() {
@@ -74,30 +85,9 @@ final class NativeUIKeyboardAccessoryState: ObservableObject {
     }
 }
 
-/// The screen-scoped focus state text inputs share — one `String?` of the
-/// focused field's key, injected by the host below.
-///
-/// Two independent per-field `@FocusState` bools can never chain without a
-/// keyboard bounce: SwiftUI processes the old field's resign and the new
-/// field's focus as separate operations, so the keyboard dips down and back
-/// up on every hop regardless of timing. With ONE shared value the hop is a
-/// single atomic write — SwiftUI treats it as focus MOVING between fields
-/// (the Focus Cookbook enum recipe) and the keyboard stays up, exactly like
-/// UIKit's becomeFirstResponder-in-shouldReturn.
-private struct NativeUIFocusScopeKey: EnvironmentKey {
-    static let defaultValue: FocusState<String?>.Binding? = nil
-}
-
-extension EnvironmentValues {
-    var nativeUIFocusScope: FocusState<String?>.Binding? {
-        get { self[NativeUIFocusScopeKey.self] }
-        set { self[NativeUIFocusScopeKey.self] = newValue }
-    }
-}
-
-/// Wraps a content root, owns the screen's shared focus scope, and pins the
-/// accessory bar above the keyboard while a field has claimed it.
-/// Transparent pass-through (no inset, no cost) while no claim is active.
+/// Wraps a content root and pins the accessory bar above the keyboard while
+/// a field has claimed it. Transparent pass-through (no inset, no cost)
+/// while no claim is active.
 struct NativeUIKeyboardAccessoryHost<Content: View>: View {
     /// Set on the screen-root instance — its bar yields while any bottom
     /// sheet is presented (the sheet's own host takes over).
@@ -108,14 +98,8 @@ struct NativeUIKeyboardAccessoryHost<Content: View>: View {
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    /// The shared focus scope for every text input under this host. The
-    /// sheet host shadows the root host's scope for sheet content — chains
-    /// never cross a presentation boundary.
-    @FocusState private var focusedKey: String?
-
     var body: some View {
         content
-            .environment(\.nativeUIFocusScope, $focusedKey)
             .safeAreaInset(edge: .bottom, spacing: 0) {
             if let info = state.info, !(hidesUnderSheets && state.sheetDepth > 0) {
                 let theme = themeStore.resolve(for: colorScheme)
