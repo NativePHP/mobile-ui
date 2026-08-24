@@ -30,13 +30,21 @@ struct NativeUIBottomSheetRenderer: View {
                     NativeUIBridge.sendSheetDismissEvent(onDismissCb, nodeId: node.id)
                 }
             }) {
-                VStack(spacing: 0) {
-                    ForEach(node.children) { child in
-                        NodeView(node: child).equatable()
+                // NavigationStack (bar hidden) is the toolbar host: SwiftUI
+                // drops `.toolbar(placement: .keyboard)` items — the text
+                // inputs' pad-keyboard accessory bar — for fields presented
+                // in a bare `.sheet`. Wrapping the content gives them a
+                // host; with the bar hidden the sheet looks identical.
+                NavigationStack {
+                    VStack(spacing: 0) {
+                        ForEach(node.children) { child in
+                            NodeView(node: child).equatable()
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(theme.surface)
+                    .toolbar(.hidden, for: .navigationBar)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(theme.surface)
                 .presentationDetents(resolveDetents(detentsStr))
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(permanent)
