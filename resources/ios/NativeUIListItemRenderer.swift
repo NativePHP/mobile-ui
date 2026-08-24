@@ -142,10 +142,16 @@ struct NativeUIListItemRenderer: View {
             }
         case "avatar":
             // Decorative — the row's text content carries the meaning.
-            AsyncImage(url: URL(string: value)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Circle().fill(Color(.systemGray5))
+            Group {
+                if let path = NativeUILocalImage.path(for: value) {
+                    leadingLocalImage(path: path) { Circle().fill(Color(.systemGray5)) }
+                } else {
+                    AsyncImage(url: URL(string: value)) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Circle().fill(Color(.systemGray5))
+                    }
+                }
             }
             .frame(width: 40, height: 40)
             .clipShape(Circle())
@@ -163,10 +169,18 @@ struct NativeUIListItemRenderer: View {
             .accessibilityHidden(true)
         case "image":
             // Decorative — the row's text content carries the meaning.
-            AsyncImage(url: URL(string: value)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
+            Group {
+                if let path = NativeUILocalImage.path(for: value) {
+                    leadingLocalImage(path: path) {
+                        RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
+                    }
+                } else {
+                    AsyncImage(url: URL(string: value)) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
+                    }
+                }
             }
             .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -217,6 +231,21 @@ struct NativeUIListItemRenderer: View {
         } else {
             tinted
                 .accessibilityValue(a11yValue)
+        }
+    }
+
+    /// Decode a file on disk for a leading slot. `AsyncImage` only speaks
+    /// http(s), so a `file://` URL or an absolute path has to be read
+    /// directly — the same route `NativeUIImageRenderer` takes.
+    @ViewBuilder
+    private func leadingLocalImage<Placeholder: View>(
+        path: String,
+        @ViewBuilder placeholder: () -> Placeholder
+    ) -> some View {
+        if let uiImage = UIImage(contentsOfFile: path) {
+            Image(uiImage: uiImage).resizable().scaledToFill()
+        } else {
+            placeholder()
         }
     }
 

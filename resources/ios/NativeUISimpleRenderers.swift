@@ -229,17 +229,8 @@ struct NativeUIImageRenderer: View {
         }
     }
 
-    /// Resolves `src` to a local filesystem path when it points at an
-    /// on-device file (`file://…` URL or an absolute `/…` path), or nil
-    /// when it's a remote URL that should go through AsyncImage.
     private static func localFilePath(for src: String) -> String? {
-        if src.hasPrefix("file://") {
-            return URL(string: src)?.path ?? String(src.dropFirst("file://".count))
-        }
-        if src.hasPrefix("/") {
-            return src
-        }
-        return nil
+        NativeUILocalImage.path(for: src)
     }
 
     private func resolveContentMode(_ fit: Int) -> ContentMode {
