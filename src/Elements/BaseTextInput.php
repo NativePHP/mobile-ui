@@ -20,7 +20,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label` (behavior)
+ *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label`, `next-focus` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -104,6 +104,9 @@ abstract class BaseTextInput extends Element
         }
         if (isset($attrs['submit-label']) || isset($attrs['submitLabel'])) {
             $this->submitLabel((string) ($attrs['submit-label'] ?? $attrs['submitLabel']));
+        }
+        if (isset($attrs['next-focus']) || isset($attrs['nextFocus'])) {
+            $this->nextFocus((string) ($attrs['next-focus'] ?? $attrs['nextFocus']));
         }
         if (isset($attrs['maxLines']) || isset($attrs['max-lines'])) {
             $this->maxLines((int) ($attrs['maxLines'] ?? $attrs['max-lines']));
@@ -364,6 +367,36 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Move the keyboard focus to another text input when this one is
+     * submitted — the "Next" affordance of a multi-field form. `$ref` is
+     * the target input's `ref` (the same ref `Native::test()` targets);
+     * the chain is explicit, one hop per field.
+     *
+     * When set (and `submitLabel()` isn't), the renderers derive a `next`
+     * submit label, mirroring how capitalization derives from `keyboard`.
+     * A missing target at submit time (recycled list row, conditional
+     * render, typo) is a no-op — focus then follows `keep-focus-on-submit`
+     * or the platform default. `@submit` still fires first, and the field
+     * being left commits per `sync_mode` on losing focus, so
+     * `native:model.blur` bindings see the value before the hop.
+     *
+     * An empty ref is treated as unset so Blade can pass a conditional
+     * (`next-focus="{{ $next }}"`) without special-casing the last field.
+     *
+     * Blade: `next-focus` (or `nextFocus`).
+     */
+    public function nextFocus(string $ref): static
+    {
+        $ref = trim($ref);
+
+        if ($ref !== '') {
+            $this->inputProps['next_focus'] = $ref;
+        }
+
+        return $this;
+    }
+
     public function maxLines(int $lines): static
     {
         $this->inputProps['max_lines'] = $lines;
@@ -529,6 +562,14 @@ abstract class BaseTextInput extends Element
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->inputProps;
+
+        // A field is focus-addressable when its element carries a `ref` —
+        // surfaced to the renderers as a prop, because the node-level ref
+        // is not decoded natively. Each platform's focus registry keys the
+        // field under this name; another input's `next_focus` targets it.
+        if ($this->elementRef !== null && $this->elementRef !== '') {
+            $props['focus_ref'] = $this->elementRef;
+        }
 
         if ($this->changeCallback !== null) {
             $props['on_change'] = $registry->register($this->changeCallback);

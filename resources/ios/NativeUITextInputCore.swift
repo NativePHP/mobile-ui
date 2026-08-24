@@ -48,6 +48,10 @@ struct NativeUITextInputCore: View {
     @State private var pendingSelection: NativeUISelectionPayload? = nil
     @State private var lastEmittedSelection: NativeUISelectionPayload? = nil
 
+    // Token for this field's `focus_ref` registration (see
+    // `NativeUIFocusRegistry`); nil when the element carries no ref.
+    @State private var focusRegistryToken: UUID? = nil
+
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
@@ -77,6 +81,11 @@ struct NativeUITextInputCore: View {
         let debounceMs    = p.getInt("debounce_ms", default: 300)
         let keepFocus     = p.getBool("keep_focus_on_submit")
         let submitLabelKind = p.getString("submit_label")
+        // Focus chaining (`next-focus`): `focus_ref` is this field's own
+        // address in the focus registry (the element's `ref`, surfaced as a
+        // prop); `next_focus` is the ref to move the keyboard to on submit.
+        let focusRef      = p.getString("focus_ref")
+        let nextFocus     = p.getString("next_focus")
         // Selection reporting is opt-in (0/absent ⇒ off) and never applies to
         // secure fields. Read exactly like `on_change` / `debounce_ms` above.
         let onSelectionCb = p.getCallbackId("on_selection_change")
@@ -155,12 +164,26 @@ struct NativeUITextInputCore: View {
         .textInputAutocapitalization(capitalization)
         .autocorrectionDisabled(!autocorrect)
         .disabled(disabled || readOnly)
-        .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0))
+        .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0, nextFocus: nextFocus))
         .onAppear {
             if !initialized {
                 text = serverValue
                 lastSentValue = serverValue
                 initialized = true
+            }
+            // Make this field focus-addressable. Capturing the FocusState
+            // binding keeps the registry free of any view reference.
+            if !focusRef.isEmpty {
+                let binding = $isFocused
+                focusRegistryToken = NativeUIFocusRegistry.shared.register(focusRef) {
+                    binding.wrappedValue = true
+                }
+            }
+        }
+        .onDisappear {
+            if let token = focusRegistryToken, !focusRef.isEmpty {
+                NativeUIFocusRegistry.shared.unregister(focusRef, token: token)
+                focusRegistryToken = nil
             }
         }
         .onChange(of: serverValue) { _, newServerValue in
@@ -240,13 +263,26 @@ struct NativeUITextInputCore: View {
             if onSubmitCb != 0 {
                 NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
             }
-            // Chat "send and keep typing": SwiftUI resigns first responder on
-            // return by default. Re-assert focus so the keyboard stays up. NOTE:
-            // this causes a small keyboard "bounce" on return (resign → refocus)
-            // that the send button doesn't have — the smooth fix needs a
-            // UIKit-backed field (see notes), not the multiline workaround which
-            // mis-sized the field in the flex layout.
-            if keepFocus {
+            // Focus routing after submit. `next-focus` wins over
+            // `keep-focus-on-submit` — moving the keyboard to the chained
+            // field IS keeping it up; keepFocus is only the fallback when the
+            // target isn't on screen (recycled row, conditional render,
+            // typo'd ref). Both run async because SwiftUI resigns first
+            // responder on return before this handler's effects settle.
+            if !nextFocus.isEmpty {
+                DispatchQueue.main.async {
+                    if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
+                        isFocused = true
+                    }
+                }
+            } else if keepFocus {
+                // Chat "send and keep typing": SwiftUI resigns first responder
+                // on return by default. Re-assert focus so the keyboard stays
+                // up. NOTE: this causes a small keyboard "bounce" on return
+                // (resign → refocus) that the send button doesn't have — the
+                // smooth fix needs a UIKit-backed field (see notes), not the
+                // multiline workaround which mis-sized the field in the flex
+                // layout.
                 DispatchQueue.main.async { isFocused = true }
             }
         }
@@ -426,15 +462,17 @@ private struct NativeUISelectionPayload: Equatable {
 }
 
 /// Submit-key face for the field. The explicit `submit_label` prop wins;
-/// unset — or unknown, same policy as `resolveKeyboardType` — keeps the
-/// original default: `.done` when `@submit` is wired, `.return` otherwise.
+/// unset — or unknown, same policy as `resolveKeyboardType` — derives
+/// `.next` when a `next_focus` chain is set (mirroring how capitalization
+/// derives from the keyboard type), else keeps the original default:
+/// `.done` when `@submit` is wired, `.return` otherwise.
 ///
 /// A multiline field ignores the prop entirely: on the vertical-axis
 /// TextField a non-return submit label swaps newline insertion for a submit
 /// action, silently taking away the field's reason to be multiline. Android
 /// ignores the prop for multiline the same way (`resolveImeAction` in
 /// `TextInputShared.kt`) — keep the two in sync.
-private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bool) -> SubmitLabel {
+private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bool, nextFocus: String) -> SubmitLabel {
     if !multiline {
         switch explicit.lowercased() {
         case "next":   return .next
@@ -445,6 +483,7 @@ private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bo
         case "return": return .return
         default:       break
         }
+        if !nextFocus.isEmpty { return .next }
     }
     return hasSubmit ? .done : .return
 }
