@@ -56,6 +56,14 @@ struct NativeUITextInputCore: View {
     // accessory bar (pad keyboards only — see NativeUIKeyboardAccessoryBar).
     @State private var accessoryToken = UUID()
 
+    // Screen-scoped shared focus (see NativeUIFocusScopeKey): one String? of
+    // the focused field's key for the whole screen, so a next-focus hop is a
+    // single atomic write — SwiftUI then MOVES focus instead of resigning
+    // and re-acquiring, and the keyboard stays up. `focusKey` is this
+    // field's identity in that scope; a @State UUID survives republishes.
+    @Environment(\.nativeUIFocusScope) private var focusScope
+    @State private var focusKey = UUID().uuidString
+
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
@@ -227,6 +235,11 @@ struct NativeUITextInputCore: View {
             }
         }
         .nuiScaledFont(size: textSize, fontName: fontName.isEmpty ? nil : fontName)
+        // Second focus binding, into the screen's shared scope. Coexists
+        // with the per-field bool above: the system keeps both in sync, the
+        // bool drives this field's own logic, the scope makes cross-field
+        // hops atomic.
+        .modifier(SharedFocusScopeModifier(key: focusKey))
         // NOTE: SwiftUI's editable TextField ignores `.lineSpacing` for its
         // typed text (unlike `Text`), so `leading-*` has no visible effect on
         // iOS inputs. Kept for intent / forward-compat; leading works on
@@ -245,10 +258,18 @@ struct NativeUITextInputCore: View {
                 initialized = true
             }
             // Make this field focus-addressable. Capturing the FocusState
-            // binding keeps the registry free of any view reference.
+            // bindings keeps the registry free of any view reference. The
+            // scope write is what makes a chained hop bounce-free (one
+            // atomic focus move); the bool write is the fallback when no
+            // host provides a scope, and a harmless no-op otherwise.
             if !focusRef.isEmpty {
                 let binding = $isFocused
+                let scope = focusScope
+                let key = focusKey
                 focusRegistryToken = NativeUIFocusRegistry.shared.register(focusRef) {
+                    if let scope {
+                        scope.wrappedValue = key
+                    }
                     binding.wrappedValue = true
                 }
             }
@@ -346,6 +367,25 @@ struct NativeUITextInputCore: View {
         }
         .onSubmit {
             performSubmit()
+        }
+    }
+
+    // ─── Shared focus scope ──────────────────────────────────────────────────
+
+    /// Applies the screen's shared focus binding when a host provides one.
+    /// Without a host (no accessory host wrapping this context) the field
+    /// runs on its per-field bool alone, exactly as before.
+    private struct SharedFocusScopeModifier: ViewModifier {
+        let key: String
+
+        @Environment(\.nativeUIFocusScope) private var scope
+
+        func body(content: Content) -> some View {
+            if let scope {
+                content.focused(scope, equals: key)
+            } else {
+                content
+            }
         }
     }
 

@@ -74,9 +74,30 @@ final class NativeUIKeyboardAccessoryState: ObservableObject {
     }
 }
 
-/// Wraps a content root and pins the accessory bar above the keyboard while
-/// a field has claimed it. Transparent pass-through (no inset, no cost)
-/// while no claim is active.
+/// The screen-scoped focus state text inputs share — one `String?` of the
+/// focused field's key, injected by the host below.
+///
+/// Two independent per-field `@FocusState` bools can never chain without a
+/// keyboard bounce: SwiftUI processes the old field's resign and the new
+/// field's focus as separate operations, so the keyboard dips down and back
+/// up on every hop regardless of timing. With ONE shared value the hop is a
+/// single atomic write — SwiftUI treats it as focus MOVING between fields
+/// (the Focus Cookbook enum recipe) and the keyboard stays up, exactly like
+/// UIKit's becomeFirstResponder-in-shouldReturn.
+private struct NativeUIFocusScopeKey: EnvironmentKey {
+    static let defaultValue: FocusState<String?>.Binding? = nil
+}
+
+extension EnvironmentValues {
+    var nativeUIFocusScope: FocusState<String?>.Binding? {
+        get { self[NativeUIFocusScopeKey.self] }
+        set { self[NativeUIFocusScopeKey.self] = newValue }
+    }
+}
+
+/// Wraps a content root, owns the screen's shared focus scope, and pins the
+/// accessory bar above the keyboard while a field has claimed it.
+/// Transparent pass-through (no inset, no cost) while no claim is active.
 struct NativeUIKeyboardAccessoryHost<Content: View>: View {
     /// Set on the screen-root instance — its bar yields while any bottom
     /// sheet is presented (the sheet's own host takes over).
@@ -87,8 +108,15 @@ struct NativeUIKeyboardAccessoryHost<Content: View>: View {
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The shared focus scope for every text input under this host. The
+    /// sheet host shadows the root host's scope for sheet content — chains
+    /// never cross a presentation boundary.
+    @FocusState private var focusedKey: String?
+
     var body: some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
+        content
+            .environment(\.nativeUIFocusScope, $focusedKey)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
             if let info = state.info, !(hidesUnderSheets && state.sheetDepth > 0) {
                 let theme = themeStore.resolve(for: colorScheme)
                 HStack {
