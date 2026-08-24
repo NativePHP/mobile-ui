@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -52,6 +53,7 @@ internal data class TextInputProps(
     val maxLength: Int,
     val keyboard: KeyboardType,
     val capitalization: KeyboardCapitalization?,
+    val submitLabel: String,
     val disabled: Boolean,
     val readOnly: Boolean,
     val isError: Boolean,
@@ -116,6 +118,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         maxLength    = p.getInt("max_length"),
         keyboard     = resolveKeyboardType(p.getString("keyboard")),
         capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getBool("secure"), p.getString("keyboard")),
+        submitLabel  = p.getString("submit_label"),
         disabled     = p.getBool("disabled"),
         readOnly     = p.getBool("read_only"),
         isError      = p.getBool("is_error"),
@@ -212,10 +215,40 @@ internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: 
     }
 }
 
-internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions =
-    props.capitalization
-        ?.let { KeyboardOptions(keyboardType = props.keyboard, capitalization = it) }
-        ?: KeyboardOptions(keyboardType = props.keyboard)
+/**
+ * IME action for the submit key — the `submit_label` prop. The explicit
+ * value wins; unset — or unknown, same policy as [resolveKeyboardType] —
+ * keeps [ImeAction.Default], i.e. exactly the pre-prop behaviour.
+ *
+ * "return" is iOS vocabulary (a plain Return key); Android has no exact
+ * equivalent, so it resolves to the IME default too.
+ *
+ * A multiline field ignores the prop entirely: a non-default IME action
+ * replaces the return key, and multiline's return key must keep inserting
+ * newlines. iOS ignores the prop for multiline the same way
+ * (`resolveSubmitLabel` in `NativeUITextInputCore.swift`) — keep the two
+ * in sync.
+ */
+internal fun resolveImeAction(explicit: String, multiline: Boolean): ImeAction {
+    if (multiline) return ImeAction.Default
+
+    return when (explicit.lowercase()) {
+        "next"   -> ImeAction.Next
+        "done"   -> ImeAction.Done
+        "go"     -> ImeAction.Go
+        "search" -> ImeAction.Search
+        "send"   -> ImeAction.Send
+        else     -> ImeAction.Default
+    }
+}
+
+internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions {
+    val imeAction = resolveImeAction(props.submitLabel, props.multiline)
+
+    return props.capitalization
+        ?.let { KeyboardOptions(keyboardType = props.keyboard, capitalization = it, imeAction = imeAction) }
+        ?: KeyboardOptions(keyboardType = props.keyboard, imeAction = imeAction)
+}
 
 /**
  * Outbound dispatch state machine. Call [onTextChanged] whenever local text

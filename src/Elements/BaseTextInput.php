@@ -2,6 +2,7 @@
 
 namespace Native\Mobile\UI\Elements;
 
+use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
 use Native\Mobile\Icon\AndroidSymbol;
@@ -19,7 +20,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -100,6 +101,9 @@ abstract class BaseTextInput extends Element
         }
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
+        }
+        if (isset($attrs['submit-label']) || isset($attrs['submitLabel'])) {
+            $this->submitLabel((string) ($attrs['submit-label'] ?? $attrs['submitLabel']));
         }
         if (isset($attrs['maxLines']) || isset($attrs['max-lines'])) {
             $this->maxLines((int) ($attrs['maxLines'] ?? $attrs['max-lines']));
@@ -318,6 +322,44 @@ abstract class BaseTextInput extends Element
     public function keepFocusOnSubmit(bool $value = true): static
     {
         $this->inputProps['keep_focus_on_submit'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Which action the keyboard's submit key advertises — "next" | "done" |
+     * "go" | "search" | "send" | "return". Maps to SwiftUI's `SubmitLabel`
+     * on iOS and the IME action on Android.
+     *
+     * Leave it unset and each platform keeps its current default (iOS shows
+     * Done when `@submit` is wired, Return otherwise; Android leaves the IME
+     * action to the platform). The label is purely cosmetic — pressing the
+     * key still fires `@submit` and commits per `sync_mode`, whatever face
+     * it shows.
+     *
+     * "return" is iOS vocabulary (a plain Return key); Android has no exact
+     * equivalent and renders its IME default for it.
+     *
+     * IGNORED on a `multiline()` field natively, on both platforms: there
+     * the return key must keep inserting newlines, and a non-return submit
+     * label would silently replace that. Not validated here because the
+     * fluent order (`multiline()` before or after `submitLabel()`) must not
+     * change the outcome.
+     *
+     * Blade: `submit-label` (or `submitLabel`).
+     */
+    public function submitLabel(string $label): static
+    {
+        $label = strtolower(trim($label));
+
+        if (! in_array($label, ['next', 'done', 'go', 'search', 'send', 'return'], true)) {
+            throw new InvalidArgumentException(
+                "Unknown submit-label `{$label}`. "
+                .'Use one of: next, done, go, search, send, return — or omit the attribute to keep the platform default.'
+            );
+        }
+
+        $this->inputProps['submit_label'] = $label;
 
         return $this;
     }
