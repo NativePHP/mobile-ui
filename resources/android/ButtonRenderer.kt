@@ -27,10 +27,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.MaterialIcon
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
-import androidx.compose.foundation.isSystemInDarkTheme
 import com.nativephp.plugins.native_ui.NativeUITheme
 import com.nativephp.plugins.native_ui.NativeUITokens
 
@@ -70,7 +70,7 @@ object ButtonRenderer {
         // rather than a CompositionLocal because nothing in the render tree
         // currently provides one — the store is backed by `mutableStateOf`, so
         // Compose recomposes automatically when PHP pushes a theme update.
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val theme = if (NativeAppearanceState.isDark()) NativeUITheme.dark else NativeUITheme.light
         val metrics = sizeMetrics(size, theme)
         // Leading — button labels are single-line, so this is usually a no-op.
         val lineHeight = nuiLineHeightUnit(p.getFloat("line_height_px", 0f), p.getFloat("line_height", 0f), metrics.textSize.value)

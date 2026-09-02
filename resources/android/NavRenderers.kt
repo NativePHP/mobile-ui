@@ -4,7 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.nativephp.mobile.ui.NativeAppearanceState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.offset
@@ -54,7 +54,7 @@ object TopBarRenderer {
 
         // Honor explicit text_color / background_color from NavBar builder;
         // fall back to system dark-theme heuristic only when nothing is set.
-        val isDark = isSystemInDarkTheme()
+        val isDark = NativeAppearanceState.isDark()
         val textArgb = props.getColor("text_color", 0)
         val textColor = if (textArgb != 0) Color(textArgb) else if (isDark) Color.White else Color.Black
         val bgArgb = props.getColor("background_color", 0)

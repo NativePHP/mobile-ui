@@ -1,6 +1,5 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.BottomSheetDefaults
@@ -13,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.RenderNode
@@ -51,7 +51,7 @@ object BottomSheetRenderer {
 
         if (!visible) return
 
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val theme = if (NativeAppearanceState.isDark()) NativeUITheme.dark else NativeUITheme.light
 
         val skipPartial = !hasPartialDetent(detentsStr)
         val sheetState = rememberModalBottomSheetState(

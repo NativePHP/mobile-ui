@@ -1,6 +1,5 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -17,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -41,7 +41,7 @@ object SelectRenderer {
         val a11yLabel   = p.getString("a11y_label")
         val a11yHint    = p.getString("a11y_hint")
 
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val theme = if (NativeAppearanceState.isDark()) NativeUITheme.dark else NativeUITheme.light
 
         var expanded by remember { mutableStateOf(false) }
         var selectedValue by remember(node.id) { mutableStateOf(serverValue) }

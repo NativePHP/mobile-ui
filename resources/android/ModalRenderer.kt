@@ -3,7 +3,6 @@ package com.nativephp.plugins.native_ui.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
@@ -49,7 +49,7 @@ object ModalRenderer {
         val a11yLabel = node.props.getString("a11y_label")
         val nodeId = node.id
 
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val theme = if (NativeAppearanceState.isDark()) NativeUITheme.dark else NativeUITheme.light
 
         var showModal by remember { mutableStateOf(false) }
         LaunchedEffect(visible) { showModal = visible }

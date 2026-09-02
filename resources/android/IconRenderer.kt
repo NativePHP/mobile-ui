@@ -1,13 +1,13 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 
@@ -19,7 +19,7 @@ object IconRenderer {
         val a11yLabel = p.getString("a11y_label")
         val lightArgb = p.getColor("color", 0xFF000000.toInt())
         val darkArgb  = p.getColor("dark_color", 0)
-        val isDark = isSystemInDarkTheme()
+        val isDark = NativeAppearanceState.isDark()
         val effectiveArgb = if (isDark && darkArgb != 0) darkArgb else lightArgb
 
         com.nativephp.mobile.ui.MaterialIcon(

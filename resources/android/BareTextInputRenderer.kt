@@ -1,6 +1,5 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -45,7 +45,7 @@ object BareTextInputRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
         val props = parseTextInputProps(node)
-        val isDark = isSystemInDarkTheme()
+        val isDark = NativeAppearanceState.isDark()
         val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
         val customFontFamily = (if (props.fontName.isNotEmpty()) NativeUIFontResolver.resolve(LocalContext.current, props.fontName) else null)
             ?: nuiThemeDefaultFontFamily(LocalContext.current)

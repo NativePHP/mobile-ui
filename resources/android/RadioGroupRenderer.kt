@@ -1,6 +1,5 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -13,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.RenderNode
@@ -35,7 +35,7 @@ object RadioGroupRenderer {
         val a11yLabel   = p.getString("a11y_label")
         val a11yHint    = p.getString("a11y_hint")
 
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val theme = if (NativeAppearanceState.isDark()) NativeUITheme.dark else NativeUITheme.light
 
         var selectedValue by remember(node.id) { mutableStateOf(serverValue) }
         var lastSentValue by remember(node.id) { mutableStateOf(serverValue) }

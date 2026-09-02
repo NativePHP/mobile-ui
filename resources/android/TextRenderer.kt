@@ -1,6 +1,5 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import android.content.Context
@@ -23,6 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 
@@ -57,7 +57,7 @@ object TextRenderer {
         val maxLines = p.getInt("max_lines")
         val textAlign = resolveTextAlign(p.getInt("text_align"))
 
-        val isDark = isSystemInDarkTheme()
+        val isDark = NativeAppearanceState.isDark()
         val darkColor = if (isDark) p.getColor("dark_color", 0) else 0
         val textArgb = if (darkColor != 0) darkColor else p.getColor("color", 0xFF000000.toInt())
         Text(
@@ -94,7 +94,7 @@ object TextRenderer {
     @Composable
     private fun RenderComposed(node: NativeUINode, modifier: Modifier) {
         val p = node.props
-        val isDark = isSystemInDarkTheme()
+        val isDark = NativeAppearanceState.isDark()
         val maxLines = p.getInt("max_lines")
         // Leading applies to the whole string; base the multiplier on the
         // node's own font size (the root run's size).

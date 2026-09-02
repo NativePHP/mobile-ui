@@ -1,7 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.NativeAppearanceState
 import com.nativephp.mobile.ui.MaterialIcon
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
@@ -88,7 +88,7 @@ object DatePickerRenderer {
         val a11yLabel    = p.getString("a11y_label")
         val a11yHint     = p.getString("a11y_hint")
 
-        val theme  = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val theme  = if (NativeAppearanceState.isDark()) NativeUITheme.dark else NativeUITheme.light
         val zone   = resolveZone(p.getString("timezone"))
         val locale = resolveLocale(p.getString("locale"))
         val is24   = resolve24Hour(hourFormat, locale)
