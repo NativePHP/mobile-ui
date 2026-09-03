@@ -89,6 +89,11 @@ paths serialize to the same wire tree.
 - Disabled controls use the `surface-variant` (fill) + `on-surface-variant`
   (label) tokens on both platforms — tune disabled contrast by adjusting
   those two tokens, not per-component.
+- `outlined-text-input` has NO fill by default — its box is transparent, so on
+  a colored screen it stops reading as a field. Declare the optional
+  `input-fill` / `on-input` token pair to give it one; `on-input` recolors
+  everything drawn inside the box. Do not reach for `surface` / `surface-variant`
+  for this, or every card moves with the field.
 - Buttons render their variant token solid; for a softer tonal fill set
   opacity on the token itself (e.g. `'secondary' => 'fuchsia-500/70'`).
 - `<native:icon>` accepts platform enum overrides as attributes —

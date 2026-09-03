@@ -13,6 +13,12 @@ import SwiftUI
 /// All chrome colors resolve from `NativeUITheme.shared`. Per-instance color
 /// overrides are intentionally not supported (Model 3 — drop to
 /// `<pressable>` for fully custom input visuals).
+///
+/// The box is filled with the `input-fill` theme token and its contents take
+/// `on-input`. Both are transparent / absent by default, which is Material 3's
+/// outlined container and reproduces this renderer exactly as it was before
+/// the tokens existed; an app that wants its fields to read as fields on a
+/// colored screen declares the pair and gets one.
 struct NativeUIOutlinedTextInputRenderer: View {
     let node: NativeUINode
 
@@ -51,6 +57,28 @@ struct NativeUIOutlinedTextInputRenderer: View {
 
         let supportingColor: Color = isError ? theme.destructive : theme.onSurfaceVariant
 
+        // Everything INSIDE the box. Two tones by default — typed text at full
+        // emphasis, icons and affixes muted — which is the M3 hierarchy and
+        // what this renderer has always drawn. A declared `on-input` collapses
+        // both onto itself, because the moment `input-fill` is a saturated
+        // color the muted gray stops being a hierarchy and starts being
+        // unreadable.
+        //
+        // `label` and `supporting` sit OUTSIDE the box and are deliberately
+        // NOT included: they are painted on the surface behind the field, so
+        // they keep taking their color from it.
+        let fieldTextColor: Color = theme.onInput ?? theme.onSurface
+        let fieldDecorationColor: Color = theme.onInput ?? theme.onSurfaceVariant
+
+        // Honor user-supplied border radius via class (e.g. `rounded-full` →
+        // 9999 → Capsule shape). Falls back to Material 3's outlined default
+        // (theme.radiusMd ≈ 4pt) when no class radius is set. Hoisted out of
+        // the background below now that the fill and the stroke both need it —
+        // one shape, two paints, so they cannot drift apart.
+        let cornerRadius: CGFloat = (node.style?.borderRadius ?? 0) > 0
+            ? CGFloat(node.style!.borderRadius)
+            : theme.radiusMd
+
         // The visible label doubles as the field's accessibility label unless
         // an explicit a11y_label override was provided. When the field is in
         // an error state, the supporting text must be announced: it rides the
@@ -71,18 +99,18 @@ struct NativeUIOutlinedTextInputRenderer: View {
                 if !leadingIcon.isEmpty {
                     Image(systemName: getIconForName(leadingIcon))
                         .nuiScaledFont(size: metrics.iconSize)
-                        .foregroundStyle(theme.onSurfaceVariant)
+                        .foregroundStyle(fieldDecorationColor)
                 }
                 if !prefixText.isEmpty {
                     Text(prefixText)
                         .nuiScaledFont(size: metrics.textSize)
-                        .foregroundStyle(theme.onSurfaceVariant)
+                        .foregroundStyle(fieldDecorationColor)
                 }
 
                 NativeUITextInputCore(
                     node: node,
                     textSize: metrics.textSize,
-                    contentColor: disabled ? theme.onSurface.opacity(0.6) : theme.onSurface,
+                    contentColor: disabled ? fieldTextColor.opacity(0.6) : fieldTextColor,
                     tintColor: isError ? theme.destructive : theme.primary
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,30 +118,32 @@ struct NativeUIOutlinedTextInputRenderer: View {
                 if !suffixText.isEmpty {
                     Text(suffixText)
                         .nuiScaledFont(size: metrics.textSize)
-                        .foregroundStyle(theme.onSurfaceVariant)
+                        .foregroundStyle(fieldDecorationColor)
                 }
                 if loading {
                     ProgressView().controlSize(.small)
                 } else if !trailingIcon.isEmpty {
                     Image(systemName: getIconForName(trailingIcon))
                         .nuiScaledFont(size: metrics.iconSize)
-                        .foregroundStyle(theme.onSurfaceVariant)
+                        .foregroundStyle(fieldDecorationColor)
                 }
             }
             .padding(.horizontal, metrics.hPadding)
             .padding(.vertical, metrics.vPadding)
             .background(
-                // Honor user-supplied border radius via class (e.g.
-                // `rounded-full` → 9999 → Capsule shape). Falls back to
-                // Material 3's outlined default (theme.radiusMd ≈ 4pt)
-                // when no class radius is set.
-                RoundedRectangle(
-                    cornerRadius: (node.style?.borderRadius ?? 0) > 0
-                        ? CGFloat(node.style!.borderRadius)
-                        : theme.radiusMd,
-                    style: .continuous
-                )
-                .stroke(borderColor, lineWidth: isError ? 2 : 1)
+                // Fill first, stroke over it, both on the same shape so the
+                // border still sits exactly where it did — a stroke centers on
+                // its path, and the path here is the background's own frame,
+                // unchanged. The fill is decoration only: `.allowsHitTesting`
+                // keeps it from swallowing taps that used to fall through the
+                // hollow middle of the box.
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(theme.inputFill)
+                    .allowsHitTesting(false)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(borderColor, lineWidth: isError ? 2 : 1)
+                    )
             )
             .opacity(disabled ? 0.6 : 1.0)
             .allowsHitTesting(!disabled && !readOnly)

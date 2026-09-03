@@ -51,6 +51,33 @@ describe('Theme color token normalization', function () {
         expect(Theme::get('light.accent'))->toBe('not-a-color');
     });
 
+    it('carries the optional input-fill / on-input pair through the color grammar', function () {
+        // The token map is open-ended, so these two need no special handling
+        // in Theme — but the outlined text input is the only element whose
+        // DEFAULT appearance depends on them being absent, so pin that they
+        // travel like any other color when they are present.
+        Theme::load(['light' => [
+            'input-fill' => 'slate-800',
+            'on-input' => '#F8FAFC',
+        ]]);
+
+        expect(Theme::get('light.input-fill'))->toBe('#1E293B');
+        expect(Theme::get('light.on-input'))->toBe('#F8FAFC');
+    });
+
+    it('omits input-fill / on-input entirely when they are not declared', function () {
+        // Absence is the signal the renderers read: no `input-fill` means a
+        // transparent box (Material 3's outlined container), and no `on-input`
+        // means each slot inside the field keeps its own default color. A
+        // synthesized default here would quietly restyle every existing field.
+        Theme::load(['light' => ['primary' => '#B91C1C']]);
+
+        expect(Theme::all()['light'])->not->toHaveKey('input-fill');
+        expect(Theme::all()['light'])->not->toHaveKey('on-input');
+        expect(Theme::all()['dark'])->not->toHaveKey('input-fill');
+        expect(Theme::all()['dark'])->not->toHaveKey('on-input');
+    });
+
     it('normalizes tokens supplied via merge()', function () {
         Theme::load(['light' => ['primary' => '#B91C1C']]);
         Theme::merge(['light' => ['accent' => 'orange-800/50']]);

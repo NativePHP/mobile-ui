@@ -35,6 +35,11 @@ import com.nativephp.plugins.native_ui.NativeUITheme
  *
  * All colors drawn from [NativeUITheme] — per-instance color overrides are
  * intentionally not honored (plan doc Model 3).
+ *
+ * The container is filled with the `input-fill` theme token and its contents
+ * take `on-input`. Both are transparent / absent by default, which is what
+ * `OutlinedTextFieldDefaults.colors()` already resolved to, so an app that
+ * declares neither renders exactly as before.
  */
 object OutlinedTextInputRenderer {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -110,6 +115,18 @@ object OutlinedTextInputRenderer {
             }
         }
 
+        // Everything INSIDE the box. Two tones by default — typed text at full
+        // emphasis, labels, placeholders and icons muted — which is the M3
+        // hierarchy this renderer has always drawn. A declared `on-input`
+        // collapses both onto itself, because the moment `input-fill` is a
+        // saturated color the muted gray stops being a hierarchy and starts
+        // being unreadable. Supporting text is excluded: M3 draws it BELOW the
+        // box, on the surface behind the field, so it keeps that surface's
+        // colors. So is the focused label color, which is a focus accent
+        // (`primary`) rather than in-field content.
+        val fieldTextColor = theme.onInput ?: theme.onSurface
+        val fieldDecorationColor = theme.onInput ?: theme.onSurfaceVariant
+
         val textSize = when (props.size) {
             "sm" -> theme.fontSm
             "lg" -> theme.fontLg
@@ -148,7 +165,7 @@ object OutlinedTextInputRenderer {
             suffix = suffixSlot(props.suffix),
             leadingIcon = leadingIconSlot(props.leadingIcon),
             trailingIcon = if (props.loading) {
-                { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.onSurfaceVariant) }
+                { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = fieldDecorationColor) }
             } else trailingIconSlot(props.trailingIcon),
             isError = props.isError,
             singleLine = props.singleLine,
@@ -161,12 +178,21 @@ object OutlinedTextInputRenderer {
                 selectionReporter.flush(value)
                 dispatcher.onSubmit(value.text)
             }),
-            textStyle = TextStyle(fontSize = textSize, color = theme.onSurface, fontFamily = customFontFamily, lineHeight = lineHeight),
+            textStyle = TextStyle(fontSize = textSize, color = fieldTextColor, fontFamily = customFontFamily, lineHeight = lineHeight),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = theme.onSurface,
-                unfocusedTextColor = theme.onSurface,
-                disabledTextColor = theme.onSurface.copy(alpha = 0.6f),
-                errorTextColor = theme.onSurface,
+                focusedTextColor = fieldTextColor,
+                unfocusedTextColor = fieldTextColor,
+                disabledTextColor = fieldTextColor.copy(alpha = 0.6f),
+                errorTextColor = fieldTextColor,
+                // The container defaults to Transparent in
+                // OutlinedTextFieldDefaults, so naming it here changes nothing
+                // until `input-fill` is declared. All four states take the
+                // same value: a field that vanishes into the page is just as
+                // wrong once it's focused or in error.
+                focusedContainerColor = theme.inputFill,
+                unfocusedContainerColor = theme.inputFill,
+                disabledContainerColor = theme.inputFill,
+                errorContainerColor = theme.inputFill,
                 cursorColor = theme.primary,
                 errorCursorColor = theme.destructive,
                 focusedBorderColor = theme.primary,
@@ -174,18 +200,18 @@ object OutlinedTextInputRenderer {
                 disabledBorderColor = theme.outline.copy(alpha = 0.5f),
                 errorBorderColor = theme.destructive,
                 focusedLabelColor = theme.primary,
-                unfocusedLabelColor = theme.onSurfaceVariant,
-                disabledLabelColor = theme.onSurfaceVariant.copy(alpha = 0.6f),
+                unfocusedLabelColor = fieldDecorationColor,
+                disabledLabelColor = fieldDecorationColor.copy(alpha = 0.6f),
                 errorLabelColor = theme.destructive,
-                focusedPlaceholderColor = theme.onSurfaceVariant,
-                unfocusedPlaceholderColor = theme.onSurfaceVariant,
+                focusedPlaceholderColor = fieldDecorationColor,
+                unfocusedPlaceholderColor = fieldDecorationColor,
                 focusedSupportingTextColor = theme.onSurfaceVariant,
                 unfocusedSupportingTextColor = theme.onSurfaceVariant,
                 errorSupportingTextColor = theme.destructive,
-                focusedLeadingIconColor = theme.onSurfaceVariant,
-                unfocusedLeadingIconColor = theme.onSurfaceVariant,
-                focusedTrailingIconColor = theme.onSurfaceVariant,
-                unfocusedTrailingIconColor = theme.onSurfaceVariant,
+                focusedLeadingIconColor = fieldDecorationColor,
+                unfocusedLeadingIconColor = fieldDecorationColor,
+                focusedTrailingIconColor = fieldDecorationColor,
+                unfocusedTrailingIconColor = fieldDecorationColor,
             ),
         )
     }

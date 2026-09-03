@@ -67,6 +67,22 @@ return [
             'surface-variant' => '#F1F5F9',
             'on-surface-variant' => '#475569',
 
+            // Text-field container, for the OUTLINED variant. Both are unset
+            // on purpose, and unset means "transparent box, Material 3
+            // defaults inside" — the outlined field then reads as whatever is
+            // behind it, which is correct on a plain page and invisible on a
+            // colored one. Declare the pair to give the field a body of its
+            // own:
+            //
+            //   'input-fill' => '#FFFFFF',
+            //   'on-input'   => '#0F172A',
+            //
+            // `on-input` recolors everything drawn INSIDE the box — typed
+            // text, placeholder, icons, prefix/suffix — so declare it
+            // alongside any fill dark enough to swallow the default grays.
+            // The label and supporting text sit outside the box and keep
+            // taking their color from the surface behind it.
+
             // Outline = neutral borders (text fields, dividers, cards).
             // outline-variant = softer edges: hairline dividers, card seams.
             'outline' => '#CBD5E1',
