@@ -14,11 +14,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.NativeUINode
@@ -79,6 +81,7 @@ object BareTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
 
         // Caret / selection reporter — independent of the direct change/submit
         // dispatchers; no-op unless `on_selection_change` is wired and the
@@ -125,6 +128,7 @@ object BareTextInputRenderer {
             // flush the pending selection on the focused → unfocused edge.
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRequester(focusRequester)
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
@@ -160,6 +164,19 @@ object BareTextInputRenderer {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 props.dispatchSubmit?.invoke(value.text)
+                // Chained focus (`next-focus`): move the keyboard to the
+                // target field. A missing target is a no-op.
+                if (props.nextFocus.isNotEmpty()) {
+                    NativeUIFocusRegistry.request(props.nextFocus)
+                } else {
+                    // Consuming the IME action suppresses its platform
+                    // default, so Done/Go/Send/Search left the keyboard up.
+                    // Restore it — close the keyboard like the platform (and
+                    // iOS's return key) does. Next keeps the keyboard: the
+                    // chain moved it, or the target is gone and there is
+                    // nothing sensible to do.
+                    defaultKeyboardAction(ImeAction.Done)
+                }
             })
         )
     }

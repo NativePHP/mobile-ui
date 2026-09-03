@@ -19,10 +19,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUINode
@@ -79,6 +81,7 @@ object FilledTextInputRenderer {
         }
 
         val interactionSource = remember { MutableInteractionSource() }
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
@@ -124,7 +127,7 @@ object FilledTextInputRenderer {
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
-            modifier = Modifier.fillMaxWidth().then(modifier).nuiA11y(props.a11yLabel, props.a11yHint),
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint),
             enabled = props.enabled,
             readOnly = props.readOnly,
             interactionSource = interactionSource,
@@ -143,10 +146,26 @@ object FilledTextInputRenderer {
             minLines = props.minLines,
             visualTransformation = props.visualTransformation,
             keyboardOptions = keyboardOptionsFor(props),
-            keyboardActions = KeyboardActions(onDone = {
+            // onAny, not onDone: `submit-label` can make the IME action Next /
+            // Go / Search / Send, and an onDone-only handler would silently
+            // drop the submit for those. Matches the bare renderer.
+            keyboardActions = KeyboardActions(onAny = {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 dispatcher.onSubmit(value.text)
+                // Chained focus (`next-focus`): move the keyboard to the
+                // target field. A missing target is a no-op.
+                if (props.nextFocus.isNotEmpty()) {
+                    NativeUIFocusRegistry.request(props.nextFocus)
+                } else {
+                    // Consuming the IME action suppresses its platform
+                    // default, so Done/Go/Send/Search left the keyboard up.
+                    // Restore it — close the keyboard like the platform (and
+                    // iOS's return key) does. Next keeps the keyboard: the
+                    // chain moved it, or the target is gone and there is
+                    // nothing sensible to do.
+                    defaultKeyboardAction(ImeAction.Done)
+                }
             }),
             textStyle = TextStyle(fontSize = textSize, color = theme.onSurface, fontFamily = customFontFamily, lineHeight = lineHeight),
             colors = TextFieldDefaults.colors(

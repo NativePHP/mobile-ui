@@ -2,6 +2,7 @@
 
 namespace Native\Mobile\UI\Elements;
 
+use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
 use Native\Mobile\Icon\AndroidSymbol;
@@ -19,7 +20,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label`, `next-focus` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -100,6 +101,15 @@ abstract class BaseTextInput extends Element
         }
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
+        }
+        if (! empty($attrs['autofocus'])) {
+            $this->autofocus();
+        }
+        if (isset($attrs['submit-label']) || isset($attrs['submitLabel'])) {
+            $this->submitLabel((string) ($attrs['submit-label'] ?? $attrs['submitLabel']));
+        }
+        if (isset($attrs['next-focus']) || isset($attrs['nextFocus'])) {
+            $this->nextFocus((string) ($attrs['next-focus'] ?? $attrs['nextFocus']));
         }
         if (isset($attrs['maxLines']) || isset($attrs['max-lines'])) {
             $this->maxLines((int) ($attrs['maxLines'] ?? $attrs['max-lines']));
@@ -322,6 +332,91 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Which action the keyboard's submit key advertises — "next" | "done" |
+     * "go" | "search" | "send" | "return". Maps to SwiftUI's `SubmitLabel`
+     * on iOS and the IME action on Android.
+     *
+     * Leave it unset and each platform keeps its current default (iOS shows
+     * Done when `@submit` is wired, Return otherwise; Android leaves the IME
+     * action to the platform). The label is purely cosmetic — pressing the
+     * key still fires `@submit` and commits per `sync_mode`, whatever face
+     * it shows.
+     *
+     * "return" is iOS vocabulary (a plain Return key); Android has no exact
+     * equivalent and renders its IME default for it.
+     *
+     * IGNORED on a `multiline()` field natively, on both platforms: there
+     * the return key must keep inserting newlines, and a non-return submit
+     * label would silently replace that. Not validated here because the
+     * fluent order (`multiline()` before or after `submitLabel()`) must not
+     * change the outcome.
+     *
+     * Blade: `submit-label` (or `submitLabel`).
+     */
+    public function submitLabel(string $label): static
+    {
+        $label = strtolower(trim($label));
+
+        if (! in_array($label, ['next', 'done', 'go', 'search', 'send', 'return'], true)) {
+            throw new InvalidArgumentException(
+                "Unknown submit-label `{$label}`. "
+                .'Use one of: next, done, go, search, send, return — or omit the attribute to keep the platform default.'
+            );
+        }
+
+        $this->inputProps['submit_label'] = $label;
+
+        return $this;
+    }
+
+    /**
+     * Move the keyboard focus to another text input when this one is
+     * submitted — the "Next" affordance of a multi-field form. `$ref` is
+     * the target input's `ref` (the same ref `Native::test()` targets);
+     * the chain is explicit, one hop per field.
+     *
+     * When set (and `submitLabel()` isn't), the renderers derive a `next`
+     * submit label, mirroring how capitalization derives from `keyboard`.
+     * A missing target at submit time (recycled list row, conditional
+     * render, typo) is a no-op — focus then follows `keep-focus-on-submit`
+     * or the platform default. `@submit` still fires first, and the field
+     * being left commits per `sync_mode` on losing focus, so
+     * `native:model.blur` bindings see the value before the hop.
+     *
+     * An empty ref is treated as unset so Blade can pass a conditional
+     * (`next-focus="{{ $next }}"`) without special-casing the last field.
+     *
+     * Blade: `next-focus` (or `nextFocus`).
+     */
+    /**
+     * Focus this input (and raise the keyboard) when it first appears —
+     * the opening field of a form the user came here to fill. Fires once
+     * per appearance, only on mount: a re-render that moves the attribute
+     * to an already-mounted field never steals focus mid-edit.
+     *
+     * Blade: `autofocus` / `:autofocus="$bool"`.
+     */
+    public function autofocus(bool $value = true): static
+    {
+        if ($value) {
+            $this->inputProps['autofocus'] = true;
+        }
+
+        return $this;
+    }
+
+    public function nextFocus(string $ref): static
+    {
+        $ref = trim($ref);
+
+        if ($ref !== '') {
+            $this->inputProps['next_focus'] = $ref;
+        }
+
+        return $this;
+    }
+
     public function maxLines(int $lines): static
     {
         $this->inputProps['max_lines'] = $lines;
@@ -487,6 +582,14 @@ abstract class BaseTextInput extends Element
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->inputProps;
+
+        // A field is focus-addressable when its element carries a `ref` —
+        // surfaced to the renderers as a prop, because the node-level ref
+        // is not decoded natively. Each platform's focus registry keys the
+        // field under this name; another input's `next_focus` targets it.
+        if ($this->elementRef !== null && $this->elementRef !== '') {
+            $props['focus_ref'] = $this->elementRef;
+        }
 
         if ($this->changeCallback !== null) {
             $props['on_change'] = $registry->register($this->changeCallback);
