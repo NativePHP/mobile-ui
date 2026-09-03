@@ -459,7 +459,7 @@ Rationale: a Card component fights the "Tailwind classes only" principle (memory
 - [ ] placeholder
 - [ ] error fallback
 - [ ] async loading
-- [ ] local asset references
+- [x] local asset references (relative `src` → app `public/`, absolute → device path)
 - [ ] Docs: `image.md`
 
 ### 8.4 `<canvas>` / `<shapes>`  (engine)

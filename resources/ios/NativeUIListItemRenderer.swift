@@ -142,9 +142,7 @@ struct NativeUIListItemRenderer: View {
             }
         case "avatar":
             // Decorative — the row's text content carries the meaning.
-            AsyncImage(url: URL(string: value)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            NativeUIRowImage(src: value) {
                 Circle().fill(Color(.systemGray5))
             }
             .frame(width: 40, height: 40)
@@ -163,9 +161,7 @@ struct NativeUIListItemRenderer: View {
             .accessibilityHidden(true)
         case "image":
             // Decorative — the row's text content carries the meaning.
-            AsyncImage(url: URL(string: value)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            NativeUIRowImage(src: value) {
                 RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
             }
             .frame(width: 56, height: 56)

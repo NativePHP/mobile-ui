@@ -18,6 +18,14 @@ paths serialize to the same wire tree.
   Use `.live` / `.blur` / `.debounce.Xms` modifiers to control sync frequency.
 - Wire callbacks with event attributes (`@tap`, `@change`, `@submit`,
   `@dismiss`) pointing at public methods on the component.
+- Image sources — `<native:image src>`, and `leadingAvatar` / `leadingImage`
+  on `<native:list-item>` — all resolve the same way: a remote URL
+  (`https://…`), a device file path (`/var/mobile/…/photo.jpg`, what the
+  camera and gallery hand you), or a RELATIVE path, which resolves against the
+  app's `public/` directory on device — `src="img/logo.png"` renders
+  `public/img/logo.png`. Unlike the web, a leading slash means a device
+  filesystem path, NOT the public root: write `img/logo.png`, never
+  `/img/logo.png`.
 - Text inputs also take `@selectionChange` for caret / selection reporting:
   the handler is called as `method(string $text, int $selectionStart, int
   $selectionEnd)` with offsets in Unicode code points (`start === end` for a

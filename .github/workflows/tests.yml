@@ -16,38 +16,22 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          # 8.4+ is required: nativephp/mobile pulls in endroid/qr-code ^6.1.3,
-          # which needs PHP ^8.4, so the dependency chain won't resolve on 8.3.
+          # 8.4+ is required: nativephp/mobile v4 declares php ^8.4 itself,
+          # so the dependency chain won't resolve on 8.3.
           php-version: '8.4'
           coverage: none
 
       # Unlike the leaf plugins, this suite exercises nativephp/mobile at
       # runtime (the Edge element collector, elements, facades), so CI must
-      # actually install it. Until v4 is released we build against the
-      # mobile-air `element` branch (composer constraint `dev-element`);
-      # after release, replace the require below with a normal `^4.0` pin
-      # and drop the VCS repository + stability tweaks.
+      # actually install it. Now that v4 has shipped, the `^4.0` constraint
+      # in composer.json resolves straight from Packagist — no VCS
+      # repository, stability tweaks or access token involved, so forks
+      # build the same way we do.
       #
-      # NativePHP/mobile-air is private, so cloning is authenticated with
-      # the MOBILE_AIR_TOKEN repo secret (a PAT / fine-grained token with
-      # read access to NativePHP/mobile-air). If the secret is absent the
-      # step is skipped so public forks still get a clear failure.
-      - name: Configure private repo auth
-        env:
-          TOKEN: ${{ secrets.MOBILE_AIR_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            composer config --global github-oauth.github.com "$TOKEN"
-          else
-            echo "MOBILE_AIR_TOKEN not set — assuming public access to nativephp/mobile"
-          fi
-
-      - name: Install dependencies (mobile-air @ dev-element)
-        run: |
-          composer config minimum-stability dev
-          composer config prefer-stable true
-          composer config repositories.mobile-air vcs https://github.com/NativePHP/mobile-air.git
-          composer require "nativephp/mobile:dev-element" --no-interaction --with-all-dependencies
+      # `update` rather than `install`: composer.lock is gitignored, so
+      # there is never a lock file to install from.
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
 
       - name: Run tests
         run: ./vendor/bin/pest --colors=always

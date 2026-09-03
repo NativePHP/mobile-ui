@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -227,8 +228,11 @@ object ListItemRenderer {
                     }
                 }
                 "avatar" -> {
+                    val context = LocalContext.current
                     SubcomposeAsyncImage(
-                        model = effectiveValue,
+                        model = remember(effectiveValue, context) {
+                            nuiResolveImageSrc(effectiveValue, context)
+                        },
                         contentDescription = null,
                         modifier = Modifier
                             .size(40.dp)
@@ -272,8 +276,11 @@ object ListItemRenderer {
                     }
                 }
                 "image" -> {
+                    val context = LocalContext.current
                     SubcomposeAsyncImage(
-                        model = effectiveValue,
+                        model = remember(effectiveValue, context) {
+                            nuiResolveImageSrc(effectiveValue, context)
+                        },
                         contentDescription = null,
                         modifier = Modifier
                             .size(56.dp)
