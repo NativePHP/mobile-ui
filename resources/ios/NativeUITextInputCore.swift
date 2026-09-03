@@ -76,6 +76,7 @@ struct NativeUITextInputCore: View {
         let syncMode      = p.getString("sync_mode", default: "live")
         let debounceMs    = p.getInt("debounce_ms", default: 300)
         let keepFocus     = p.getBool("keep_focus_on_submit")
+        let submitLabelKind = p.getString("submit_label")
         // Selection reporting is opt-in (0/absent ⇒ off) and never applies to
         // secure fields. Read exactly like `on_change` / `debounce_ms` above.
         let onSelectionCb = p.getCallbackId("on_selection_change")
@@ -154,7 +155,7 @@ struct NativeUITextInputCore: View {
         .textInputAutocapitalization(capitalization)
         .autocorrectionDisabled(!autocorrect)
         .disabled(disabled || readOnly)
-        .submitLabel(onSubmitCb != 0 ? .done : .return)
+        .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0))
         .onAppear {
             if !initialized {
                 text = serverValue
@@ -422,6 +423,30 @@ private struct NativeUISelectionPayload: Equatable {
     let text: String
     let start: Int
     let end: Int
+}
+
+/// Submit-key face for the field. The explicit `submit_label` prop wins;
+/// unset — or unknown, same policy as `resolveKeyboardType` — keeps the
+/// original default: `.done` when `@submit` is wired, `.return` otherwise.
+///
+/// A multiline field ignores the prop entirely: on the vertical-axis
+/// TextField a non-return submit label swaps newline insertion for a submit
+/// action, silently taking away the field's reason to be multiline. Android
+/// ignores the prop for multiline the same way (`resolveImeAction` in
+/// `TextInputShared.kt`) — keep the two in sync.
+private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bool) -> SubmitLabel {
+    if !multiline {
+        switch explicit.lowercased() {
+        case "next":   return .next
+        case "done":   return .done
+        case "go":     return .go
+        case "search": return .search
+        case "send":   return .send
+        case "return": return .return
+        default:       break
+        }
+    }
+    return hasSubmit ? .done : .return
 }
 
 /// Keyboard resolution — accepts string hints ("email", "number", etc.) that

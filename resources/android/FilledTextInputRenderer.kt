@@ -143,7 +143,10 @@ object FilledTextInputRenderer {
             minLines = props.minLines,
             visualTransformation = props.visualTransformation,
             keyboardOptions = keyboardOptionsFor(props),
-            keyboardActions = KeyboardActions(onDone = {
+            // onAny, not onDone: `submit-label` can make the IME action Next /
+            // Go / Search / Send, and an onDone-only handler would silently
+            // drop the submit for those. Matches the bare renderer.
+            keyboardActions = KeyboardActions(onAny = {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 dispatcher.onSubmit(value.text)
