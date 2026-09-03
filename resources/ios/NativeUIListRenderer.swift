@@ -114,6 +114,11 @@ struct NativeUIListRenderer: View {
             .equatable()
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowInsets(EdgeInsets())
+            // Rows carry SwiftUI's opaque system fill, which paints over the
+            // list's own background — so hiding the scroll background via
+            // ListBackgroundModifier still left a white sheet on a themed
+            // screen. Clear the row and let its content decide.
+            .listRowBackground(Color.clear)
             // Drive dividers from the bottom edge only; always hide the top
             // edge. The top separator renders solely on a section's first row,
             // so hiding it removes the stray full-width line that otherwise
