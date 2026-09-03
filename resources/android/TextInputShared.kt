@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -46,6 +47,7 @@ internal data class TextInputProps(
     val leadingIcon: String,
     val trailingIcon: String,
     val secure: Boolean,
+    val revealable: Boolean,
     val multiline: Boolean,
     val maxLines: Int,
     val minLines: Int,
@@ -72,8 +74,28 @@ internal data class TextInputProps(
     val selectionDebounceMs: Int,
 ) {
     val enabled: Boolean get() = !disabled && !loading
+
+    /**
+     * Masking for a field that may currently be revealed. The no-argument
+     * property is the always-masked case, which is what the chromeless
+     * variant uses — it has no decoration slot to put a toggle in, so it can
+     * never be revealed.
+     */
+    fun visualTransformation(revealed: Boolean): VisualTransformation =
+        if (secure && !revealed) PasswordVisualTransformation() else VisualTransformation.None
+
     val visualTransformation: VisualTransformation
-        get() = if (secure) PasswordVisualTransformation() else VisualTransformation.None
+        get() = visualTransformation(revealed = false)
+
+    /**
+     * Whether to draw the in-field reveal toggle. Opt-in via `revealable`,
+     * meaningless without `secure`, and suppressed while the field is not
+     * interactive — there is nothing to reveal in a field the user cannot
+     * type into, and a disabled control that still answers taps is its own
+     * bug.
+     */
+    val revealToggle: Boolean get() = secure && revealable && enabled && !readOnly
+
     val singleLine: Boolean get() = !multiline
 
     /** Numeric sp size for the chromeless variant. Tracks token fallbacks. */
@@ -110,6 +132,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         leadingIcon  = p.getString("leading_icon"),
         trailingIcon = p.getString("trailing_icon"),
         secure       = p.getBool("secure"),
+        revealable   = p.getBool("revealable"),
         multiline    = p.getBool("multiline"),
         maxLines     = p.getInt("max_lines").let { if (it > 0) it else if (p.getBool("multiline")) 5 else 1 },
         minLines     = p.getInt("min_lines").let { if (it > 0) it else 1 },
@@ -424,6 +447,38 @@ internal fun leadingIconSlot(name: String): (@Composable () -> Unit)? =
 @Composable
 internal fun trailingIconSlot(name: String): (@Composable () -> Unit)? =
     if (name.isEmpty()) null else ({ MaterialIcon(name = name, contentDescription = null) })
+
+/**
+ * The in-field reveal ("eye") for a `secure` field, for the M3 `trailingIcon`
+ * slot — so it sits where the trailing icon sits rather than as a separate
+ * Show / Hide control beside the input, which is what an app has to build
+ * today and which costs a bridge round-trip and a republish on every tap.
+ *
+ * [revealed] is caller-owned local state and stays local: it must never be
+ * reported to PHP, republish the tree, or touch the value / caret / sync-mode
+ * machinery. Returns null when the field didn't ask for a toggle, so the
+ * caller's existing trailing slot is used unchanged.
+ *
+ * The content description announces the ACTION the tap performs rather than
+ * the current state — TalkBack reads "Show password, button".
+ */
+@Composable
+internal fun revealToggleSlot(
+    props: TextInputProps,
+    revealed: Boolean,
+    onToggle: () -> Unit,
+): (@Composable () -> Unit)? {
+    if (!props.revealToggle) return null
+
+    return {
+        IconButton(onClick = onToggle) {
+            MaterialIcon(
+                name = if (revealed) "visibility_off" else "visibility",
+                contentDescription = if (revealed) "Hide password" else "Show password",
+            )
+        }
+    }
+}
 
 /**
  * Apply optional a11y label/hint to a modifier.

@@ -50,6 +50,12 @@ object FilledTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
 
+        // Reveal state for a `revealable` secure field. Local on purpose, and
+        // that is the whole safety argument for the feature: flipping it never
+        // crosses the bridge, so it cannot republish the tree, disturb `value`
+        // / `lastSentValue`, trip the sync-mode dispatcher, or move the caret.
+        var revealed by remember { mutableStateOf(false) }
+
         val dispatcher = remember(props.syncMode, props.debounceMs, props.onChangeCb) {
             TextInputDispatcher(
                 scope = scope,
@@ -136,12 +142,20 @@ object FilledTextInputRenderer {
             leadingIcon = leadingIconSlot(props.leadingIcon),
             trailingIcon = if (props.loading) {
                 { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.onSurfaceVariant) }
-            } else trailingIconSlot(props.trailingIcon),
+            } else {
+                // The reveal toggle owns the trailing slot whenever it is on.
+                // An author who set a trailing icon AND `revealable` asked for
+                // the toggle by asking for `revealable`, which the icon slot
+                // has no other way to express; the icon is still drawn on
+                // every field that didn't.
+                revealToggleSlot(props, revealed) { revealed = !revealed }
+                    ?: trailingIconSlot(props.trailingIcon)
+            },
             isError = props.isError,
             singleLine = props.singleLine,
             maxLines = props.maxLines,
             minLines = props.minLines,
-            visualTransformation = props.visualTransformation,
+            visualTransformation = props.visualTransformation(revealed),
             keyboardOptions = keyboardOptionsFor(props),
             keyboardActions = KeyboardActions(onDone = {
                 // Flush the settled caret before the submit event fires.

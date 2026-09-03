@@ -211,6 +211,38 @@ it('still serializes the selection callback when secure is explicitly false', fu
     expect($registry->kind($props['on_selection_change']))->toBe('text_selection');
 });
 
+it('carries the reveal toggle from the Blade attribute', function (string $type) {
+    NativeElementCollector::leaf($type, [
+        'secure' => true,
+        'revealable' => true,
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['revealable'])->toBeTrue();
+})->with(['bare_text_input', 'outlined_text_input', 'filled_text_input']);
+
+it('omits the reveal toggle when the attribute is absent', function () {
+    // Absence is what keeps every existing secure field looking the way it
+    // does — the renderers only draw the eye when the prop is present and
+    // true, so a serialized `false` would be indistinguishable but noisier.
+    NativeElementCollector::leaf('outlined_text_input', ['secure' => true]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props'])->not->toHaveKey('revealable');
+});
+
+it('registers the reveal toggle via the fluent API', function () {
+    $props = OutlinedTextInput::make()
+        ->secure()
+        ->revealable()
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($props['secure'])->toBeTrue();
+    expect($props['revealable'])->toBeTrue();
+});
+
 it('registers selection change via the fluent API', function () {
     $registry = new CallbackRegistry;
     $props = OutlinedTextInput::make()

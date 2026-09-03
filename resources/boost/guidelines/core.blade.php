@@ -28,6 +28,12 @@ paths serialize to the same wire tree.
 - Each `@selectionChange` event carries the FULL current text and costs a
   component re-render, independent of the `native:model` sync mode — don't
   reach for it when plain `@change` would do.
+- Add `revealable` alongside `secure` for the in-field eye that lets the user
+  check what they typed. It is native-only — tapping it never round-trips to
+  PHP and never touches the bound value — so don't hand-roll a Show / Hide
+  button bound to a component property. Honored on `outlined-text-input` and
+  `filled-text-input`; `bare-text-input` draws no chrome, so supply your own
+  control there.
 - `<native:date-picker>` handles dates, times, and both. Set `mode` to
   `date` (default), `time`, or `datetime`. Values are always wall-clock ISO
   strings — `2026-07-25`, `14:30`, `2026-07-25T14:30` — never offsets or

@@ -19,7 +19,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalize`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -91,6 +91,9 @@ abstract class BaseTextInput extends Element
         }
         if (! empty($attrs['secure'])) {
             $this->secure();
+        }
+        if (! empty($attrs['revealable'])) {
+            $this->revealable();
         }
         if (isset($attrs['maxLength']) || isset($attrs['max-length'])) {
             $this->maxLength((int) ($attrs['maxLength'] ?? $attrs['max-length']));
@@ -291,6 +294,29 @@ abstract class BaseTextInput extends Element
     public function secure(bool $value = true): static
     {
         $this->inputProps['secure'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Draw a reveal ("eye") toggle inside a `secure()` field, so the user can
+     * check what they typed without the app building a separate Show / Hide
+     * control beside the input.
+     *
+     * The toggle is entirely native: tapping it never crosses the bridge, so
+     * it cannot disturb the bound value, the caret, or the `native:model`
+     * sync mode. The revealed state is local to the field and is deliberately
+     * not reported to PHP.
+     *
+     * Opt-in, and a no-op without `secure()`. Honored by `outlined-text-input`
+     * and `filled-text-input`; ignored by `bare-text-input`, whose contract is
+     * that it draws no chrome of its own — supply your own control there.
+     *
+     * Blade: `revealable`.
+     */
+    public function revealable(bool $value = true): static
+    {
+        $this->inputProps['revealable'] = $value;
 
         return $this;
     }

@@ -8,7 +8,7 @@ import UIKit
 ///     value we sent out)
 ///   - `sync_mode` dispatch policy (live | debounce | blur) — controlled by
 ///     the `native:model` directive modifier chain
-///   - secure / multiline input
+///   - secure / multiline input, with an optional in-field reveal toggle
 ///   - keyboard type, submit label
 ///   - disabled / readOnly state
 ///   - onChange / onSubmit callbacks
@@ -21,10 +21,29 @@ struct NativeUITextInputCore: View {
     let contentColor: Color
     let tintColor: Color
 
+    /// Whether this variant has room to draw the `revealable` eye INSIDE the
+    /// field. The chrome variants (outlined, filled) pass true; the chromeless
+    /// one does not, because its whole contract is that it draws no decoration
+    /// of its own — an author using it supplies their own trailing control.
+    /// Defaulted so the bare renderer's call site stays as it was, and so the
+    /// prop is honored on exactly the same two variants on both platforms
+    /// (Android's toggle lives in the M3 `trailingIcon` slot, which the
+    /// chromeless `BasicTextField` doesn't have).
+    var supportsRevealToggle: Bool = false
+
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
     @State private var initialized: Bool = false
     @State private var debounceTask: Task<Void, Never>? = nil
+    /// Whether a `secure` field is currently showing its contents.
+    ///
+    /// Local `@State` on purpose, and that is the whole safety argument for
+    /// this feature: toggling it never crosses the bridge, so it cannot
+    /// republish the tree, cannot perturb `text` / `lastSentValue`, cannot
+    /// trip the `sync_mode` state machine, and cannot move the caret. Reveal
+    /// state is also the kind of thing that must not be persisted or
+    /// round-tripped anywhere near a password.
+    @State private var revealed: Bool = false
     @FocusState private var isFocused: Bool
 
     // ─── Selection / caret reporting (opt-in via `on_selection_change`) ──────
@@ -59,6 +78,16 @@ struct NativeUITextInputCore: View {
         let minLines      = p.getInt("min_lines")
         let disabled      = p.getBool("disabled")
         let readOnly      = p.getBool("read_only")
+        // The in-field eye. Only on a secure field, only where the variant has
+        // chrome to host it, and only while the field is interactive — there
+        // is nothing to reveal in a field the user cannot type into, and a
+        // disabled control that still responds to taps is its own bug.
+        let revealToggle  = supportsRevealToggle
+            && secure
+            && p.getBool("revealable")
+            && !(disabled || readOnly)
+        // A secure field is masked unless the user has revealed it.
+        let masked        = secure && !revealed
         let keyboardKind  = p.getString("keyboard")
         let keyboard      = resolveKeyboardType(keyboardKind)
         // Capitalization and autocorrect are derived from `secure` and the
@@ -101,10 +130,21 @@ struct NativeUITextInputCore: View {
         Group {
             if secure {
                 // SecureField has no selection binding — caret reporting is
-                // intentionally never available for secure fields.
-                SecureField(placeholder, text: $text)
-                    .foregroundColor(contentColor)
-                    .focused($isFocused)
+                // intentionally never available for secure fields. That holds
+                // for the revealed branch too: `selectionEnabled` is gated on
+                // `!secure`, so an unmasked password still reports nothing.
+                if masked {
+                    SecureField(placeholder, text: $text)
+                        .foregroundColor(contentColor)
+                        .focused($isFocused)
+                } else {
+                    // SecureField has no unmasked mode, so revealing means
+                    // swapping in a plain TextField. `multiline` is ignored on
+                    // a secure field in both branches, as before.
+                    TextField(placeholder, text: $text)
+                        .foregroundColor(contentColor)
+                        .focused($isFocused)
+                }
             } else if multiline {
                 // A vertical-axis TextField reports a ~0 intrinsic width when
                 // empty and won't expand to fill an ancestor's `maxWidth:
@@ -249,6 +289,16 @@ struct NativeUITextInputCore: View {
                 DispatchQueue.main.async { isFocused = true }
             }
         }
+        // Appended rather than woven in: when the toggle is off this modifier
+        // returns its content untouched, so every field that doesn't ask for
+        // an eye keeps the exact view tree it had.
+        .modifier(RevealToggleModifier(
+            enabled: revealToggle,
+            revealed: $revealed,
+            isFocused: $isFocused,
+            textSize: textSize,
+            contentColor: contentColor
+        ))
     }
 
     // ─── Dispatch policy ─────────────────────────────────────────────────────
@@ -499,5 +549,72 @@ private func allowsAutocorrection(secure: Bool, keyboard: String) -> Bool {
         return false
     default:
         return true
+    }
+}
+
+/// Places the reveal ("eye") control inside the field's own chrome, so it sits
+/// where the trailing icon sits rather than as a separate Show / Hide control
+/// next to the input — which is what an app has to build today, and which
+/// costs a bridge round-trip and a republish on every tap.
+///
+/// Disabled, this returns `content` unchanged: no HStack, no wrapper, nothing
+/// added to the view tree. Every existing field therefore lays out exactly as
+/// it did.
+private struct RevealToggleModifier: ViewModifier {
+    let enabled: Bool
+    @Binding var revealed: Bool
+    var isFocused: FocusState<Bool>.Binding
+    let textSize: CGFloat
+    let contentColor: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            HStack(spacing: 6) {
+                content
+                Button {
+                    // Read focus BEFORE the swap: flipping `revealed` changes
+                    // which branch of the field is built, and SwiftUI treats
+                    // SecureField and TextField as different views, so the
+                    // one that had first responder is torn down and focus is
+                    // dropped. Re-assert it on the next runloop turn — after
+                    // the new field exists — or the keyboard drops away on
+                    // every tap of the eye.
+                    let wasFocused = isFocused.wrappedValue
+                    revealed.toggle()
+                    if wasFocused {
+                        DispatchQueue.main.async { isFocused.wrappedValue = true }
+                    }
+                } label: {
+                    Image(systemName: revealed ? "eye.slash.fill" : "eye.fill")
+                        .nuiScaledFont(size: max(13, textSize - 2))
+                        .foregroundStyle(contentColor.opacity(0.85))
+                        // Deliberately NOT `.nuiMinTapTarget()`. That puts a
+                        // `minHeight: 44` on the icon, and this HStack sits
+                        // INSIDE the field's content — the variant renderer adds
+                        // its own vertical padding around the whole thing — so a
+                        // 44pt floor here makes a revealable field far taller
+                        // than a plain one. Measured on a login form: 42.7pt for
+                        // the email field, 64.7pt for the password field beside
+                        // it. Half again as tall, and it reads as a layout bug.
+                        //
+                        // `maxHeight: .infinity` fills the row rather than
+                        // demanding a height, so the field keeps exactly the
+                        // height it had before it grew an eye (re-measured at
+                        // 40.7pt, matching the same field with the toggle off).
+                        // The tap target is still >= 44 wide by the full height
+                        // of the field, and `contentShape` keeps all of that
+                        // tappable instead of just the glyph.
+                        .frame(minWidth: 44, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // Announce the ACTION the tap performs, not the current state.
+                // VoiceOver reads this as "Show password, button".
+                .accessibilityLabel(revealed ? "Hide password" : "Show password")
+            }
+        } else {
+            content
+        }
     }
 }
