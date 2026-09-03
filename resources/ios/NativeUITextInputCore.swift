@@ -27,6 +27,12 @@ struct NativeUITextInputCore: View {
     @State private var debounceTask: Task<Void, Never>? = nil
     @FocusState private var isFocused: Bool
 
+    /// The enclosing vertical `<scroll-view>`'s proxy, published by
+    /// `NativeUIScrollViewRenderer`. Nil everywhere there isn't one — sheets,
+    /// modals, non-scrolling screens, and bottom-anchored chat logs, which run
+    /// their own keyboard policy — and nil means this field does not scroll.
+    @Environment(\.nativeUIScrollProxy) private var scrollProxy
+
     // ─── Selection / caret reporting (opt-in via `on_selection_change`) ──────
     //
     // Independent of the value/`sync_mode` machinery above: it never touches
@@ -155,6 +161,11 @@ struct NativeUITextInputCore: View {
         .autocorrectionDisabled(!autocorrect)
         .disabled(disabled || readOnly)
         .submitLabel(onSubmitCb != 0 ? .done : .return)
+        // Scroll target for `scrollIntoView()` below. `node.id` is already the
+        // ForEach identity of every node in the tree, so it is stable across
+        // republishes; and because it is applied to the view `body` returns
+        // rather than to this struct, it cannot reset the `@State` above.
+        .id(node.id)
         .onAppear {
             if !initialized {
                 text = serverValue
@@ -226,6 +237,8 @@ struct NativeUITextInputCore: View {
                 if selectionEnabled {
                     flushSelection(cb: onSelectionCb)
                 }
+            } else {
+                scrollIntoView()
             }
         }
         .onSubmit {
@@ -250,6 +263,41 @@ struct NativeUITextInputCore: View {
             }
         }
     }
+
+    // ─── Keyboard avoidance ──────────────────────────────────────────────────
+
+    /// Ask the enclosing `<scroll-view>` to bring this field into view.
+    ///
+    /// SwiftUI already shrinks the screen by the keyboard height, but that
+    /// only guarantees the field is somewhere in the SCROLLABLE CONTENT — not
+    /// that it is on screen. On a chat composer pinned to the bottom the two
+    /// amount to the same thing, which is why nothing needed this before; on a
+    /// login form the password field sits mid-page and a shrunk viewport
+    /// leaves it exactly where it was, under the keyboard.
+    ///
+    /// Deferred past the keyboard's own presentation so the scroll runs
+    /// against the already-shrunk viewport. Centering against the full height
+    /// first would put the field in the middle of a screen that is about to
+    /// lose its bottom half — i.e. back under the keyboard. The delay is a
+    /// little longer than the ~0.25s the system animates the keyboard in.
+    ///
+    /// Runs on focus rather than on `keyboardWillShow`, because moving from
+    /// one field to the next never re-shows the keyboard and is exactly when
+    /// this is needed. Where there is no proxy — sheets, modals, fixed
+    /// screens, bottom-anchored scroll views — this is a no-op.
+    private func scrollIntoView() {
+        guard let scrollProxy else { return }
+
+        let id = node.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusScrollDelay) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                scrollProxy.scrollTo(id, anchor: .center)
+            }
+        }
+    }
+
+    /// How long to wait after focus before scrolling, in seconds.
+    private static let focusScrollDelay: TimeInterval = 0.35
 
     // ─── Dispatch policy ─────────────────────────────────────────────────────
 

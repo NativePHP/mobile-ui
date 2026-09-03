@@ -170,6 +170,19 @@ struct NativeUIScrollViewRenderer: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            // Hand this scroll view's proxy to its subtree, so a text input
+            // anywhere inside can bring ITSELF above the keyboard when it
+            // takes focus (`NativeUITextInputCore`). `ScrollViewReader`
+            // proposes its content the size it was proposed, so this is
+            // identity plumbing and nothing else — no layout of its own.
+            //
+            // Withheld from a bottom-anchored view on purpose. That mode
+            // already owns a keyboard policy (the show / hide re-pins below)
+            // and it is deliberately a different one: a chat log wants the
+            // LATEST MESSAGE above the keyboard, not the composer centered in
+            // what's left. Two policies driving one proxy would race, and the
+            // later one would win by accident.
+            .environment(\.nativeUIScrollProxy, stickBottom ? nil : proxy)
             .onAppear {
                 guard stickBottom else { return }
                 // Defer past first layout — lazy content isn't measured yet
@@ -258,5 +271,25 @@ private struct MinViewportHeightModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+// MARK: - Focus-driven scrolling
+
+/// The enclosing vertical `ScrollView`'s proxy, for descendants that need to
+/// scroll themselves into view.
+///
+/// `nil` by default, and nil is a real answer rather than a missing one: a
+/// sheet, a modal, a fixed screen or a bottom-anchored chat log all have no
+/// vertical scroll view whose scrolling is this descendant's business, and a
+/// descendant that finds no proxy correctly does nothing.
+struct NativeUIScrollProxyKey: EnvironmentKey {
+    static let defaultValue: ScrollViewProxy? = nil
+}
+
+extension EnvironmentValues {
+    var nativeUIScrollProxy: ScrollViewProxy? {
+        get { self[NativeUIScrollProxyKey.self] }
+        set { self[NativeUIScrollProxyKey.self] = newValue }
     }
 }
