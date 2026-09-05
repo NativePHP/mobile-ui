@@ -76,6 +76,7 @@ struct NativeUITextInputCore: View {
         let syncMode      = p.getString("sync_mode", default: "live")
         let debounceMs    = p.getInt("debounce_ms", default: 300)
         let keepFocus     = p.getBool("keep_focus_on_submit")
+        let autofocus     = p.getBool("autofocus")
         // Selection reporting is opt-in (0/absent ⇒ off) and never applies to
         // secure fields. Read exactly like `on_change` / `debounce_ms` above.
         let onSelectionCb = p.getCallbackId("on_selection_change")
@@ -160,6 +161,14 @@ struct NativeUITextInputCore: View {
                 text = serverValue
                 lastSentValue = serverValue
                 initialized = true
+
+                // First appearance only: a later re-render must not steal
+                // focus back from wherever the user has since moved it.
+                // Deferred a runloop because @FocusState does not take
+                // while the view is still being installed.
+                if autofocus && !disabled && !readOnly {
+                    DispatchQueue.main.async { isFocused = true }
+                }
             }
         }
         .onChange(of: serverValue) { _, newServerValue in

@@ -3,7 +3,11 @@ package com.nativephp.plugins.native_ui.ui
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -69,6 +73,7 @@ internal data class TextInputProps(
     val onSelectionChangeCb: Int,
     val syncMode: SyncMode,
     val debounceMs: Int,
+    val autofocus: Boolean,
     val selectionDebounceMs: Int,
 ) {
     val enabled: Boolean get() = !disabled && !loading
@@ -133,6 +138,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         onSelectionChangeCb = p.getCallbackId("on_selection_change"),
         syncMode     = parseSyncMode(p.getString("sync_mode", "live")),
         debounceMs   = p.getInt("debounce_ms").let { if (it > 0) it else 300 },
+        autofocus    = p.getBool("autofocus"),
         selectionDebounceMs = resolveSelectionDebounceMs(p.getInt("selection_debounce_ms")),
     )
 }
@@ -435,4 +441,24 @@ internal fun trailingIconSlot(name: String): (@Composable () -> Unit)? =
 internal fun Modifier.nuiA11y(label: String, hint: String): Modifier {
     val merged = listOf(label, hint).filter { it.isNotEmpty() }.joinToString(". ")
     return if (merged.isEmpty()) this else semantics { contentDescription = merged }
+}
+
+/**
+ * Focus the field and raise the keyboard on first composition.
+ *
+ * Keyed on [Unit] rather than on the flag: this fires once when the field
+ * appears, not again on every recomposition - otherwise a re-render would
+ * steal focus back from wherever the user has since moved it.
+ */
+@Composable
+internal fun Modifier.nuiAutofocus(enabled: Boolean): Modifier {
+    if (!enabled) return this
+
+    val requester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        runCatching { requester.requestFocus() }
+    }
+
+    return this.focusRequester(requester)
 }

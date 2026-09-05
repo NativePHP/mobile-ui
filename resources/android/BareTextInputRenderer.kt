@@ -129,7 +129,8 @@ object BareTextInputRenderer {
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
                 }
-                .then(modifier),
+                .then(modifier)
+                .nuiAutofocus(props.autofocus),
             enabled = !props.disabled,
             readOnly = props.readOnly,
             textStyle = LocalTextStyle.current.copy(

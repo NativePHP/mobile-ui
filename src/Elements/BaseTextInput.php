@@ -101,6 +101,9 @@ abstract class BaseTextInput extends Element
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
         }
+        if (! empty($attrs['autofocus']) || ! empty($attrs['auto-focus'])) {
+            $this->autofocus();
+        }
         if (isset($attrs['maxLines']) || isset($attrs['max-lines'])) {
             $this->maxLines((int) ($attrs['maxLines'] ?? $attrs['max-lines']));
         }
@@ -318,6 +321,23 @@ abstract class BaseTextInput extends Element
     public function keepFocusOnSubmit(bool $value = true): static
     {
         $this->inputProps['keep_focus_on_submit'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Focus this field and raise the keyboard as soon as it appears.
+     *
+     * For the field that is the reason its screen exists — a form the user
+     * was just sent to in order to type one thing. Blade: `autofocus`
+     * (or `auto-focus`).
+     *
+     * Only one field per screen should set it. Two would race for first
+     * responder, and the loser's keyboard flickers.
+     */
+    public function autofocus(bool $value = true): static
+    {
+        $this->inputProps['autofocus'] = $value;
 
         return $this;
     }
