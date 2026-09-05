@@ -124,7 +124,8 @@ object FilledTextInputRenderer {
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
-            modifier = Modifier.fillMaxWidth().then(modifier).nuiA11y(props.a11yLabel, props.a11yHint),
+            modifier = Modifier.fillMaxWidth().then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
+                .nuiAutofocus(props.autofocus),
             enabled = props.enabled,
             readOnly = props.readOnly,
             interactionSource = interactionSource,
