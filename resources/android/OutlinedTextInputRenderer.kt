@@ -20,11 +20,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
@@ -91,11 +93,17 @@ object OutlinedTextInputRenderer {
         // modes. Passing our own source also means we don't pay for M3's
         // default ripple-focus-hover machinery elsewhere.
         val interactionSource = remember { MutableInteractionSource() }
+        val focusManager = LocalFocusManager.current
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
                 when (interaction) {
-                    is FocusInteraction.Focus   -> focusStack += interaction
+                    is FocusInteraction.Focus   -> {
+                        focusStack += interaction
+                        // Lets interactive taps elsewhere honor this
+                        // field's keep-focus-on-submit (mobile-air #335).
+                        KeyboardFocusPolicy.focusedFieldKeepsFocus = props.keepFocusOnSubmit
+                    }
                     is FocusInteraction.Unfocus -> {
                         focusStack.remove(interaction.focus)
                         if (focusStack.isEmpty()) {
@@ -103,6 +111,7 @@ object OutlinedTextInputRenderer {
                             // caret lands, then flush any deferred text change.
                             selectionReporter.flush(value)
                             dispatcher.onBlur(value.text)
+                            KeyboardFocusPolicy.focusedFieldKeepsFocus = false
                         }
                     }
                     else -> { /* ignore press/hover/drag */ }
@@ -160,6 +169,12 @@ object OutlinedTextInputRenderer {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 dispatcher.onSubmit(value.text)
+                // Supplying KeyboardActions replaces Compose's default
+                // hide-on-Done, so dismissal is restored here to match
+                // the iOS renderer and the documented default (#335).
+                if (!props.keepFocusOnSubmit) {
+                    focusManager.clearFocus()
+                }
             }),
             textStyle = TextStyle(fontSize = textSize, color = theme.onSurface, fontFamily = customFontFamily, lineHeight = lineHeight),
             colors = OutlinedTextFieldDefaults.colors(
