@@ -65,9 +65,22 @@ struct NativeDrawerHost<Content: View>: View {
 
     @ObservedObject private var state = DrawerHostState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var dragOffset: CGFloat = 0
 
     private let edgeSwipeThreshold: CGFloat = 30
+
+    /// Whether the layout direction is right-to-left. When true, the drawer
+    /// lives on the trailing edge and every physical offset / gesture sign is
+    /// inverted — logical `.leading`/`.trailing` alignment alone does not
+    /// mirror `.offset(x:)` math or drag-translation signs.
+    private var isRTL: Bool { layoutDirection == .rightToLeft }
+
+    /// +1 in LTR, -1 in RTL — the direction content moves to reveal the drawer.
+    private var openSign: CGFloat { isRTL ? -1 : 1 }
+
+    /// The edge the drawer is pinned to and slides from.
+    private var drawerAlignment: Alignment { isRTL ? .trailing : .leading }
 
     /// Slide animation for the drawer. Suppressed when the user has Reduce
     /// Motion enabled — open/close state then applies instantly instead of
@@ -116,37 +129,41 @@ struct NativeDrawerHost<Content: View>: View {
 
             let edgeSwipe = DragGesture(minimumDistance: 10)
                 .onChanged { value in
-                    guard !state.isOpen,
-                          value.startLocation.x < edgeSwipeThreshold,
-                          value.translation.width > 0 else { return }
-                    dragOffset = min(value.translation.width, drawerWidth)
+                    guard !state.isOpen else { return }
+                    let delta = openSign * value.translation.width
+                    guard delta > 0 else { return }
+                    dragOffset = min(delta, drawerWidth)
                 }
                 .onEnded { value in settleOpen(value: value, width: drawerWidth) }
 
             let closeDrag = DragGesture()
                 .onChanged { value in
-                    guard state.isOpen, value.translation.width < 0 else { return }
-                    dragOffset = max(value.translation.width, -drawerWidth)
+                    guard state.isOpen else { return }
+                    let delta = openSign * value.translation.width
+                    guard delta < 0 else { return }
+                    dragOffset = max(delta, -drawerWidth)
                 }
                 .onEnded { value in settleClose(value: value, width: drawerWidth) }
 
-            ZStack(alignment: .leading) {
+            ZStack(alignment: drawerAlignment) {
                 if isReveal {
-                    // Drawer pinned at the left edge, behind the content.
+                    // Drawer pinned at the leading edge (left in LTR, right in
+                    // RTL), behind the content.
                     drawerView(drawerNode, width: drawerWidth)
                         .zIndex(0)
 
-                    // Content slides right to expose the drawer. No scrim
-                    // dims the drawer; a transparent catcher over the pushed-
-                    // aside content closes the drawer on tap / drag.
+                    // Content slides aside (right in LTR, left in RTL) to
+                    // expose the drawer. No scrim dims the drawer; a
+                    // transparent catcher over the pushed-aside content closes
+                    // the drawer on tap / drag.
                     content
-                        .offset(x: openWidth)
+                        .offset(x: openSign * openWidth)
                         .zIndex(1)
 
                     if state.isOpen {
                         Color.clear
                             .contentShape(Rectangle())
-                            .offset(x: openWidth)
+                            .offset(x: openSign * openWidth)
                             .onTapGesture { animateClosed() }
                             .gesture(closeDrag)
                             .zIndex(2)
@@ -166,19 +183,21 @@ struct NativeDrawerHost<Content: View>: View {
                     }
 
                     drawerView(drawerNode, width: drawerWidth)
-                        .offset(x: openWidth - drawerWidth)
+                        .offset(x: openSign * (openWidth - drawerWidth))
                         .gesture(closeDrag)
                         .zIndex(2)
                 }
 
-                // Left-edge detector for swipe-to-open (both modes), when closed.
+                // Edge detector for swipe-to-open (both modes), when closed.
+                // Positioned at the leading edge (LTR) or trailing edge (RTL).
                 if !state.isOpen {
                     Color.clear
                         .frame(width: edgeSwipeThreshold)
                         .frame(maxHeight: .infinity)
                         .contentShape(Rectangle())
+                        .frame(maxWidth: .infinity, alignment: drawerAlignment)
                         .gesture(edgeSwipe)
-                        .ignoresSafeArea(edges: .leading)
+                        .ignoresSafeArea(edges: isRTL ? .trailing : .leading)
                         .zIndex(3)
                 }
 
@@ -232,8 +251,11 @@ struct NativeDrawerHost<Content: View>: View {
     // MARK: - Gesture settling
 
     private func settleOpen(value: DragGesture.Value, width: CGFloat) {
-        let velocity = value.predictedEndTranslation.width - value.translation.width
-        let opened = value.translation.width > width * 0.3 || velocity > 300
+        // `openSign *` maps both directions onto the "open" axis so the
+        // threshold and velocity checks stay direction-agnostic.
+        let delta = openSign * value.translation.width
+        let velocity = openSign * (value.predictedEndTranslation.width - value.translation.width)
+        let opened = delta > width * 0.3 || velocity > 300
         withAnimation(drawerAnimation) {
             state.isOpen = opened
             dragOffset = 0
@@ -241,8 +263,9 @@ struct NativeDrawerHost<Content: View>: View {
     }
 
     private func settleClose(value: DragGesture.Value, width: CGFloat) {
-        let velocity = value.predictedEndTranslation.width - value.translation.width
-        let closed = abs(value.translation.width) > width * 0.3 || velocity < -300
+        let delta = openSign * value.translation.width
+        let velocity = openSign * (value.predictedEndTranslation.width - value.translation.width)
+        let closed = abs(delta) > width * 0.3 || velocity < -300
         withAnimation(drawerAnimation) {
             state.isOpen = !closed
             dragOffset = 0
