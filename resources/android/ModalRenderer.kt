@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -85,7 +86,10 @@ object ModalRenderer {
                 Column(modifier = Modifier.fillMaxSize()) {
                     if (dismissible) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(8.dp),
                             horizontalArrangement = Arrangement.End,
                         ) {
                             IconButton(onClick = {
