@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -336,6 +337,68 @@ private fun totalDescendants(node: NativeUINode): Int {
     return count
 }
 
+/**
+ * The author's declared intent: the index passed to
+ * `ScrollView::autoScrollTo($index)`, or `-1` when they aren't driving the
+ * scroll position at all (prop absent, or negative).
+ *
+ * Deliberately independent of the children, so that precedence over
+ * `scroll-anchor` doesn't flicker while a list fills in.
+ */
+private fun autoScrollRequest(node: NativeUINode): Int {
+    val requested = node.props.getInt("auto_scroll_to", -1)
+
+    return if (requested < 0) -1 else requested
+}
+
+/**
+ * The child to actually bring into view, or `-1` when there is nothing to
+ * scroll to yet.
+ *
+ * An index past the end is IGNORED, not clamped. Clamping looked like a
+ * kindness — land on the last child now, correct it later — but it ties the
+ * scroll to a row that moves whenever the CONTENT does rather than when the
+ * author's intent does. Removing rows then drags a reader down to the new end,
+ * and a list streaming in scrolls repeatedly on its way to a target it hasn't
+ * reached. Ignoring the index keeps the useful half: nothing happens until the
+ * named child exists, and then the list goes there exactly once.
+ */
+private fun resolveAutoScrollTarget(node: NativeUINode): Int {
+    val requested = autoScrollRequest(node)
+
+    return if (requested >= node.children.size) -1 else requested
+}
+
+/**
+ * Drives a lazy list from the resolved `auto_scroll_to` target.
+ *
+ * Keyed on the RESOLVED index, so the scroll fires when the author's intent
+ * actually changes — not on every re-publish. A screen that re-renders for an
+ * unrelated reason (a tick, a toggle elsewhere) carries the same index and
+ * leaves a reader who has scrolled away exactly where they were. It also means
+ * a clamped target re-fires on its own once the list grows past it: the
+ * resolved value moves even though the prop didn't.
+ *
+ * First application jumps, later ones animate — matching `scroll-anchor`:
+ * a screen that opens already scrolled shouldn't visibly fly down from the
+ * top, but a later move is a state change the user should see happen.
+ */
+@Composable
+private fun AutoScrollToEffect(targetIndex: Int, listState: LazyListState) {
+    val didInitialScroll = remember { mutableStateOf(false) }
+
+    LaunchedEffect(targetIndex) {
+        if (targetIndex < 0) return@LaunchedEffect
+
+        if (!didInitialScroll.value) {
+            didInitialScroll.value = true
+            listState.scrollToItem(targetIndex)
+        } else {
+            listState.animateScrollToItem(targetIndex)
+        }
+    }
+}
+
 object ScrollViewRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
@@ -345,8 +408,14 @@ object ScrollViewRenderer {
             detectVerticalDragGestures(onDragStart = { keyboardController?.hide() }) { _, _ -> }
         }
 
+        val autoScrollTarget = resolveAutoScrollTarget(node)
+
         if (horizontal) {
-            LazyRow(modifier = modifier) {
+            val rowState = rememberLazyListState()
+
+            AutoScrollToEffect(autoScrollTarget, rowState)
+
+            LazyRow(modifier = modifier, state = rowState) {
                 items(node.children, key = { it.id }) { child ->
                     NodeView(node = child)
                 }
@@ -360,7 +429,19 @@ object ScrollViewRenderer {
             // item with a max offset lands at the very bottom regardless of how
             // the content is nested. Hooks are called unconditionally to satisfy
             // Compose's rules; the work is gated on the prop.
-            val stickBottom = node.props.getString("scroll_anchor", "") == "bottom"
+            // An explicit `auto_scroll_to` wins over `scroll-anchor="bottom"`.
+            // Both drive the same LazyListState, so letting them run together
+            // would have two effects fighting over the same list — the author
+            // named a specific child, which is the more specific instruction.
+            //
+            // Gated on the REQUEST rather than the resolved target: an author
+            // who named a child owns the scroll position from that moment,
+            // including the frames before the child exists. Gating on the
+            // resolved target would hand control back to the anchor whenever
+            // the index is out of reach, so a list filling in would sit at the
+            // bottom and then jump.
+            val stickBottom = autoScrollRequest(node) < 0 &&
+                node.props.getString("scroll_anchor", "") == "bottom"
             val listState = rememberLazyListState()
             val didInitialScroll = remember { mutableStateOf(false) }
             val contentSignal = if (stickBottom) totalDescendants(node) else 0
@@ -376,6 +457,8 @@ object ScrollViewRenderer {
                     }
                 }
             }
+
+            AutoScrollToEffect(autoScrollTarget, listState)
 
             // A `fill` / `h-full` DIRECT child asked to be at least as tall as
             // the VIEWPORT — the "short screen centred, still scrolls when the
