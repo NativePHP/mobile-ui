@@ -152,6 +152,13 @@ class DatePicker extends Element
             $this->syncMode((string) ($attrs['sync-mode'] ?? $attrs['syncMode']));
         }
 
+        if (isset($attrs['supporting'])) {
+            $this->supporting($attrs['supporting']);
+        }
+        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
+            $this->error();
+        }
+
         $this->applyA11yAttributes($attrs);
     }
 
@@ -461,5 +468,21 @@ class DatePicker extends Element
         unset($layout['padding']);
 
         return $layout;
+    }
+
+    /** Supporting/helper text under the control (error-colored when error()). */
+    public function supporting(string $text): static
+    {
+        $this->pickerProps['supporting'] = $text;
+
+        return $this;
+    }
+
+    /** Flag the control as invalid — destructive tint + supporting text color. */
+    public function error(bool $on = true): static
+    {
+        $this->pickerProps['is_error'] = $on;
+
+        return $this;
     }
 }

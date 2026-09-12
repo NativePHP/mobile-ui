@@ -25,6 +25,14 @@ struct NativeUISelectRenderer: View {
         let disabled    = p.getBool("disabled")
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
+        let isError     = p.getBool("is_error")
+        let supporting  = p.getString("supporting")
+
+        // Error state must be announced, not just tinted: the supporting
+        // text rides the hint channel unless an explicit hint is set
+        // (same convention as the text inputs).
+        let errorText = (isError && !supporting.isEmpty) ? supporting : ""
+        let effectiveA11yHint = a11yHint.isEmpty ? errorText : a11yHint
 
         VStack(alignment: .leading, spacing: 4) {
             if !label.isEmpty {
@@ -56,7 +64,7 @@ struct NativeUISelectRenderer: View {
                 .padding(.vertical, 11)
                 .background(
                     RoundedRectangle(cornerRadius: theme.radiusMd, style: .continuous)
-                        .stroke(theme.outline, lineWidth: 1)
+                        .stroke(isError ? theme.destructive : theme.outline, lineWidth: 1)
                 )
             }
             .disabled(disabled)
@@ -64,6 +72,12 @@ struct NativeUISelectRenderer: View {
             // Announce the current selection as the control's value so
             // VoiceOver reads "…, <selected option>" on focus.
             .accessibilityValue(selected)
+
+            if !supporting.isEmpty {
+                Text(supporting)
+                    .nuiScaledFont(size: theme.fontSm)
+                    .foregroundStyle(isError ? theme.destructive : theme.onSurfaceVariant)
+            }
         }
         .onAppear {
             if !initialized {
@@ -79,7 +93,7 @@ struct NativeUISelectRenderer: View {
             }
         }
         .modifier(A11yLabelModifier(label: a11yLabel))
-        .modifier(A11yHintModifier(hint: a11yHint))
+        .modifier(A11yHintModifier(hint: effectiveA11yHint))
     }
 }
 
