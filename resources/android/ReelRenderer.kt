@@ -1,6 +1,5 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,7 +10,6 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
@@ -145,12 +143,13 @@ object ReelRenderer {
         }
     }
 
+    /**
+     * Transparent: the reel's own background (`bg-*` on the tag) shows
+     * through, so an unshipped page never flashes a theme colour over a
+     * dark feed.
+     */
     @Composable
     private fun ReelPlaceholder() {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
+        Box(modifier = Modifier.fillMaxSize())
     }
 }

@@ -128,12 +128,19 @@ private struct ReelBody: View {
         }
     }
 
+    /// Deliberately NOT a lazy stack. Only the shipped window (a handful
+    /// of pages) is real content; everything else is a flat colour, so a
+    /// plain stack stays cheap into the hundreds of pages. A lazy stack
+    /// would materialise the next page only as it scrolls in, so its
+    /// video surface would be created mid-swipe and pop from black to
+    /// its first frame in front of the user. This way a neighbour is live
+    /// (and buffering) the moment PHP ships it.
     @ViewBuilder
     private func pages(size: CGSize) -> some View {
         if horizontal {
-            LazyHStack(spacing: 0) { pageViews(size: size) }
+            HStack(spacing: 0) { pageViews(size: size) }
         } else {
-            LazyVStack(spacing: 0) { pageViews(size: size) }
+            VStack(spacing: 0) { pageViews(size: size) }
         }
     }
 
@@ -148,7 +155,10 @@ private struct ReelBody: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .accessibilityLabel("Loading")
                 } else {
-                    Color(.secondarySystemBackground)
+                    // Transparent: the reel's own background (`bg-*` on the
+                    // tag) shows through, so an unshipped page never flashes
+                    // a system colour over a dark feed.
+                    Color.clear
                         .accessibilityHidden(true)
                 }
             }

@@ -16,9 +16,16 @@ use Native\Mobile\Edge\Element;
  *   <native:reel :count="$loaded" :page="$page" :from="$from" :to="$to"
  *                has-more on-page-change="onReelPage">
  *       @for ($i = $from; $i <= $to; $i++)
- *           @include('feed.page', ['index' => $i])
+ *           @include('feed.page', ['index' => $i])   {{-- root: <stack :native:key="'page-'.$i"> --}}
  *       @endfor
  *   </native:reel>
+ *
+ * Key the root of every page with `native:key` (an id that does not depend
+ * on the page's slot in the window). The window slides by one on every
+ * swipe, so an unkeyed page gets a new positional node id at each render
+ * and native rebuilds its whole subtree — a video surface restarts from
+ * zero one round-trip after the swipe settles. A bare `key` attribute is
+ * NOT the same thing and is silently ignored.
  *
  * Native lays out `count` logical pages and shows a placeholder for any
  * page outside `[from..to]`. `count` is how many items are loaded SO FAR,

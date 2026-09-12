@@ -26,6 +26,9 @@ namespace Native\Mobile\UI\Concerns;
  *       }
  *   }
  *
+ * Every page's root element must carry `native:key="page-{$index}"` (or
+ * any position-independent key); see Reel's docblock for why.
+ *
  * Single reel per screen for now.
  */
 trait HasReelPage
@@ -34,12 +37,13 @@ trait HasReelPage
     public int $reelPage = 0;
 
     /**
-     * Pages shipped either side of the current one. 1 keeps the first
-     * swipe in both directions on-device; native pre-renders one
-     * neighbour per direction, so anything larger only helps when a PHP
-     * round-trip is slower than a fast flick.
+     * Pages shipped either side of the current one. 2 keeps a fast second
+     * swipe on-device: the page after next is already there while the PHP
+     * round-trip for the settle is still in flight. Each shipped page is
+     * rendered Blade plus a buffering (not yet drawing) video, so keep it
+     * small.
      */
-    public int $reelWindow = 1;
+    public int $reelWindow = 2;
 
     /** Items fetched so far — the reel's `count`. */
     public int $reelLoaded = 0;
