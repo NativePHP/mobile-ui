@@ -5,14 +5,13 @@ import SwiftUI
 /// inside `window_from..window_to` and every other page shows a
 /// placeholder until the next render brings it in.
 ///
-/// Playback seam: each page is rendered with `\.reelPageActive` set, true
-/// only for the settled page, so media renderers (media-player's
-/// `video_player`) play the visible page and pause the pre-rendered
-/// neighbours without this plugin knowing about them.
+/// Media on a page plays itself based on its own on-screen visibility
+/// (media-player's `video_player` does), so this renderer knows nothing
+/// about playback and nothing in core mediates.
 ///
-/// Page-change protocol: once the scroll phase goes idle, the page at the
-/// leading edge → `on_page_change` as decimal text (the `reel_page`
-/// callback kind). The pager position survives re-renders; the `page` prop
+/// Page-change protocol: once the scroll phase goes idle, the page nearest
+/// the leading edge → `on_page_change` over the TAB_CHANGE transport (one
+/// int). The pager position survives re-renders; the `page` prop
 /// only moves it when PHP sends an index that differs from the one native
 /// last reported (a programmatic jump).
 ///
@@ -24,7 +23,12 @@ struct NativeUIReelRenderer: View {
         let p = node.props
         let count = max(0, p.getInt("count", default: node.children.count))
         let windowFrom = p.getInt("window_from")
-        let requestedPage = min(max(0, p.getInt("page")), max(0, count - 1))
+        // `has_more` appends one loading page after the last loaded item —
+        // a feed has no total, so the user can pull into the tail while
+        // PHP fetches the next batch. Settling there reports index == count.
+        let hasMore = p.getBool("has_more")
+        let pageCount = hasMore ? count + 1 : count
+        let requestedPage = min(max(0, p.getInt("page")), max(0, pageCount - 1))
 
         let pageByIndex: [Int: NativeUINode] = {
             var map: [Int: NativeUINode] = [:]
@@ -37,7 +41,8 @@ struct NativeUIReelRenderer: View {
 
         ReelBody(
             nodeId: node.id,
-            count: count,
+            count: pageCount,
+            loaded: count,
             requestedPage: requestedPage,
             horizontal: p.getBool("horizontal"),
             cbId: p.getCallbackId("on_page_change"),
@@ -50,7 +55,10 @@ struct NativeUIReelRenderer: View {
 /// Owns the scroll position state so it outlives parent re-renders.
 private struct ReelBody: View {
     let nodeId: Int
+    /// Pages laid out, including the trailing loading page when `has_more`.
     let count: Int
+    /// Items PHP has loaded; indexes at or past this are the loading tail.
+    let loaded: Int
     let requestedPage: Int
     let horizontal: Bool
     let cbId: Int
@@ -61,21 +69,19 @@ private struct ReelBody: View {
     @State private var position: Int?
     /// Page nearest the leading edge, derived from the scroll geometry.
     @State private var leading: Int
-    /// Page the scroll last came to rest on. Drives the playback seam.
-    @State private var settled: Int
     /// The index PHP knows about — what we last sent, or what it last sent.
     @State private var knownPage: Int
 
-    init(nodeId: Int, count: Int, requestedPage: Int, horizontal: Bool, cbId: Int, pageByIndex: [Int: NativeUINode]) {
+    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, cbId: Int, pageByIndex: [Int: NativeUINode]) {
         self.nodeId = nodeId
         self.count = count
+        self.loaded = loaded
         self.requestedPage = requestedPage
         self.horizontal = horizontal
         self.cbId = cbId
         self.pageByIndex = pageByIndex
         _position = State(initialValue: requestedPage)
         _leading = State(initialValue: requestedPage)
-        _settled = State(initialValue: requestedPage)
         _knownPage = State(initialValue: requestedPage)
     }
 
@@ -112,13 +118,11 @@ private struct ReelBody: View {
             }
             .onScrollPhaseChange { _, phase in
                 guard phase == .idle else { return }
-                settled = leading
                 report(leading)
             }
             .onChange(of: requestedPage) { _, page in
                 guard page != knownPage else { return }
                 knownPage = page
-                settled = page
                 position = page
             }
         }
@@ -138,6 +142,11 @@ private struct ReelBody: View {
             Group {
                 if let child = pageByIndex[index] {
                     NodeView(node: child).equatable()
+                } else if index >= loaded {
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityLabel("Loading")
                 } else {
                     Color(.secondarySystemBackground)
                         .accessibilityHidden(true)
@@ -145,7 +154,6 @@ private struct ReelBody: View {
             }
             .frame(width: size.width, height: size.height)
             .clipped()
-            .environment(\.reelPageActive, settled == index)
             .id(index)
         }
     }
@@ -153,7 +161,7 @@ private struct ReelBody: View {
     private func report(_ index: Int) {
         guard cbId != 0, index != knownPage else { return }
         knownPage = index
-        NativeElementBridge.sendTextChangeEvent(cbId, nodeId: nodeId, text: String(index))
+        NativeElementBridge.sendTabChangeEvent(cbId, nodeId: nodeId, index: index)
     }
 }
 

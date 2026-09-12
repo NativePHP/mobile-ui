@@ -10,19 +10,30 @@ use Native\Mobile\Edge\Element;
  * fills the container; a swipe settles on exactly one page. Vertical by
  * default, `horizontal` for a stories-style strip.
  *
- * Two ways to fill it:
+ * The children are the pages. For a feed, ship only a window of them and
+ * tell the reel where that window sits:
  *
- *  - Windowed (`<reel item="feed.page" :count="$n" :page="$page" />`):
- *    the precompiler renders the `item` view once per index inside
- *    `[window_from..window_to]`; native lays out `count` logical pages
- *    and shows a placeholder for any page PHP hasn't shipped. Pair with
- *    `HasReelPage` — native fires `on_page_change(index)` after each
- *    swipe settles and the next render emits the pages around it.
- *  - Inline (`<reel> ...pages... </reel>`): the children are the pages.
+ *   <native:reel :count="$loaded" :page="$page" :from="$from" :to="$to"
+ *                has-more on-page-change="onReelPage">
+ *       @for ($i = $from; $i <= $to; $i++)
+ *           @include('feed.page', ['index' => $i])
+ *       @endfor
+ *   </native:reel>
+ *
+ * Native lays out `count` logical pages and shows a placeholder for any
+ * page outside `[from..to]`. `count` is how many items are loaded SO FAR,
+ * not a total — a feed has none; grow it as batches arrive and the pager
+ * grows in place. With `has-more` native appends a loading page after the
+ * last item; settling on it reports `index === count`. Pair with the
+ * `HasReelPage` trait — native fires `on_page_change(int $index)` after
+ * each swipe settles and the next render emits the pages around it.
  *
  * Native keeps the pager position across re-renders; `page` only moves
  * the pager when PHP changes it to something other than the index it
  * was last told about (a programmatic jump).
+ *
+ * The page index rides the tab-change transport, so a single feed is
+ * capped at 32,767 pages per screen.
  */
 class Reel extends Element
 {
@@ -60,6 +71,10 @@ class Reel extends Element
         if (isset($attrs['horizontal'])) {
             $this->horizontal(filter_var($attrs['horizontal'], FILTER_VALIDATE_BOOLEAN));
         }
+        $more = $attrs['has_more'] ?? $attrs['hasMore'] ?? $attrs['has-more'] ?? null;
+        if ($more !== null) {
+            $this->hasMore(filter_var($more, FILTER_VALIDATE_BOOLEAN));
+        }
         $cb = $attrs['on_page_change'] ?? $attrs['onPageChange'] ?? $attrs['on-page-change'] ?? null;
         if ($cb !== null) {
             $this->onPageChange($cb);
@@ -68,7 +83,7 @@ class Reel extends Element
         $this->applyA11yAttributes($attrs);
     }
 
-    /** Total logical pages. Defaults to the number of inline children. */
+    /** Items loaded so far. Defaults to the number of inline children. */
     public function count(int $count): static
     {
         $this->reelProps['count'] = max(0, $count);
@@ -91,6 +106,18 @@ class Reel extends Element
         return $this;
     }
 
+    /**
+     * Append a loading page after the last loaded item. The user can pull
+     * into it while the next batch is fetched; settling there reports
+     * `index === count`.
+     */
+    public function hasMore(bool $value = true): static
+    {
+        $this->reelProps['has_more'] = $value;
+
+        return $this;
+    }
+
     public function onPageChange(string $method): static
     {
         $this->pageCallback = $method;
@@ -107,9 +134,9 @@ class Reel extends Element
         }
 
         if ($this->pageCallback !== null) {
-            // 'reel_page' kind: NativeComponent::dispatch decodes the
-            // TEXT_CHANGE payload as one int (the settled page index).
-            $props['on_page_change'] = $registry->register($this->pageCallback, 'reel_page');
+            // Rides the TAB_CHANGE transport: dispatch hands the handler
+            // one int — the settled page index.
+            $props['on_page_change'] = $registry->register($this->pageCallback);
         }
 
         return $props;

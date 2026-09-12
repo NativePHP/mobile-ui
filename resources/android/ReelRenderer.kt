@@ -10,17 +10,17 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.LocalAvailableHeight
-import com.nativephp.mobile.ui.nativerender.LocalReelPageActive
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
@@ -32,13 +32,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * children inside `window_from..window_to` and every other page shows a
  * placeholder until the next render brings it in.
  *
- * Playback seam: each page is composed under `LocalReelPageActive`, true
- * only for the settled page, so media renderers (media-player's
- * `video_player`) play the visible page and pause the pre-composed
- * neighbours without this plugin knowing about them.
+ * Media on a page plays itself based on its own on-screen visibility
+ * (media-player's `video_player` does), so this renderer knows nothing
+ * about playback and nothing in core mediates.
  *
- * Page-change protocol: `settledPage` → `on_page_change` as decimal text
- * (the `reel_page` callback kind). The pager position survives re-renders;
+ * Page-change protocol: `settledPage` → `on_page_change` over the
+ * TAB_CHANGE transport (one int). The pager position survives re-renders;
  * the `page` prop only moves it when PHP sends an index that differs from
  * the one native last reported (a programmatic jump).
  *
@@ -50,7 +49,12 @@ object ReelRenderer {
         val p = node.props
         val count = p.getInt("count", node.children.size).coerceAtLeast(0)
         val windowFrom = p.getInt("window_from", 0)
-        val requestedPage = p.getInt("page", 0).coerceIn(0, (count - 1).coerceAtLeast(0))
+        // `has_more` appends one loading page after the last loaded item —
+        // a feed has no total, so the user can pull into the tail while
+        // PHP fetches the next batch. Settling there reports index == count.
+        val hasMore = p.getBool("has_more", false)
+        val pageCount = if (hasMore) count + 1 else count
+        val requestedPage = p.getInt("page", 0).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
         val horizontal = p.getBool("horizontal", false)
         val cbId = p.getCallbackId("on_page_change")
 
@@ -60,7 +64,7 @@ object ReelRenderer {
             out
         }
 
-        val pagerState = rememberPagerState(initialPage = requestedPage) { count }
+        val pagerState = rememberPagerState(initialPage = requestedPage) { pageCount }
 
         // The index PHP knows about: what we last sent it, or what it last
         // sent us. Stops a re-render that echoes our own page back from
@@ -81,7 +85,7 @@ object ReelRenderer {
                     .collect { index ->
                         if (index != knownPage.intValue) {
                             knownPage.intValue = index
-                            NativeElementBridge.sendTextChangeEvent(cbId, node.id, index.toString())
+                            NativeElementBridge.sendTabChangeEvent(cbId, node.id, index)
                         }
                     }
             }
@@ -101,14 +105,14 @@ object ReelRenderer {
             }
 
             val page: @Composable (Int) -> Unit = { index ->
-                CompositionLocalProvider(LocalReelPageActive provides (pagerState.settledPage == index)) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        val child = pageByIndex[index]
-                        if (child != null) {
-                            NodeView(node = child)
-                        } else {
-                            ReelPlaceholder()
-                        }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    val child = pageByIndex[index]
+                    if (child != null) {
+                        NodeView(node = child)
+                    } else if (hasMore && index >= count) {
+                        ReelLoadingPage()
+                    } else {
+                        ReelPlaceholder()
                     }
                 }
             }
@@ -128,6 +132,16 @@ object ReelRenderer {
                     key = { it },
                 ) { index -> page(index) }
             }
+        }
+    }
+
+    @Composable
+    private fun ReelLoadingPage() {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
         }
     }
 
