@@ -406,6 +406,14 @@
             "self_closing": true
         },
         {
+            "type": "reel",
+            "element": "Native\\Mobile\\UI\\Elements\\Reel",
+            "blade": "Native\\Mobile\\UI\\Components\\Reel",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.ReelRenderer",
+            "ios_renderer": "NativeUIReelRenderer",
+            "self_closing": false
+        },
+        {
             "type": "carousel",
             "element": "Native\\Mobile\\UI\\Elements\\Carousel",
             "blade": "Native\\Mobile\\UI\\Components\\Carousel",
