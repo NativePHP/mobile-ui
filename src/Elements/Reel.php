@@ -35,9 +35,14 @@ use Native\Mobile\Edge\Element;
  * `HasReelPage` trait — native fires `on_page_change(int $index)` after
  * each swipe settles and the next render emits the pages around it.
  *
- * Native keeps the pager position across re-renders; `page` only moves
- * the pager when PHP changes it to something other than the index it
- * was last told about (a programmatic jump).
+ * Native reports the page as soon as it becomes the nearest one during a
+ * swipe (not once the scroll rests), so PHP's round-trip overlaps the
+ * animation. Native keeps the pager position across re-renders; `page`
+ * only moves the pager when PHP sends an index native never reported (a
+ * programmatic jump) — echoes of earlier reports are ignored.
+ *
+ * `placeholders` gives every loaded page an image to show before it is
+ * shipped (see placeholders()).
  *
  * The page index rides the tab-change transport, so a single feed is
  * capped at 32,767 pages per screen.
@@ -82,6 +87,9 @@ class Reel extends Element
         if ($more !== null) {
             $this->hasMore(filter_var($more, FILTER_VALIDATE_BOOLEAN));
         }
+        if (isset($attrs['placeholders']) && is_array($attrs['placeholders'])) {
+            $this->placeholders($attrs['placeholders']);
+        }
         $cb = $attrs['on_page_change'] ?? $attrs['onPageChange'] ?? $attrs['on-page-change'] ?? null;
         if ($cb !== null) {
             $this->onPageChange($cb);
@@ -121,6 +129,22 @@ class Reel extends Element
     public function hasMore(bool $value = true): static
     {
         $this->reelProps['has_more'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * One image URL per page index (empty string for none), for every
+     * loaded item — not just the shipped window. A page PHP hasn't shipped
+     * yet shows its image instead of nothing, so scrolling faster than the
+     * round-trip lands on a still rather than a blank. Twenty URLs is a
+     * trivial payload; the images are fetched and cached natively.
+     *
+     * @param  array<int, string|null>  $urls
+     */
+    public function placeholders(array $urls): static
+    {
+        $this->reelProps['placeholders'] = array_map(fn ($u) => (string) ($u ?? ''), array_values($urls));
 
         return $this;
     }

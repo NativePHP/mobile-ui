@@ -26,6 +26,7 @@ it('applies windowed reel props and registers the page callback', function () {
         'from' => 40,
         'to' => 42,
         'has-more' => true,
+        'placeholders' => ['https://x/a.jpg', null, 'https://x/c.jpg'],
         'on-page-change' => 'setReelPage',
     ]);
     NativeElementCollector::open('column', []);
@@ -41,6 +42,7 @@ it('applies windowed reel props and registers the page callback', function () {
         ->and($tree['props']['window_from'])->toBe(40)
         ->and($tree['props']['window_to'])->toBe(42)
         ->and($tree['props']['has_more'])->toBeTrue()
+        ->and($tree['props']['placeholders'])->toBe(['https://x/a.jpg', '', 'https://x/c.jpg'])
         ->and($tree['props'])->not->toHaveKey('horizontal');
 
     $cb = $tree['props']['on_page_change'];

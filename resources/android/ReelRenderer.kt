@@ -12,11 +12,13 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.LocalAvailableHeight
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
@@ -52,6 +54,8 @@ object ReelRenderer {
         // PHP fetches the next batch. Settling there reports index == count.
         val hasMore = p.getBool("has_more", false)
         val pageCount = if (hasMore) count + 1 else count
+        // Image per page index for pages PHP hasn't shipped; "" for none.
+        val placeholders = p.getStringList("placeholders")
         val requestedPage = p.getInt("page", 0).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
         val horizontal = p.getBool("horizontal", false)
         val cbId = p.getCallbackId("on_page_change")
@@ -64,25 +68,32 @@ object ReelRenderer {
 
         val pagerState = rememberPagerState(initialPage = requestedPage) { pageCount }
 
-        // The index PHP knows about: what we last sent it, or what it last
-        // sent us. Stops a re-render that echoes our own page back from
-        // being mistaken for a jump, and vice versa.
-        val knownPage = remember { mutableIntStateOf(requestedPage) }
+        // Pages reported to PHP that it has not echoed back yet, oldest
+        // first. A `page` prop matching one of these is an echo of our own
+        // report, not a programmatic jump.
+        val reported = remember { mutableStateListOf(requestedPage) }
 
         LaunchedEffect(requestedPage) {
-            if (requestedPage != knownPage.intValue) {
-                knownPage.intValue = requestedPage
+            val at = reported.indexOf(requestedPage)
+            if (at >= 0) {
+                repeat(at + 1) { reported.removeAt(0) }
+            } else {
+                reported.clear()
+                reported.add(requestedPage)
                 pagerState.scrollToPage(requestedPage)
             }
         }
 
         if (cbId != 0) {
+            // `currentPage` flips as soon as a page becomes the nearest one
+            // mid-swipe (settledPage waits for rest), so PHP's round-trip
+            // overlaps the animation instead of starting after it.
             LaunchedEffect(pagerState, cbId) {
-                snapshotFlow { pagerState.settledPage }
+                snapshotFlow { pagerState.currentPage }
                     .distinctUntilChanged()
                     .collect { index ->
-                        if (index != knownPage.intValue) {
-                            knownPage.intValue = index
+                        if (reported.lastOrNull() != index) {
+                            reported.add(index)
                             NativeElementBridge.sendTabChangeEvent(cbId, node.id, index)
                         }
                     }
@@ -110,7 +121,7 @@ object ReelRenderer {
                     } else if (hasMore && index >= count) {
                         ReelLoadingPage()
                     } else {
-                        ReelPlaceholder()
+                        ReelPlaceholder(placeholders.getOrNull(index).orEmpty())
                     }
                 }
             }
@@ -144,12 +155,21 @@ object ReelRenderer {
     }
 
     /**
-     * Transparent: the reel's own background (`bg-*` on the tag) shows
-     * through, so an unshipped page never flashes a theme colour over a
-     * dark feed.
+     * An unshipped page: its placeholder image if PHP gave one, else
+     * transparent so the reel's own background (`bg-*` on the tag) shows
+     * through and never flashes a theme colour over a dark feed.
      */
     @Composable
-    private fun ReelPlaceholder() {
-        Box(modifier = Modifier.fillMaxSize())
+    private fun ReelPlaceholder(imageUrl: String) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (imageUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
     }
 }

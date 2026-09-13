@@ -46,7 +46,8 @@ struct NativeUIReelRenderer: View {
             requestedPage: requestedPage,
             horizontal: p.getBool("horizontal"),
             cbId: p.getCallbackId("on_page_change"),
-            pageByIndex: pageByIndex
+            pageByIndex: pageByIndex,
+            placeholders: p.getStringList("placeholders")
         )
         .modifier(ReelA11yLabelModifier(label: p.getString("a11y_label")))
     }
@@ -63,16 +64,19 @@ private struct ReelBody: View {
     let horizontal: Bool
     let cbId: Int
     let pageByIndex: [Int: NativeUINode]
+    /// Image per page index for pages PHP hasn't shipped; "" for none.
+    let placeholders: [String]
 
     /// Programmatic-jump binding only. Reading it back is useless here:
     /// under `.paging` it goes nil the moment the pager moves.
     @State private var position: Int?
     /// Page nearest the leading edge, derived from the scroll geometry.
     @State private var leading: Int
-    /// The index PHP knows about — what we last sent, or what it last sent.
-    @State private var knownPage: Int
+    /// Pages reported to PHP that it has not echoed back yet, oldest first.
+    /// A `page` prop matching one of these is an echo, not a jump.
+    @State private var reported: [Int]
 
-    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, cbId: Int, pageByIndex: [Int: NativeUINode]) {
+    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String]) {
         self.nodeId = nodeId
         self.count = count
         self.loaded = loaded
@@ -80,9 +84,10 @@ private struct ReelBody: View {
         self.horizontal = horizontal
         self.cbId = cbId
         self.pageByIndex = pageByIndex
+        self.placeholders = placeholders
         _position = State(initialValue: requestedPage)
         _leading = State(initialValue: requestedPage)
-        _knownPage = State(initialValue: requestedPage)
+        _reported = State(initialValue: [requestedPage])
     }
 
     var body: some View {
@@ -115,14 +120,23 @@ private struct ReelBody: View {
                 return min(count - 1, max(0, Int((offset / length).rounded())))
             } action: { _, page in
                 leading = page
+                // Report the moment a page becomes the nearest one, mid-swipe,
+                // so PHP's round-trip overlaps the animation instead of
+                // starting after it. Idle re-reports the same page (no-op).
+                report(page)
             }
             .onScrollPhaseChange { _, phase in
                 guard phase == .idle else { return }
                 report(leading)
             }
             .onChange(of: requestedPage) { _, page in
-                guard page != knownPage else { return }
-                knownPage = page
+                // An echo of something we reported: drop it and everything
+                // reported before it. Anything else is a programmatic jump.
+                if let at = reported.firstIndex(of: page) {
+                    reported.removeFirst(at + 1)
+                    return
+                }
+                reported = [page]
                 position = page
             }
         }
@@ -155,11 +169,7 @@ private struct ReelBody: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .accessibilityLabel("Loading")
                 } else {
-                    // Transparent: the reel's own background (`bg-*` on the
-                    // tag) shows through, so an unshipped page never flashes
-                    // a system colour over a dark feed.
-                    Color.clear
-                        .accessibilityHidden(true)
+                    placeholder(index)
                 }
             }
             .frame(width: size.width, height: size.height)
@@ -169,9 +179,26 @@ private struct ReelBody: View {
     }
 
     private func report(_ index: Int) {
-        guard cbId != 0, index != knownPage else { return }
-        knownPage = index
+        guard cbId != 0, reported.last != index else { return }
+        reported.append(index)
         NativeElementBridge.sendTabChangeEvent(cbId, nodeId: nodeId, index: index)
+    }
+
+    /// An unshipped page: its placeholder image if PHP gave one, else
+    /// nothing (the reel's own background shows through).
+    @ViewBuilder
+    private func placeholder(_ index: Int) -> some View {
+        if index < placeholders.count, !placeholders[index].isEmpty, let url = URL(string: placeholders[index]) {
+            AsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color.clear
+            }
+            .accessibilityHidden(true)
+        } else {
+            Color.clear
+                .accessibilityHidden(true)
+        }
     }
 }
 
