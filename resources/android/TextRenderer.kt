@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
+import com.nativephp.plugins.native_ui.NativeUITheme
 
 object TextRenderer {
     @Composable
@@ -59,11 +60,16 @@ object TextRenderer {
 
         val isDark = isSystemInDarkTheme()
         val darkColor = if (isDark) p.getColor("dark_color", 0) else 0
-        val textArgb = if (darkColor != 0) darkColor else p.getColor("color", 0xFF000000.toInt())
+        // default to 0 (unset) so text without
+        // an explicit color class takes the theme's onSurface, which follows
+        // the system dark mode. The vendor default of pure black was invisible
+        // on dark surfaces — the same defect the iOS renderer had.
+        val textArgb = if (darkColor != 0) darkColor else p.getColor("color", 0)
+        val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
         Text(
             text = text,
             modifier = modifier,
-            color = argbToComposeColor(textArgb),
+            color = if (textArgb != 0) argbToComposeColor(textArgb) else theme.onSurface,
             fontSize = fontSize.sp,
             fontWeight = fontWeight,
             fontStyle = fontStyle,
@@ -105,9 +111,12 @@ object TextRenderer {
             appendTextRuns(node, RunCtx.Root, isDark, ctx)
         }
 
+        // runs without a colour inherit this.
+        val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
         Text(
             text = annotated,
             modifier = modifier,
+            color = theme.onSurface,
             textAlign = resolveTextAlign(p.getInt("text_align")),
             maxLines = if (maxLines > 0) maxLines else Int.MAX_VALUE,
             overflow = TextOverflow.Ellipsis,
@@ -146,7 +155,9 @@ private data class RunCtx(
     companion object {
         // Root defaults — mirror the leaf path (16sp, normal, black, no dark
         // override, no custom font, no decoration/letter-spacing/transform).
-        val Root = RunCtx(16f, 0, 0, "", 0xFF000000.toInt(), 0, false, 0f, 0)
+        // no colour → the span inherits the
+        // enclosing Text's colour (theme onSurface), see RenderComposed.
+        val Root = RunCtx(16f, 0, 0, "", 0, 0, false, 0f, 0)
     }
 }
 
@@ -180,7 +191,7 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
         val effectiveBg = if (darkBg != 0) darkBg else bgArgb
 
         val span = SpanStyle(
-            color = argbToComposeColor(fg),
+            color = if (fg != 0) argbToComposeColor(fg) else Color.Unspecified,
             fontSize = ctx.fontSize.sp,
             fontWeight = resolveFontWeight(ctx.fontWeightInt),
             fontStyle = if (ctx.italic) FontStyle.Italic else FontStyle.Normal,
