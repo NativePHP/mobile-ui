@@ -3,6 +3,8 @@ package com.nativephp.plugins.native_ui.ui
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
@@ -28,6 +30,14 @@ import kotlin.math.abs
  *   - `pan-y-id`       (int)   — id of the SharedValue receiving the
  *                                cumulative vertical drag translation.
  *   - `pan-y-initial`  (float) — initial value to seed the store with.
+ *   - `pan-x-id` /
+ *     `pan-x-initial`          — same, for the horizontal axis. Bind one
+ *                                axis or both.
+ *   - `on_drag_end`    (int)   — callback fired when a drag ends,
+ *                                carrying the final "x,y" translation
+ *                                (dp) as text (rides the TEXT_CHANGE
+ *                                format). An unbound axis reports the
+ *                                raw gesture translation.
  *   - `pinch-id`       (int)   — id of the SharedValue receiving the
  *                                cumulative pinch scale factor
  *                                (1.0 = identity).
@@ -57,8 +67,11 @@ import kotlin.math.abs
 object GestureAreaRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
+        val panXId = node.props.getInt("pan-x-id", 0)
+        val panXInitial = node.props.getFloat("pan-x-initial", 0f)
         val panYId = node.props.getInt("pan-y-id", 0)
         val panYInitial = node.props.getFloat("pan-y-initial", 0f)
+        val onDragEnd = node.props.getInt("on_drag_end", 0)
         val pinchId = node.props.getInt("pinch-id", 0)
         val pinchInitial = node.props.getFloat("pinch-initial", 1f)
         val pinchMin = node.props.getFloat("pinch-min", 0f)
@@ -79,27 +92,61 @@ object GestureAreaRenderer {
         //     on a persistent SharedValue. That is an explicit
         //     write-back: push it into the store even though the id
         //     already has a live value (a reset button, snap-to, etc.).
+        SyncBinding(panXId, panXInitial)
         SyncBinding(panYId, panYInitial)
         SyncBinding(pinchId, pinchInitial)
 
         Box(
             modifier = modifier
                 .nuiA11y(node.props.getString("a11y_label"), node.props.getString("a11y_hint"))
-                .pointerInput(panYId) {
-                    if (panYId == 0) return@pointerInput
-                    detectVerticalDragGestures(
-                        onDragStart = { /* no-op — store already holds the running value */ },
-                        onDragEnd = { /* @drag-end callback wired in 3b */ },
-                        onDragCancel = { /* same */ },
-                    ) { _, dragAmount ->
-                        // dragAmount is in raw pixels; convert to dp so the
-                        // SharedValue stays density-independent and the
-                        // user's `interpolate([0, 200], ...)` formulas match
-                        // iOS point-based behavior. PointerInputScope
-                        // extends Density, so .toDp() is in scope.
-                        val deltaDp = dragAmount.toDp().value
-                        val current = SharedValueStore.valueOf(panYId)
-                        SharedValueStore.set(panYId, current + deltaDp)
+                .pointerInput(panXId, panYId, onDragEnd) {
+                    if (panXId == 0 && panYId == 0 && onDragEnd == 0) return@pointerInput
+                    // Raw gesture translation for this drag, in dp — what
+                    // `on_drag_end` reports for an axis with no SharedValue.
+                    var gestureX = 0f
+                    var gestureY = 0f
+                    // dragAmount is in raw pixels; convert to dp so the
+                    // SharedValue stays density-independent and the
+                    // user's `interpolate([0, 200], ...)` formulas match
+                    // iOS point-based behavior. PointerInputScope
+                    // extends Density, so .toDp() is in scope.
+                    val onDrag: (Offset) -> Unit = { dragAmount ->
+                        val dx = dragAmount.x.toDp().value
+                        val dy = dragAmount.y.toDp().value
+                        gestureX += dx
+                        gestureY += dy
+                        if (panXId != 0) {
+                            SharedValueStore.set(panXId, SharedValueStore.valueOf(panXId) + dx)
+                        }
+                        if (panYId != 0) {
+                            SharedValueStore.set(panYId, SharedValueStore.valueOf(panYId) + dy)
+                        }
+                    }
+                    val onEnd: () -> Unit = {
+                        if (onDragEnd != 0) {
+                            val x = if (panXId != 0) SharedValueStore.valueOf(panXId) else gestureX
+                            val y = if (panYId != 0) SharedValueStore.valueOf(panYId) else gestureY
+                            NativeUIBridge.sendTextChangeEvent(onDragEnd, node.id, "$x,$y")
+                        }
+                        gestureX = 0f
+                        gestureY = 0f
+                    }
+                    when {
+                        // One axis bound: detect on that axis only, so the
+                        // other direction stays free for an enclosing
+                        // scroll container.
+                        panXId != 0 && panYId == 0 -> detectHorizontalDragGestures(
+                            onDragEnd = onEnd,
+                            onDragCancel = onEnd,
+                        ) { _, dragAmount -> onDrag(Offset(dragAmount, 0f)) }
+                        panXId == 0 && panYId != 0 -> detectVerticalDragGestures(
+                            onDragEnd = onEnd,
+                            onDragCancel = onEnd,
+                        ) { _, dragAmount -> onDrag(Offset(0f, dragAmount)) }
+                        else -> detectDragGestures(
+                            onDragEnd = onEnd,
+                            onDragCancel = onEnd,
+                        ) { _, dragAmount -> onDrag(dragAmount) }
                     }
                 }
                 .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax) {
