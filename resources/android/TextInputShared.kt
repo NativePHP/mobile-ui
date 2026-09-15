@@ -199,8 +199,8 @@ internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: 
     if (secure) return KeyboardCapitalization.None
 
     return when (explicit.lowercase()) {
-        "none"       -> KeyboardCapitalization.None
-        "sentences"  -> KeyboardCapitalization.Sentences
+        "none", "never", "off" -> KeyboardCapitalization.None
+        "sentences", "on"        -> KeyboardCapitalization.Sentences
         "words"      -> KeyboardCapitalization.Words
         "characters" -> KeyboardCapitalization.Characters
         else -> when (keyboard.lowercase()) {

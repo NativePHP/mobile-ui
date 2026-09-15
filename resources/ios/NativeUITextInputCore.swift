@@ -463,8 +463,8 @@ private func resolveAutocapitalization(explicit: String, secure: Bool, keyboard:
     if secure { return .never }
 
     switch explicit.lowercased() {
-    case "none":       return .never
-    case "sentences":  return .sentences
+    case "none", "never", "off": return .never
+    case "sentences", "on":        return .sentences
     case "words":      return .words
     case "characters": return .characters
     default:           break
