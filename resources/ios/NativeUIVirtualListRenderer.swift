@@ -145,7 +145,7 @@ private final class VisibleWindowTracker: ObservableObject {
         scheduleEmit()
     }
 
-    private func scheduleEmit(delay: TimeInterval = 0.2) {
+    private func scheduleEmit(delay: TimeInterval = 0.025) {
         debounceTask?.cancel()
         let task = DispatchWorkItem { [weak self] in self?.emitIfNeeded() }
         debounceTask = task

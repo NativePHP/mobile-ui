@@ -27,7 +27,7 @@ import com.nativephp.mobile.ui.nativerender.NodeView
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Full-screen snap pager (`reel`). Compose's `VerticalPager` /
+ * Full-screen snap pager (`pager`). Compose's `VerticalPager` /
  * `HorizontalPager` lays out `count` logical pages; PHP ships only the
  * children inside `window_from..window_to` and every other page shows a
  * placeholder until the next render brings it in.
@@ -41,9 +41,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * the `page` prop only moves it when PHP sends an index that differs from
  * the one native last reported (a programmatic jump).
  *
- * See `src/Elements/Reel.php` for the matching element class.
+ * See `src/Elements/Pager.php` for the matching element class.
  */
-object ReelRenderer {
+object PagerRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
         val p = node.props
@@ -100,13 +100,13 @@ object ReelRenderer {
             }
         }
 
-        val reelModifier = modifier.nuiA11y(p.getString("a11y_label"), p.getString("a11y_hint"))
+        val pagerModifier = modifier.nuiA11y(p.getString("a11y_label"), p.getString("a11y_hint"))
 
         // A pager needs a bounded main axis. Inside a lazy parent (the
         // plain vertical scroll_view is a LazyColumn) the incoming height
         // is infinite, so fall back to one viewport.
         val availableHeight = LocalAvailableHeight.current
-        BoxWithConstraints(modifier = reelModifier) {
+        BoxWithConstraints(modifier = pagerModifier) {
             val sized = if (constraints.hasBoundedHeight) {
                 Modifier.fillMaxSize()
             } else {
@@ -119,9 +119,9 @@ object ReelRenderer {
                     if (child != null) {
                         NodeView(node = child)
                     } else if (hasMore && index >= count) {
-                        ReelLoadingPage()
+                        PagerLoadingPage()
                     } else {
-                        ReelPlaceholder(placeholders.getOrNull(index).orEmpty())
+                        PagerPlaceholder(placeholders.getOrNull(index).orEmpty())
                     }
                 }
             }
@@ -145,7 +145,7 @@ object ReelRenderer {
     }
 
     @Composable
-    private fun ReelLoadingPage() {
+    private fun PagerLoadingPage() {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
@@ -156,11 +156,11 @@ object ReelRenderer {
 
     /**
      * An unshipped page: its placeholder image if PHP gave one, else
-     * transparent so the reel's own background (`bg-*` on the tag) shows
+     * transparent so the pager's own background (`bg-*` on the tag) shows
      * through and never flashes a theme colour over a dark feed.
      */
     @Composable
-    private fun ReelPlaceholder(imageUrl: String) {
+    private fun PagerPlaceholder(imageUrl: String) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (imageUrl.isNotEmpty()) {
                 AsyncImage(

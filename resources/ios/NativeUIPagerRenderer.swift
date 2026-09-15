@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Full-screen snap pager (`reel`). A paging `ScrollView` lays out `count`
+/// Full-screen snap pager (`pager`). A paging `ScrollView` lays out `count`
 /// logical pages, each sized to the container; PHP ships only the children
 /// inside `window_from..window_to` and every other page shows a
 /// placeholder until the next render brings it in.
@@ -15,8 +15,8 @@ import SwiftUI
 /// only moves it when PHP sends an index that differs from the one native
 /// last reported (a programmatic jump).
 ///
-/// See `src/Elements/Reel.php` for the matching element class.
-struct NativeUIReelRenderer: View {
+/// See `src/Elements/Pager.php` for the matching element class.
+struct NativeUIPagerRenderer: View {
     let node: NativeUINode
 
     var body: some View {
@@ -39,7 +39,7 @@ struct NativeUIReelRenderer: View {
             return map
         }()
 
-        ReelBody(
+        PagerBody(
             nodeId: node.id,
             count: pageCount,
             loaded: count,
@@ -49,12 +49,12 @@ struct NativeUIReelRenderer: View {
             pageByIndex: pageByIndex,
             placeholders: p.getStringList("placeholders")
         )
-        .modifier(ReelA11yLabelModifier(label: p.getString("a11y_label")))
+        .modifier(PagerA11yLabelModifier(label: p.getString("a11y_label")))
     }
 }
 
 /// Owns the scroll position state so it outlives parent re-renders.
-private struct ReelBody: View {
+private struct PagerBody: View {
     let nodeId: Int
     /// Pages laid out, including the trailing loading page when `has_more`.
     let count: Int
@@ -93,7 +93,7 @@ private struct ReelBody: View {
     var body: some View {
         let axis: Axis.Set = horizontal ? .horizontal : .vertical
 
-        // Pages are sized to the reel's measured frame — the visible
+        // Pages are sized to the pager's measured frame — the visible
         // viewport. Under a navigation bar the ScrollView extends beneath
         // the bar and insets its content by the bar height; `.paging`
         // steps by the visible length, so this is the one sizing that
@@ -185,7 +185,7 @@ private struct ReelBody: View {
     }
 
     /// An unshipped page: its placeholder image if PHP gave one, else
-    /// nothing (the reel's own background shows through).
+    /// nothing (the pager's own background shows through).
     @ViewBuilder
     private func placeholder(_ index: Int) -> some View {
         if index < placeholders.count, !placeholders[index].isEmpty, let url = URL(string: placeholders[index]) {
@@ -202,7 +202,7 @@ private struct ReelBody: View {
     }
 }
 
-private struct ReelA11yLabelModifier: ViewModifier {
+private struct PagerA11yLabelModifier: ViewModifier {
     let label: String
 
     func body(content: Content) -> some View {

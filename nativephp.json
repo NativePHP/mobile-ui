@@ -406,11 +406,11 @@
             "self_closing": true
         },
         {
-            "type": "reel",
-            "element": "Native\\Mobile\\UI\\Elements\\Reel",
-            "blade": "Native\\Mobile\\UI\\Components\\Reel",
-            "android_renderer": "com.nativephp.plugins.native_ui.ui.ReelRenderer",
-            "ios_renderer": "NativeUIReelRenderer",
+            "type": "pager",
+            "element": "Native\\Mobile\\UI\\Elements\\Pager",
+            "blade": "Native\\Mobile\\UI\\Components\\Pager",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.PagerRenderer",
+            "ios_renderer": "NativeUIPagerRenderer",
             "self_closing": false
         },
         {

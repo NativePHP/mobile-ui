@@ -29,7 +29,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * even though the per-row content isn't allocated.
  *
  * Visible range is read from `LazyListState.layoutInfo` via `snapshotFlow`,
- * debounced 80ms (same pattern as on_end_reached in `ListRenderer.kt`).
+ * debounced 25ms (same pattern as on_end_reached in `ListRenderer.kt`).
  * The callback fires with `[from, to]` (overscan applied) as
  * `"$from,$to"` text — PHP decodes via the `virtual_window` callback kind.
  *
@@ -70,7 +70,7 @@ object VirtualListRenderer {
                     Pair(first, last)
                 }
                     .distinctUntilChanged()
-                    .debounce(200)
+                    .debounce(25)
                     .collect { (first, last) ->
                         if (first < 0 || last < 0) return@collect
                         // Hysteresis. Only ask PHP for a new window when the

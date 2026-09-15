@@ -11,13 +11,13 @@ use Native\Mobile\Edge\Element;
  * default, `horizontal` for a stories-style strip.
  *
  * The children are the pages. For a feed, ship only a window of them and
- * tell the reel where that window sits:
+ * tell the pager where that window sits:
  *
- *   <native:reel :count="$loaded" :page="$page" :from="$from" :to="$to"
- *                has-more on-page-change="onReelPage">
+ *   <native:pager :count="$loaded" :page="$page" :from="$from" :to="$to"
+ *                has-more on-page-change="onPagerPage">
  *       ... one {{ '@' }}include('feed.page', ['index' => $i]) per $i in $from..$to,
  *           each rooted at <stack :native:key="'page-'.$i"> ...
- *   </native:reel>
+ *   </native:pager>
  *
  * Key the root of every page with `native:key` (an id that does not depend
  * on the page's slot in the window). The window slides by one on every
@@ -31,7 +31,7 @@ use Native\Mobile\Edge\Element;
  * not a total — a feed has none; grow it as batches arrive and the pager
  * grows in place. With `has-more` native appends a loading page after the
  * last item; settling on it reports `index === count`. Pair with the
- * `HasReelPage` trait — native fires `on_page_change(int $index)` after
+ * `HasPagerWindow` trait — native fires `on_page_change(int $index)` after
  * each swipe settles and the next render emits the pages around it.
  *
  * Native reports the page as soon as it becomes the nearest one during a
@@ -46,12 +46,12 @@ use Native\Mobile\Edge\Element;
  * The page index rides the tab-change transport, so a single feed is
  * capped at 32,767 pages per screen.
  */
-class Reel extends Element
+class Pager extends Element
 {
-    protected string $type = 'reel';
+    protected string $type = 'pager';
 
     /** @var array<string, mixed> */
-    protected array $reelProps = [];
+    protected array $pagerProps = [];
 
     protected ?string $pageCallback = null;
 
@@ -73,11 +73,11 @@ class Reel extends Element
         }
         $from = $attrs['window_from'] ?? $attrs['windowFrom'] ?? $attrs['from'] ?? null;
         if ($from !== null) {
-            $this->reelProps['window_from'] = (int) $from;
+            $this->pagerProps['window_from'] = (int) $from;
         }
         $to = $attrs['window_to'] ?? $attrs['windowTo'] ?? $attrs['to'] ?? null;
         if ($to !== null) {
-            $this->reelProps['window_to'] = (int) $to;
+            $this->pagerProps['window_to'] = (int) $to;
         }
         if (isset($attrs['horizontal'])) {
             $this->horizontal(filter_var($attrs['horizontal'], FILTER_VALIDATE_BOOLEAN));
@@ -100,7 +100,7 @@ class Reel extends Element
     /** Items loaded so far. Defaults to the number of inline children. */
     public function count(int $count): static
     {
-        $this->reelProps['count'] = max(0, $count);
+        $this->pagerProps['count'] = max(0, $count);
 
         return $this;
     }
@@ -108,14 +108,14 @@ class Reel extends Element
     /** Page the pager should show; see the class doc for when it moves. */
     public function page(int $index): static
     {
-        $this->reelProps['page'] = max(0, $index);
+        $this->pagerProps['page'] = max(0, $index);
 
         return $this;
     }
 
     public function horizontal(bool $value = true): static
     {
-        $this->reelProps['horizontal'] = $value;
+        $this->pagerProps['horizontal'] = $value;
 
         return $this;
     }
@@ -127,7 +127,7 @@ class Reel extends Element
      */
     public function hasMore(bool $value = true): static
     {
-        $this->reelProps['has_more'] = $value;
+        $this->pagerProps['has_more'] = $value;
 
         return $this;
     }
@@ -143,7 +143,7 @@ class Reel extends Element
      */
     public function placeholders(array $urls): static
     {
-        $this->reelProps['placeholders'] = array_map(fn ($u) => (string) ($u ?? ''), array_values($urls));
+        $this->pagerProps['placeholders'] = array_map(fn ($u) => (string) ($u ?? ''), array_values($urls));
 
         return $this;
     }
@@ -157,7 +157,7 @@ class Reel extends Element
 
     protected function resolveProps(CallbackRegistry $registry): array
     {
-        $props = $this->reelProps;
+        $props = $this->pagerProps;
 
         if (! isset($props['count'])) {
             $props['count'] = count($this->children);
