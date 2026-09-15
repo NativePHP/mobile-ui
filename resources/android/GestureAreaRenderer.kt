@@ -110,16 +110,18 @@ object GestureAreaRenderer {
                     // user's `interpolate([0, 200], ...)` formulas match
                     // iOS point-based behavior. PointerInputScope
                     // extends Density, so .toDp() is in scope.
-                    val onDrag: (Offset) -> Unit = { dragAmount ->
-                        val dx = dragAmount.x.toDp().value
-                        val dy = dragAmount.y.toDp().value
-                        gestureX += dx
-                        gestureY += dy
+                    // `bound` is what the detector reports for the axis (or
+                    // axes) it watches and is what moves the SharedValue;
+                    // `raw` is the pointer's full movement, kept for both
+                    // axes so `on_drag_end` can report an unbound one too.
+                    val onDrag: (Offset, Offset) -> Unit = { bound, raw ->
+                        gestureX += raw.x.toDp().value
+                        gestureY += raw.y.toDp().value
                         if (panXId != 0) {
-                            SharedValueStore.set(panXId, SharedValueStore.valueOf(panXId) + dx)
+                            SharedValueStore.set(panXId, SharedValueStore.valueOf(panXId) + bound.x.toDp().value)
                         }
                         if (panYId != 0) {
-                            SharedValueStore.set(panYId, SharedValueStore.valueOf(panYId) + dy)
+                            SharedValueStore.set(panYId, SharedValueStore.valueOf(panYId) + bound.y.toDp().value)
                         }
                     }
                     val onEnd: () -> Unit = {
@@ -138,15 +140,19 @@ object GestureAreaRenderer {
                         panXId != 0 && panYId == 0 -> detectHorizontalDragGestures(
                             onDragEnd = onEnd,
                             onDragCancel = onEnd,
-                        ) { _, dragAmount -> onDrag(Offset(dragAmount, 0f)) }
+                        ) { change, dragAmount ->
+                            onDrag(Offset(dragAmount, 0f), change.position - change.previousPosition)
+                        }
                         panXId == 0 && panYId != 0 -> detectVerticalDragGestures(
                             onDragEnd = onEnd,
                             onDragCancel = onEnd,
-                        ) { _, dragAmount -> onDrag(Offset(0f, dragAmount)) }
+                        ) { change, dragAmount ->
+                            onDrag(Offset(0f, dragAmount), change.position - change.previousPosition)
+                        }
                         else -> detectDragGestures(
                             onDragEnd = onEnd,
                             onDragCancel = onEnd,
-                        ) { _, dragAmount -> onDrag(dragAmount) }
+                        ) { _, dragAmount -> onDrag(dragAmount, dragAmount) }
                     }
                 }
                 .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax) {
