@@ -75,6 +75,17 @@ private struct PagerBody: View {
     /// Pages reported to PHP that it has not echoed back yet, oldest first.
     /// A `page` prop matching one of these is an echo, not a jump.
     @State private var reported: [Int]
+    /// The page most recently sent to PHP. Kept apart from the pending
+    /// acknowledgements: an echo clears those, and without this the idle
+    /// callback would report the same page a second time, repeating any
+    /// pagination the handler does.
+    @State private var lastReported: Int
+
+    /// Loaded-but-unshipped pages this far from the current one get their
+    /// placeholder image; the rest stay empty. Wide enough that a fast
+    /// flick past the shipped window lands on a still, small enough that a
+    /// long feed never fetches stills it may never reach.
+    static let placeholderRadius = 4
 
     init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String]) {
         self.nodeId = nodeId
@@ -88,6 +99,7 @@ private struct PagerBody: View {
         _position = State(initialValue: requestedPage)
         _leading = State(initialValue: requestedPage)
         _reported = State(initialValue: [requestedPage])
+        _lastReported = State(initialValue: requestedPage)
     }
 
     var body: some View {
@@ -149,6 +161,10 @@ private struct PagerBody: View {
     /// video surface would be created mid-swipe and pop from black to
     /// its first frame in front of the user. This way a neighbour is live
     /// (and buffering) the moment PHP ships it.
+    ///
+    /// Placeholder images are the one thing that would make the eager
+    /// stack expensive, so they only exist within `placeholderRadius` of
+    /// the current page; further slots are clear until scrolled towards.
     @ViewBuilder
     private func pages(size: CGSize) -> some View {
         if horizontal {
@@ -168,8 +184,11 @@ private struct PagerBody: View {
                         .controlSize(.large)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .accessibilityLabel("Loading")
-                } else {
+                } else if abs(index - leading) <= Self.placeholderRadius {
                     placeholder(index)
+                } else {
+                    Color.clear
+                        .accessibilityHidden(true)
                 }
             }
             .frame(width: size.width, height: size.height)
@@ -179,7 +198,8 @@ private struct PagerBody: View {
     }
 
     private func report(_ index: Int) {
-        guard cbId != 0, reported.last != index else { return }
+        guard cbId != 0, lastReported != index else { return }
+        lastReported = index
         reported.append(index)
         NativeElementBridge.sendTabChangeEvent(cbId, nodeId: nodeId, index: index)
     }
