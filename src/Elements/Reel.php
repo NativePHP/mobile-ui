@@ -15,9 +15,8 @@ use Native\Mobile\Edge\Element;
  *
  *   <native:reel :count="$loaded" :page="$page" :from="$from" :to="$to"
  *                has-more on-page-change="onReelPage">
- *       @for ($i = $from; $i <= $to; $i++)
- *           @include('feed.page', ['index' => $i])   {{-- root: <stack :native:key="'page-'.$i"> --}}
- *       @endfor
+ *       ... one {{ '@' }}include('feed.page', ['index' => $i]) per $i in $from..$to,
+ *           each rooted at <stack :native:key="'page-'.$i"> ...
  *   </native:reel>
  *
  * Key the root of every page with `native:key` (an id that does not depend

@@ -77,10 +77,10 @@ it('tracks the settled page, the loaded count and when a feed needs its next bat
         use HasReelPage;
     };
 
-    // Nothing loaded yet: window is page ±1, unclamped.
+    // Nothing loaded yet: window is page ±2, unclamped.
     expect($host->reelPage)->toBe(0)
         ->and($host->reelWindowFrom())->toBe(0)
-        ->and($host->reelWindowTo())->toBe(1)
+        ->and($host->reelWindowTo())->toBe(2)
         ->and($host->reelNeedsMore())->toBeTrue();
 
     $host->extendReel(10);
@@ -90,7 +90,7 @@ it('tracks the settled page, the loaded count and when a feed needs its next bat
 
     // Window clamps to what is loaded.
     $host->setReelPage(9);
-    expect($host->reelWindowFrom())->toBe(8)
+    expect($host->reelWindowFrom())->toBe(7)
         ->and($host->reelWindowTo())->toBe(9);
 
     // Within three of the end → fetch ahead; the threshold is tunable.
