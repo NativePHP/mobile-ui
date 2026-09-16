@@ -11,12 +11,29 @@ struct NativeUIScrollViewRenderer: View {
     /// bottom-anchored list opens at the bottom.
     @State private var atBottom: Bool = true
 
+    /// Whether `auto_scroll_to` has been applied once already. The first
+    /// application jumps (a screen that opens already scrolled shouldn't fly
+    /// down from the top); later ones animate, so a move the user didn't
+    /// initiate is visible rather than teleporting the content.
+    @State private var didInitialAutoScroll: Bool = false
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let spacing = CGFloat(node.layout?.gap ?? 0)
         let axis = node.props.getString("axis", default: "")
-        let stickBottom = node.props.getString("scroll_anchor", default: "") == "bottom"
+        // An explicit `auto_scroll_to` wins over `scroll-anchor="bottom"`.
+        // Both drive the same ScrollViewReader, so letting them run together
+        // would have two handlers fighting over the same list — the author
+        // named a specific child, which is the more specific instruction.
+        //
+        // Gated on the REQUEST rather than the resolved target: an author who
+        // named a child owns the scroll position from that moment, including
+        // the frames before the child exists. Gating on the resolved target
+        // would hand control back to the anchor whenever the index is out of
+        // reach, so a list filling in would sit at the bottom and then jump.
+        let stickBottom = autoScrollRequest == nil
+            && node.props.getString("scroll_anchor", default: "") == "bottom"
         let messageSignal = stickBottom ? Self.descendantCount(node) : 0
 
         // 2D mode. Bypass the Lazy stacks (which force 1D layout) and use a
@@ -33,6 +50,10 @@ struct NativeUIScrollViewRenderer: View {
             // content view directly inside the ScrollView so the content's
             // own `.frame(...)` (set by NodeLayoutModifier from `w-[N]` /
             // `h-[N]` classes) drives the scrollable size.
+            //
+            // `auto_scroll_to` is deliberately not honoured here: children in
+            // 2D mode are layered at their own frames rather than sequenced,
+            // so "the child at index N" has no position to scroll to.
             //
             // Multi-child 2D scrolls are rare (typical use is one large
             // image / canvas). For multiple children we layer them in a
@@ -53,15 +74,24 @@ struct NativeUIScrollViewRenderer: View {
             }
             .scrollDismissesKeyboard(.interactively)
         } else if horizontal {
-            ScrollView(.horizontal, showsIndicators: showsIndicators) {
-                LazyHStack(alignment: .top, spacing: spacing) {
-                    ForEach(node.children) { child in
-                        NodeView(node: child)
-                            .equatable()
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: showsIndicators) {
+                    LazyHStack(alignment: .top, spacing: spacing) {
+                        ForEach(node.children) { child in
+                            NodeView(node: child)
+                                .equatable()
+                        }
                     }
                 }
+                .scrollDismissesKeyboard(.interactively)
+                // `.leading`, so a horizontal auto-scroll parks the target at
+                // the left edge — the same place Android's `scrollToItem`
+                // puts it.
+                .onAppear { applyAutoScroll(proxy: proxy, anchor: .leading, animated: false) }
+                .onChange(of: autoScrollIndex) { _, _ in
+                    applyAutoScroll(proxy: proxy, anchor: .leading, animated: true)
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
         } else if hasFillHeightChild {
             // A `fill` / `h-full` child asked to be at least as tall as the
             // VIEWPORT — the "short screen centred, still scrolls when the
@@ -184,6 +214,13 @@ struct NativeUIScrollViewRenderer: View {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
+            // `.top`, so the named child parks at the top of the viewport —
+            // matching Android's `scrollToItem`, which puts the item at the
+            // start of the list.
+            .onAppear { applyAutoScroll(proxy: proxy, anchor: .top, animated: false) }
+            .onChange(of: autoScrollIndex) { _, _ in
+                applyAutoScroll(proxy: proxy, anchor: .top, animated: true)
+            }
             // The keyboard resizes the scroll viewport in BOTH directions —
             // it shrinks on the way in (the screen shifts up for keyboard
             // avoidance) and grows back on the way out. Re-pin on each, so
@@ -211,6 +248,72 @@ struct NativeUIScrollViewRenderer: View {
                 // straight back down and undo the scroll that dismissed it.
                 guard atBottom else { return }
                 repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
+            }
+        }
+    }
+
+    /// The author's declared intent: the index passed to
+    /// `ScrollView::autoScrollTo($index)`, or `nil` when they aren't driving
+    /// the scroll position at all (prop absent, or negative).
+    ///
+    /// Deliberately independent of the children, so that precedence over
+    /// `scroll-anchor` doesn't flicker while a list fills in.
+    private var autoScrollRequest: Int? {
+        let requested = node.props.getInt("auto_scroll_to", default: -1)
+
+        return requested >= 0 ? requested : nil
+    }
+
+    /// The child to actually bring into view, or `nil` when there is nothing
+    /// to scroll to yet.
+    ///
+    /// An index past the end is IGNORED, not clamped. Clamping looked like a
+    /// kindness — land on the last child now, correct it later — but it ties
+    /// the scroll to a row that moves whenever the CONTENT does rather than
+    /// when the author's intent does. Removing rows then drags a reader down
+    /// to the new end, and a list streaming in scrolls repeatedly on its way
+    /// to a target it hasn't reached. Ignoring the index keeps the useful
+    /// half: nothing happens until the named child exists, and then the list
+    /// goes there exactly once.
+    ///
+    /// Driving `.onChange` off this RESOLVED value (rather than the raw prop)
+    /// is what keeps a re-publish from yanking the reader: a screen that
+    /// re-renders for an unrelated reason carries the same index and nothing
+    /// fires.
+    private var autoScrollIndex: Int? {
+        guard let requested = autoScrollRequest,
+              requested < node.children.count
+        else { return nil }
+
+        return requested
+    }
+
+    /// Brings the `auto_scroll_to` child into view.
+    ///
+    /// Targets the child's node id, which is the identity `ForEach` already
+    /// assigns to each row (`NativeUINode: Identifiable`), so no extra `.id()`
+    /// is needed on the row's modifier chain.
+    ///
+    /// `animated` is decided by the caller's context, but the FIRST successful
+    /// application always jumps regardless — an `.onChange` can be the first
+    /// thing to fire when the prop arrives after the initial layout.
+    private func applyAutoScroll(proxy: ScrollViewProxy, anchor: UnitPoint, animated: Bool) {
+        guard let index = autoScrollIndex else { return }
+
+        let targetID = node.children[index].id
+        let shouldAnimate = animated && didInitialAutoScroll
+        didInitialAutoScroll = true
+
+        // Defer past first layout — lazy content isn't measured yet inside
+        // `onAppear`, so an immediate `scrollTo` no-ops. Same reason the
+        // bottom-anchor pin defers.
+        DispatchQueue.main.async {
+            if shouldAnimate {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(targetID, anchor: anchor)
+                }
+            } else {
+                proxy.scrollTo(targetID, anchor: anchor)
             }
         }
     }
