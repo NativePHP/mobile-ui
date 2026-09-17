@@ -41,6 +41,14 @@ class BareTextInput extends BaseTextInput
      * Dark mode override: `class="text-slate-700 dark:text-slate-300"`
      * — the collector's `buildDarkProps` already maps `dark.color` to
      * the `dark_color` prop, which the renderers also honor.
+     *
+     * `placeholder-color` (+ `dark-placeholder-color`) styles the
+     * placeholder text independently of `color` — there's no `placeholder-*`
+     * Tailwind class parsed by the collector, so unlike `color` the dark
+     * companion is a plain sibling attribute (same shape as `Icon`'s
+     * `dark-color`) rather than a `dark:` class variant:
+     *   - `placeholder-color="#94a3b8"` / `placeholder-color="slate-400"`
+     *   - `dark-placeholder-color="slate-500"`
      */
     public function applyAttributes(array $attrs): void
     {
@@ -48,6 +56,14 @@ class BareTextInput extends BaseTextInput
 
         if (isset($attrs['color'])) {
             $this->color($attrs['color']);
+        }
+
+        if (isset($attrs['placeholder-color']) || isset($attrs['placeholderColor'])) {
+            $this->placeholderColor($attrs['placeholder-color'] ?? $attrs['placeholderColor']);
+        }
+
+        if (isset($attrs['dark-placeholder-color']) || isset($attrs['darkPlaceholderColor'])) {
+            $this->darkPlaceholderColor($attrs['dark-placeholder-color'] ?? $attrs['darkPlaceholderColor']);
         }
     }
 
@@ -58,6 +74,20 @@ class BareTextInput extends BaseTextInput
         // to `dark_color` for free — `class="text-slate-700 dark:text-slate-300"`
         // gives a working light/dark pair without any custom plumbing.
         $this->inputProps['color'] = $this->resolveColorValue($color);
+
+        return $this;
+    }
+
+    public function placeholderColor(string $color): static
+    {
+        $this->inputProps['placeholder_color'] = $this->resolveColorValue($color);
+
+        return $this;
+    }
+
+    public function darkPlaceholderColor(string $color): static
+    {
+        $this->inputProps['dark_placeholder_color'] = $this->resolveColorValue($color);
 
         return $this;
     }

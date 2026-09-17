@@ -56,11 +56,25 @@ struct NativeUIBareTextInputRenderer: View {
             return theme.primary
         }()
 
+        // Placeholder color override — independent of `color`/`dark_color`.
+        // No `placeholder-*` Tailwind class exists to drive a dark
+        // companion the way `dark:text-*` does for `color`, so
+        // `dark_placeholder_color` is set directly from a sibling
+        // `dark-placeholder-color` attribute (mirrors `Icon`'s `dark-color`).
+        let darkPlaceholderArgb = colorScheme == .dark ? p.getColor("dark_placeholder_color", default: 0) : 0
+        let lightPlaceholderArgb = p.getColor("placeholder_color", default: 0)
+        let placeholderOverride: Color? = {
+            if darkPlaceholderArgb != 0 { return Color(argb: darkPlaceholderArgb) }
+            if lightPlaceholderArgb != 0 { return Color(argb: lightPlaceholderArgb) }
+            return nil
+        }()
+
         NativeUITextInputCore(
             node: node,
             textSize: textSize,
             contentColor: disabled ? baseTextColor.opacity(0.6) : baseTextColor,
-            tintColor: resolvedTint
+            tintColor: resolvedTint,
+            placeholderColor: placeholderOverride
         )
         .opacity(disabled ? 0.6 : 1.0)
         .allowsHitTesting(!disabled && !readOnly)

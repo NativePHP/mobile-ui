@@ -40,6 +40,11 @@ import com.nativephp.plugins.native_ui.NativeUITheme
  *   - explicit attribute:  `color="#334155"`
  *   - tailwind class on the input: `class="text-slate-700"`
  *   - dark mode: `class="text-slate-700 dark:text-slate-300"`
+ *
+ * `placeholder_color` (+ `dark_placeholder_color`) recolors the placeholder
+ * independently of `color`. There's no `placeholder-*` Tailwind class to
+ * derive a dark companion from, so the dark variant is a plain sibling
+ * attribute (`dark-placeholder-color`) rather than a `dark:` class variant.
  */
 object BareTextInputRenderer {
     @Composable
@@ -63,13 +68,27 @@ object BareTextInputRenderer {
         }
         val displayedTextColor = if (props.disabled) effectiveTextColor.copy(alpha = 0.6f) else effectiveTextColor
 
-        // Placeholder follows the override too (faded by ~60%) so a
-        // dark-text input on a light pill keeps a readable placeholder
-        // in the same family.
-        val placeholderColor = if (colorArgb != 0 || darkOverrideArgb != 0) {
-            effectiveTextColor.copy(alpha = 0.6f)
-        } else {
-            theme.onSurfaceVariant
+        // Placeholder color — independent of `color`/`dark_color`. Explicit
+        // `placeholder_color`/`dark_placeholder_color` (no `placeholder-*`
+        // Tailwind class exists to derive the dark companion automatically,
+        // so it's a plain sibling attribute, same shape as `Icon`'s
+        // `dark-color`) wins outright; otherwise fall back to the `color`
+        // override faded ~60% so a dark-text input on a light pill still
+        // gets a readable placeholder in the same family. The two explicit
+        // overrides get the same disabled fade as `displayedTextColor`
+        // above, matching iOS's field-wide `.opacity(0.6)` when disabled.
+        val darkPlaceholderOverrideArgb = if (isDark) node.props.getColor("dark_placeholder_color", 0) else 0
+        val placeholderOverrideArgb = node.props.getColor("placeholder_color", 0)
+        val disabledFade = props.disabled
+        val placeholderColor = when {
+            darkPlaceholderOverrideArgb != 0 -> argbToComposeColor(darkPlaceholderOverrideArgb).let {
+                if (disabledFade) it.copy(alpha = it.alpha * 0.6f) else it
+            }
+            placeholderOverrideArgb != 0 -> argbToComposeColor(placeholderOverrideArgb).let {
+                if (disabledFade) it.copy(alpha = it.alpha * 0.6f) else it
+            }
+            colorArgb != 0 || darkOverrideArgb != 0 -> effectiveTextColor.copy(alpha = 0.6f)
+            else -> theme.onSurfaceVariant
         }
 
         // Echo-prevention sync — same shape as the outlined variant, now over a
