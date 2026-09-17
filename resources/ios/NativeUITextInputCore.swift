@@ -167,6 +167,19 @@ struct NativeUITextInputCore: View {
             // we last sent. Matching == it's an echo of our own change; ignore
             // to avoid cursor jumps / clobbering in-flight edits.
             if newServerValue != lastSentValue {
+                // While the field is FOCUSED the user owns the text. A server
+                // value that differs from `lastSentValue` mid-typing is almost
+                // always a STALE echo: with several commits in flight (fast
+                // typing + debounce + slow round trip), PHP republishes an
+                // EARLIER keystroke's value — `lastSentValue` has already moved
+                // on, the inequality passes, and applying it deletes/restores
+                // characters under the cursor. Drop server pushes while focused;
+                // the field resyncs on blur/unfocus renders. The one deliberate
+                // focused push — clear-to-empty from a send button
+                // (`keep-focus-on-submit`) — is let through.
+                if isFocused && !(keepFocus && newServerValue.isEmpty) {
+                    return
+                }
                 text = newServerValue
                 lastSentValue = newServerValue
                 // A programmatic push replaces the field wholesale and drops
