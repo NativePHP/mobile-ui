@@ -27,7 +27,11 @@ struct NativeUITextRenderer: View {
         let fontWeight = resolveFontWeight(p.getInt("font_weight"))
         let fontDesign = resolveFontDesign(p.getInt("font_family"))
         let fontName = p.getString("font_name")
-        let lightArgb = p.getColor("color", default: 0xFF000000)
+        // default light color to 0 (unset) so text without an
+        // explicit color class inherits SwiftUI `.primary`, which auto-flips
+        // with the color scheme set by nativephp-color-scheme. Original vendor
+        // default of 0xFF000000 (pure black) rendered invisible on dark surfaces.
+        let lightArgb = p.getColor("color", default: 0)
         let darkArgb  = p.getColor("dark_color", default: 0)
         // Pick the dark hex when system is dark AND the theme class supplied
         // one (theme classes auto-emit a `dark` companion). Fall through to
@@ -68,7 +72,7 @@ struct NativeUITextRenderer: View {
             styledText
                 .nuiScaledFont(size: CGFloat(fontSize), weight: fontWeight, design: fontDesign, fontName: fontName.isEmpty ? nil : fontName, italic: isItalic)
                 .lineSpacing(lineSpacingValue)
-                .foregroundColor(Color(argb: color))
+                .foregroundColor(color == 0 ? .primary : Color(argb: color))
                 .multilineTextAlignment(textAlign)
                 .lineLimit(maxLines > 0 ? maxLines : nil)
                 // `truncationMode` only applies when there IS a lineLimit; we
@@ -106,11 +110,12 @@ struct NativeUITextRenderer: View {
         var letterSpacingEm: Float
         var textTransform: Int
 
-        /// Root defaults — mirror the leaf path (16pt, regular, black, no dark
-        /// override, no custom font, no decoration/kerning/transform).
+        /// Root defaults — mirror the leaf path (16pt, regular, no color set →
+        /// falls through to SwiftUI `.primary` via `if fg != 0` guard in
+        /// makeRun so text auto-flips with the color scheme).
         static let root = RunContext(
             fontSize: 16, fontWeightInt: 0, fontFamilyInt: 0, fontName: "",
-            colorArgb: 0xFF000000, darkColorArgb: 0, italic: false,
+            colorArgb: 0, darkColorArgb: 0, italic: false,
             letterSpacingEm: 0, textTransform: 0
         )
     }
@@ -207,7 +212,12 @@ struct NativeUITextRenderer: View {
 
         // Foreground — dark hex wins when in dark mode and one was supplied.
         let fg = (colorScheme == .dark && ctx.darkColorArgb != 0) ? ctx.darkColorArgb : ctx.colorArgb
-        run.foregroundColor = Color(argb: fg)
+        // when no color prop is set (fg == 0), leave foreground
+        // unset so SwiftUI's AttributedString uses `.primary`, auto-flipping
+        // with the nativephp-color-scheme override.
+        if fg != 0 {
+            run.foregroundColor = Color(argb: fg)
+        }
 
         // Run background = the inline-code chip. bg_color lives on style;
         // dark_bg_color on props (matches NodeStyleModifier's split). Per-run,
