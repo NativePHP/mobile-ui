@@ -1,5 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
+import com.nativephp.mobile.ui.nativerender.SizeMode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
 /**
@@ -69,7 +71,9 @@ object SelectRenderer {
                 label = if (label.isNotEmpty()) ({ Text(label, fontFamily = nuiDefaultFontFamily()) }) else null,
                 placeholder = if (placeholder.isNotEmpty()) ({ Text(placeholder, fontFamily = nuiDefaultFontFamily()) }) else null,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                modifier = Modifier
+                    .then(if (node.layout?.widthMode == SizeMode.FILL) Modifier.fillMaxWidth() else Modifier)
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                 textStyle = TextStyle(color = theme.onSurface),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = theme.onSurface,
