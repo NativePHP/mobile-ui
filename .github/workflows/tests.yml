@@ -7,8 +7,16 @@ on:
 
 jobs:
   pest:
-    name: Plugin tests (Pest)
+    name: Plugin tests (Pest) - PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
+      matrix:
+        # Keep 8.3: it's our minimum, matching nativephp/mobile. If a
+        # dependency stops installing on it, loosen that constraint instead
+        # of dropping this leg.
+        php: ['8.3', '8.4']
 
     steps:
       - uses: actions/checkout@v4
@@ -16,15 +24,13 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          # 8.4+ is required: nativephp/mobile v4 declares php ^8.4 itself,
-          # so the dependency chain won't resolve on 8.3.
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           coverage: none
 
       # Unlike the leaf plugins, this suite exercises nativephp/mobile at
       # runtime (the Edge element collector, elements, facades), so CI must
-      # actually install it. Now that v4 has shipped, the `^4.0` constraint
-      # in composer.json resolves straight from Packagist — no VCS
+      # actually install it. Now that v4 has shipped, the nativephp/mobile
+      # constraint in composer.json resolves straight from Packagist — no VCS
       # repository, stability tweaks or access token involved, so forks
       # build the same way we do.
       #
