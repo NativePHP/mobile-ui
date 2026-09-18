@@ -6,6 +6,7 @@ import com.nativephp.mobile.ui.NativeUIThemeProvider
 import com.nativephp.mobile.ui.nativerender.NativeRootHostRegistry
 import com.nativephp.plugins.native_ui.ui.NativeFloatingOverlayHost
 import com.nativephp.plugins.native_ui.ui.NativeLayoutDrawerHost
+import com.nativephp.plugins.native_ui.ui.NativeUIBackgroundLayerHost
 import com.nativephp.plugins.native_ui.ui.NativeUIFontResolver
 import com.nativephp.plugins.native_ui.ui.nuiThemeDefaultTypography
 
@@ -29,6 +30,11 @@ fun registerNativeUIChrome(context: Context) {
     NativeRootHostRegistry.register("native-ui.floating-overlay", consumes = "floating_overlay") { root, content ->
         val overlayNode = root.children.firstOrNull { it.type == "floating_overlay" }
         NativeFloatingOverlayHost(overlayNode = overlayNode, content = content)
+    }
+
+    NativeRootHostRegistry.register("native-ui.background-layer", consumes = "background_layer") { root, content ->
+        val layerNode = root.children.firstOrNull { it.type == "background_layer" }
+        NativeUIBackgroundLayerHost(layerNode = layerNode, content = content)
     }
 
     // Supply the app's color scheme from native-ui's theme tokens. The lambda

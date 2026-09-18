@@ -270,7 +270,8 @@ Rationale: a Card component fights the "Tailwind classes only" principle (memory
 - [ ] keyboardType (text/number/email/url/phone/decimal)
 - [ ] secureTextEntry
 - [ ] returnKeyType + onSubmit
-- [ ] autoCorrect / autoCapitalize / spellCheck
+- [x] autoCapitalize — keyboard-derived defaults plus explicit `autocapitalization` / `autocapitalize` override
+- [ ] autoCorrect / spellCheck
 - [ ] maxLength
 - [ ] selectionColor / cursorColor
 - [ ] multiline + autoGrow

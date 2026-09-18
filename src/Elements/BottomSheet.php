@@ -35,6 +35,14 @@ class BottomSheet extends Element
         if (isset($attrs['detents'])) {
             $this->detents($attrs['detents']);
         }
+        if (isset($attrs['permanent'])) {
+            $this->permanent(filter_var($attrs['permanent'], FILTER_VALIDATE_BOOLEAN));
+        }
+        foreach (['background-interaction', 'backgroundInteraction'] as $key) {
+            if (isset($attrs[$key])) {
+                $this->backgroundInteraction(filter_var($attrs[$key], FILTER_VALIDATE_BOOLEAN));
+            }
+        }
 
         $this->applyA11yAttributes($attrs);
     }
@@ -55,6 +63,35 @@ class BottomSheet extends Element
     public function detents(string $detents): static
     {
         $this->sheetProps['detents'] = $detents;
+
+        return $this;
+    }
+
+    /**
+     * A permanent sheet can't be swiped away — drag only snaps between
+     * detents, and Android's back press won't dismiss it either. Pair
+     * with `backgroundInteraction()` on iOS so the content behind stays
+     * usable (see that method for the Android caveat).
+     */
+    public function permanent(bool $value = true): static
+    {
+        $this->sheetProps['permanent'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Keep the view behind the sheet interactive (no dim, touches pass
+     * through) — the HIG "sheet with interaction behind" pattern.
+     *
+     * iOS-only: Android's Material ModalBottomSheet is a modal window, so
+     * the scrim always intercepts background touches. For a Maps-style
+     * always-on panel over a live background on both platforms, use
+     * `<native:sheet-pane>` instead.
+     */
+    public function backgroundInteraction(bool $value = true): static
+    {
+        $this->sheetProps['background_interaction'] = $value;
 
         return $this;
     }

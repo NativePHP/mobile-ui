@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -78,24 +79,29 @@ object StackRenderer {
 
                     // Absolute children pin to the stack's edges by inset —
                     // the docs-blessed "layer a badge over an icon" pattern.
-                    // Same anchor convention as ComposeFlexLayout / the iOS
-                    // FlexContainer: a NON-ZERO right/bottom inset anchors to
-                    // that edge; otherwise offset from top-left. Non-zero (not
-                    // positive) so NEGATIVE insets overhang the edge, matching
-                    // Tailwind's `-right-8` bleed.
+                    // Same anchor convention as the iOS stack renderer: +0.0
+                    // means unset, non-zero anchors (negatives overhang —
+                    // `-right-8` bleed), and IEEE -0.0 is an authored explicit
+                    // zero (`bottom-0`), which anchors to that edge too. When
+                    // both edges are authored, left/top win (CSS precedence).
                     if (layout.positionType == PositionType.ABSOLUTE) {
                         val left = layout.positionLeft
                         val top = layout.positionTop
                         val right = layout.positionRight
                         val bottom = layout.positionBottom
+                        // -0.0f == 0f in Kotlin, so authored zeros need the
+                        // raw sign bit.
+                        fun isSet(v: Float) = v != 0f || v.toRawBits() != 0
+                        val anchorEnd = isSet(right) && !isSet(left)
+                        val anchorBottom = isSet(bottom) && !isSet(top)
                         val anchor = when {
-                            right != 0f && bottom != 0f -> Alignment.BottomEnd
-                            right != 0f                 -> Alignment.TopEnd
-                            bottom != 0f                -> Alignment.BottomStart
-                            else                        -> Alignment.TopStart
+                            anchorEnd && anchorBottom -> Alignment.BottomEnd
+                            anchorEnd                 -> Alignment.TopEnd
+                            anchorBottom              -> Alignment.BottomStart
+                            else                      -> Alignment.TopStart
                         }
-                        val offsetX = if (right != 0f) (-right).dp else left.dp
-                        val offsetY = if (bottom != 0f) (-bottom).dp else top.dp
+                        val offsetX = if (anchorEnd) (-right).dp else left.dp
+                        val offsetY = if (anchorBottom) (-bottom).dp else top.dp
                         childMod = childMod.align(anchor).offset(x = offsetX, y = offsetY)
                     }
                 }
@@ -236,6 +242,9 @@ object CanvasRenderer {
  * chunked row-of-row grid whenever the cell count is large enough to
  * matter.
  *
+ * `shows_indicators` is accepted for parity with iOS but is a no-op
+ * here — Compose's lazy grids draw no scroll indicators to begin with.
+ *
  * When the main axis is UNBOUNDED (the grid sits inside a scroll_view /
  * scrollable column), Compose's lazy grids throw ("measured with an
  * infinity maximum height constraints") where SwiftUI's LazyVGrid just
@@ -368,9 +377,78 @@ object ScrollViewRenderer {
                 }
             }
 
-            LazyColumn(modifier = scrollModifier, state = listState) {
-                items(node.children, key = { it.id }) { child ->
-                    NodeView(node = child)
+            // A `fill` / `h-full` DIRECT child asked to be at least as tall as
+            // the VIEWPORT — the "short screen centred, still scrolls when the
+            // keyboard appears" pattern. A LazyColumn measures its items with
+            // an unbounded main axis, so `fillMaxHeight()` inside one has
+            // nothing to resolve against and the child hugs its content,
+            // leaving `justify-center` no space to distribute.
+            //
+            // BoxWithConstraints supplies the viewport height, which is handed
+            // to those children as a MINIMUM: content taller than the viewport
+            // must still grow and scroll, exactly like CSS `min-height: 100%`.
+            //
+            // Direct children only — a nested descendant's fill resolves
+            // against ITS parent, which is ordinary flex behaviour.
+            //
+            // Gated so the common path keeps the original LazyColumn with no
+            // extra measurement pass around it.
+            val hasFillHeightChild = node.children.any {
+                it.layout?.heightMode == SizeMode.FILL
+            }
+
+            if (hasFillHeightChild) {
+                BoxWithConstraints(modifier = scrollModifier) {
+                    // Unbounded when the scroll view is itself content-sized
+                    // (no h-* and nothing constraining it). `heightIn(min =
+                    // Dp.Infinity)` would be catastrophic, so fall through to
+                    // the normal path — there is no viewport to fill against.
+                    val viewport = maxHeight.takeIf { it.value.isFinite() && it.value > 0f }
+                    LazyColumn(state = listState) {
+                        items(node.children, key = { it.id }) { child ->
+                            val layout = child.layout
+                            if (viewport != null && layout?.heightMode == SizeMode.FILL) {
+                                // The minimum goes on the CHILD's own modifier,
+                                // not on a wrapper. A Box RELAXES min
+                                // constraints for its children (only
+                                // `matchParentSize` opts back in), so wrapping
+                                // made the Box viewport-tall while the column
+                                // inside it kept hugging — the original bug,
+                                // one layer down.
+                                //
+                                // Compose enforces min constraints, so a column
+                                // measured at minHeight = viewport IS viewport
+                                // tall, and its own Arrangement.Center then has
+                                // slack to distribute.
+                                //
+                                // Width is reproduced here because
+                                // `overrideModifier` replaces NodeView's own
+                                // sizing block wholesale. Same pattern as
+                                // StackRenderer above.
+                                var childMod: Modifier = Modifier.heightIn(min = viewport)
+                                when (layout.widthMode) {
+                                    SizeMode.FILL -> childMod = childMod.fillMaxWidth()
+                                    SizeMode.FIXED -> if (layout.width > 0f) {
+                                        childMod = childMod.width(layout.width.dp)
+                                    }
+                                    SizeMode.PERCENT -> if (layout.width > 0f) {
+                                        childMod = childMod.fillMaxWidth(
+                                            (layout.width / 100f).coerceIn(0f, 1f)
+                                        )
+                                    }
+                                }
+                                NodeView(node = child, overrideModifier = childMod)
+                            } else {
+                                NodeView(node = child)
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(modifier = scrollModifier, state = listState) {
+                    items(node.children, key = { it.id }) { child ->
+                        NodeView(node = child)
+                    }
                 }
             }
         }

@@ -29,6 +29,9 @@ import kotlinx.coroutines.launch
  *     threshold. We keep `isRefreshing` true for 800ms after firing so
  *     the user sees the spinner even when PHP handlers complete fast;
  *     the next tree publish typically lands within that window.
+ *   - `shows_indicators` (bool) — accepted for parity with iOS but a
+ *     no-op here: `LazyColumn` draws no scroll indicators to begin
+ *     with, so there is nothing to hide.
  *
  * Children should NOT include their own `<scroll-view>` — this
  * element IS the scrolling container.

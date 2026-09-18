@@ -273,6 +273,13 @@ private fun applyLockdownSettings(
     settings.setSupportMultipleWindows(false)
     settings.mediaPlaybackRequiresUserGesture = true
     settings.setGeolocationEnabled(false)
+    // Deprecated in API 33 — the Web SQL Database API it gates was removed from
+    // WebView entirely. Suppressed rather than deleted: `minSdk` is 26, and on
+    // an older device carrying an older WebView the setting still does
+    // something, so dropping it would quietly weaken the lockdown on exactly
+    // the devices that need it most. Same reasoning as the two suppressions
+    // above.
+    @Suppress("DEPRECATION")
     settings.databaseEnabled = false
     settings.cacheMode = WebSettings.LOAD_NO_CACHE
 }

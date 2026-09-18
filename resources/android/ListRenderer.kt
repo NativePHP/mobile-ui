@@ -45,6 +45,10 @@ import com.nativephp.mobile.ui.nativerender.NodeView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * Note: `shows_indicators` is accepted for parity with iOS but is a no-op
+ * here — LazyColumn/LazyRow draw no scroll indicators to begin with.
+ */
 object ListRenderer {
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
     @Composable

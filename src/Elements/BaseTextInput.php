@@ -19,7 +19,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalization` / `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -85,6 +85,16 @@ abstract class BaseTextInput extends Element
         // Behavior
         if (isset($attrs['keyboard'])) {
             $this->keyboard($attrs['keyboard']);
+        }
+        $autocapitalization = $attrs['autocapitalization']
+            ?? $attrs['autoCapitalization']
+            ?? $attrs['auto-capitalization']
+            ?? $attrs['autocapitalize']
+            ?? $attrs['autoCapitalize']
+            ?? $attrs['auto-capitalize']
+            ?? null;
+        if ($autocapitalization !== null) {
+            $this->autocapitalize((string) $autocapitalization);
         }
         if (! empty($attrs['secure'])) {
             $this->secure();
@@ -254,6 +264,50 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Autocapitalization — "none" | "sentences" | "words" | "characters".
+     * Accepts `never` / `off` as aliases for `none` and `on` as an alias for
+     * `sentences`. Blade accepts both `autocapitalization` and the HTML-style
+     * `autocapitalize` spelling, in kebab-case or camelCase.
+     *
+     * Leave it unset and the field derives capitalization from its `keyboard`
+     * type, which is what you want almost always: an `email` or `url` field
+     * capitalizes nothing, a plain text field capitalizes sentences. This
+     * setter exists for the cases the keyboard type can't imply — a name field
+     * wanting `words`, or a reference-code field wanting `characters`.
+     *
+     * Unknown values are ignored natively and fall back to the derived
+     * behaviour rather than erroring.
+     *
+     * IGNORED on a `secure()` field, which always resolves to no
+     * capitalization (and no autocorrect). See `secure()`.
+     */
+    public function autocapitalize(string $mode): static
+    {
+        $mode = strtolower(trim($mode));
+        $this->inputProps['autocapitalize'] = match ($mode) {
+            'never', 'off' => 'none',
+            'on' => 'sentences',
+            default => $mode,
+        };
+
+        return $this;
+    }
+
+    /** Alias matching the long-form Blade attribute. */
+    public function autocapitalization(string $mode): static
+    {
+        return $this->autocapitalize($mode);
+    }
+
+    /**
+     * Mask the field's contents (password entry).
+     *
+     * Beyond masking, `secure` carries the typing behavior a secret needs:
+     * capitalization and autocorrect are both forced off natively, ahead of
+     * any `autocapitalize()` the author set, and `@selectionChange` is never
+     * serialized at all (see `onSelectionChange()`).
+     */
     public function secure(bool $value = true): static
     {
         $this->inputProps['secure'] = $value;

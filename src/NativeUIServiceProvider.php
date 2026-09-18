@@ -10,8 +10,10 @@ use Native\Mobile\Edge\Layouts\NativeLayout;
 use Native\Mobile\Edge\NativeComponent;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\Testing\TestableComponent;
+use Native\Mobile\UI\Builders\BackgroundLayer;
 use Native\Mobile\UI\Builders\Drawer;
 use Native\Mobile\UI\Builders\FloatingOverlay as FloatingOverlayBuilder;
+use Native\Mobile\UI\Concerns\HasBackgroundLayer;
 use Native\Mobile\UI\Concerns\HasFloatingOverlay;
 use Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay;
 use Native\Mobile\UI\Console\CopyFontsCommand;
@@ -83,6 +85,7 @@ class NativeUIServiceProvider extends ServiceProvider
 
         $this->registerLayoutDrawer();
         $this->registerFloatingOverlay();
+        $this->registerBackgroundLayer();
 
         if ($this->app->runningInConsole()) {
             $this->commands([
@@ -189,6 +192,48 @@ class NativeUIServiceProvider extends ServiceProvider
             $overlay->addChild($contentElement);
 
             return $overlay;
+        });
+    }
+
+    /**
+     * Register the background-layer chrome contributor: content rendered
+     * BENEATH every screen under the layout, mounted once at the root so
+     * a map/video/canvas persists across tab switches and pushes. Same
+     * discovery shape as the floating overlay: layouts opt in with
+     * {@see HasBackgroundLayer}, screens can override via
+     * `backgroundLayerOverride()` or hide with `hidesBackgroundLayer`
+     * (see {@see InteractsWithBackgroundLayer}).
+     */
+    protected function registerBackgroundLayer(): void
+    {
+        if (! class_exists(ChromeContributorRegistry::class)) {
+            return;
+        }
+
+        ChromeContributorRegistry::register(function (NativeComponent $screen, ?NativeLayout $layout, callable $renderPartial): ?Element {
+            if (self::screenHides($screen, 'hidesBackgroundLayer')) {
+                return null;
+            }
+
+            $builder = null;
+            if (method_exists($screen, 'backgroundLayerOverride')) {
+                $builder = $screen->backgroundLayerOverride();
+            }
+            if ($builder === null && $layout !== null && method_exists($layout, 'backgroundLayer')) {
+                $builder = $layout->backgroundLayer($screen);
+            }
+
+            if (! $builder instanceof BackgroundLayer) {
+                return null;
+            }
+
+            $content = $builder->getContent();
+            $contentElement = $content instanceof View ? $renderPartial($content) : $content;
+
+            $sentinel = Elements\BackgroundLayer::make();
+            $sentinel->addChild($contentElement);
+
+            return $sentinel;
         });
     }
 

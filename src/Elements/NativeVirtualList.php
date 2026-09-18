@@ -50,12 +50,26 @@ class NativeVirtualList extends Element
         if (isset($attrs['overscan'])) {
             $this->listProps['overscan'] = (int) $attrs['overscan'];
         }
+        if (isset($attrs['showsIndicators']) || isset($attrs['shows-indicators'])) {
+            $this->showsIndicators((bool) ($attrs['showsIndicators'] ?? $attrs['shows-indicators']));
+        }
         $cb = $attrs['on_window_change'] ?? $attrs['onWindowChange'] ?? $attrs['on-window-change'] ?? null;
         if ($cb !== null) {
             $this->windowCallback = $cb;
         }
 
         $this->applyA11yAttributes($attrs);
+    }
+
+    /**
+     * Same contract as list/scroll-view, default true. iOS-only in effect:
+     * Compose's LazyColumn draws no indicators to begin with.
+     */
+    public function showsIndicators(bool $value = true): static
+    {
+        $this->listProps['shows_indicators'] = $value;
+
+        return $this;
     }
 
     protected function resolveProps(CallbackRegistry $registry): array
