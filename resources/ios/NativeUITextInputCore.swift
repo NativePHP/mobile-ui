@@ -90,14 +90,16 @@ struct NativeUITextInputCore: View {
         let masked        = secure && !revealed
         let keyboardKind  = p.getString("keyboard")
         let keyboard      = resolveKeyboardType(keyboardKind)
-        // Capitalization and autocorrect are derived from the keyboard type
-        // unless the author overrode them — declaring a field `email` should
-        // carry its typing behaviour, not just its key layout.
+        // Capitalization and autocorrect are derived from `secure` and the
+        // keyboard type unless the author overrode them — declaring a field
+        // `email` should carry its typing behavior, not just its key layout,
+        // and declaring one `secure` should carry the behavior a secret needs.
         let capitalization = resolveAutocapitalization(
             explicit: p.getString("autocapitalize"),
+            secure: secure,
             keyboard: keyboardKind
         )
-        let autocorrect   = allowsAutocorrection(keyboard: keyboardKind)
+        let autocorrect   = allowsAutocorrection(secure: secure, keyboard: keyboardKind)
         let onChangeCb    = p.getCallbackId("on_change")
         let onSubmitCb    = p.getCallbackId("on_submit")
         let syncMode      = p.getString("sync_mode", default: "live")
@@ -486,8 +488,9 @@ private func resolveKeyboardType(_ kind: String) -> UIKeyboardType {
     }
 }
 
-/// Capitalization for the field, from the explicit `autocapitalize` prop when
-/// the author set one, otherwise derived from the keyboard type.
+/// Capitalization for the field. `secure` wins outright; otherwise the
+/// explicit `autocapitalize` prop when the author set one, otherwise derived
+/// from the keyboard type.
 ///
 /// SwiftUI defaults an untouched TextField to `.sentences`, which is why an
 /// email field capitalized its first letter even though `.emailAddress` was
@@ -495,12 +498,23 @@ private func resolveKeyboardType(_ kind: String) -> UIKeyboardType {
 /// kind whose content is case-sensitive or non-alphabetic therefore has to opt
 /// out explicitly.
 ///
+/// A `secure` field is checked FIRST — ahead of the explicit prop, which is the
+/// only place in this resolver where the author's word is not final. A password
+/// is opaque bytes; there is no reading of `autocapitalize="sentences"` on a
+/// secret under which shifting its first character is what the author wanted,
+/// and the failure is silent (the field is masked, so the stray capital is
+/// invisible until the login is rejected). The element already suppresses
+/// selection reporting for secure fields at the source on the same reasoning —
+/// some invariants shouldn't be a prop away from being wrong.
+///
 /// Unknown `autocapitalize` values fall through to the derived behaviour rather
 /// than erroring — same policy as `resolveKeyboardType`.
-private func resolveAutocapitalization(explicit: String, keyboard: String) -> TextInputAutocapitalization {
+private func resolveAutocapitalization(explicit: String, secure: Bool, keyboard: String) -> TextInputAutocapitalization {
+    if secure { return .never }
+
     switch explicit.lowercased() {
-    case "none":       return .never
-    case "sentences":  return .sentences
+    case "none", "never", "off": return .never
+    case "sentences", "on":        return .sentences
     case "words":      return .words
     case "characters": return .characters
     default:           break
@@ -523,7 +537,13 @@ private func resolveAutocapitalization(explicit: String, keyboard: String) -> Te
 /// Whether autocorrect should run. Same reasoning as capitalization: iOS will
 /// happily "correct" an email local part or a URL slug into a dictionary word,
 /// and the field type is enough to know that's unwanted.
-private func allowsAutocorrection(keyboard: String) -> Bool {
+///
+/// `secure` is the strongest case of all: a password is by definition not a
+/// dictionary word, so every suggestion is a wrong one, and the candidate bar
+/// over a masked field is also a place the secret can be shoulder-surfed.
+private func allowsAutocorrection(secure: Bool, keyboard: String) -> Bool {
+    if secure { return false }
+
     switch keyboard.lowercased() {
     case "email", "url", "number", "decimal", "phone", "numberpassword", "password":
         return false
