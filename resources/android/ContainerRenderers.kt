@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -40,8 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
 import com.nativephp.mobile.ui.nativerender.*
@@ -341,9 +340,6 @@ object ScrollViewRenderer {
     fun Render(node: NativeUINode, modifier: Modifier) {
         val horizontal = node.props.getBool("horizontal")
         val keyboardController = LocalSoftwareKeyboardController.current
-        val scrollModifier = modifier.pointerInput(Unit) {
-            detectVerticalDragGestures(onDragStart = { keyboardController?.hide() }) { _, _ -> }
-        }
 
         if (horizontal) {
             LazyRow(modifier = modifier) {
@@ -364,6 +360,16 @@ object ScrollViewRenderer {
             val listState = rememberLazyListState()
             val didInitialScroll = remember { mutableStateOf(false) }
             val contentSignal = if (stickBottom) totalDescendants(node) else 0
+
+            // Observe the list's own drags without consuming its pointer events.
+            // Programmatic bottom anchoring must not dismiss the keyboard.
+            LaunchedEffect(listState, keyboardController) {
+                listState.interactionSource.interactions.collect { interaction ->
+                    if (interaction is DragInteraction.Start) {
+                        keyboardController?.hide()
+                    }
+                }
+            }
 
             LaunchedEffect(stickBottom, contentSignal) {
                 if (stickBottom && node.children.isNotEmpty()) {
@@ -398,7 +404,7 @@ object ScrollViewRenderer {
             }
 
             if (hasFillHeightChild) {
-                BoxWithConstraints(modifier = scrollModifier) {
+                BoxWithConstraints(modifier = modifier) {
                     // Unbounded when the scroll view is itself content-sized
                     // (no h-* and nothing constraining it). `heightIn(min =
                     // Dp.Infinity)` would be catastrophic, so fall through to
@@ -445,7 +451,7 @@ object ScrollViewRenderer {
                     }
                 }
             } else {
-                LazyColumn(modifier = scrollModifier, state = listState) {
+                LazyColumn(modifier = modifier, state = listState) {
                     items(node.children, key = { it.id }) { child ->
                         NodeView(node = child)
                     }

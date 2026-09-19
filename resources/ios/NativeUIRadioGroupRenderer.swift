@@ -22,12 +22,19 @@ struct NativeUIRadioGroupRenderer: View {
         let groupDisabled = node.props.getBool("disabled")
         let a11yLabel   = node.props.getString("a11y_label")
         let a11yHint    = node.props.getString("a11y_hint")
+        let isError     = node.props.getBool("is_error")
+        let supporting  = node.props.getString("supporting")
+
+        // Error state rides the hint channel unless an explicit hint is
+        // set (same convention as the text inputs).
+        let errorText = (isError && !supporting.isEmpty) ? supporting : ""
+        let effectiveA11yHint = a11yHint.isEmpty ? errorText : a11yHint
 
         VStack(alignment: .leading, spacing: 8) {
             if !label.isEmpty {
                 Text(label)
                     .nuiScaledFont(size: theme.fontSm, weight: .medium)
-                    .foregroundStyle(theme.onSurfaceVariant)
+                    .foregroundStyle(isError ? theme.destructive : theme.onSurfaceVariant)
             }
 
             ForEach(node.children.filter { $0.type == "radio" }) { child in
@@ -45,6 +52,12 @@ struct NativeUIRadioGroupRenderer: View {
                     }
                 )
             }
+
+            if !supporting.isEmpty {
+                Text(supporting)
+                    .nuiScaledFont(size: theme.fontSm)
+                    .foregroundStyle(isError ? theme.destructive : theme.onSurfaceVariant)
+            }
         }
         .onAppear {
             if !initialized {
@@ -60,7 +73,7 @@ struct NativeUIRadioGroupRenderer: View {
             }
         }
         .modifier(A11yLabelModifier(label: a11yLabel))
-        .modifier(A11yHintModifier(hint: a11yHint))
+        .modifier(A11yHintModifier(hint: effectiveA11yHint))
     }
 }
 

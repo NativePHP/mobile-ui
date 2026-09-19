@@ -8,7 +8,7 @@ import UIKit
 ///     value we sent out)
 ///   - `sync_mode` dispatch policy (live | debounce | blur) — controlled by
 ///     the `native:model` directive modifier chain
-///   - secure / multiline input
+///   - secure / multiline input, with an optional in-field reveal toggle
 ///   - keyboard type, submit label
 ///   - disabled / readOnly state
 ///   - onChange / onSubmit callbacks
@@ -21,11 +21,44 @@ struct NativeUITextInputCore: View {
     let contentColor: Color
     let tintColor: Color
 
+    /// Whether this variant has room to draw the `revealable` eye INSIDE the
+    /// field. The chrome variants (outlined, filled) pass true; the chromeless
+    /// one does not, because its whole contract is that it draws no decoration
+    /// of its own — an author using it supplies their own trailing control.
+    /// Defaulted so the bare renderer's call site stays as it was, and so the
+    /// prop is honored on exactly the same two variants on both platforms
+    /// (Android's toggle lives in the M3 `trailingIcon` slot, which the
+    /// chromeless `BasicTextField` doesn't have).
+    var supportsRevealToggle: Bool = false
+
+    /// Colour for the placeholder. Nil keeps SwiftUI's own placeholder style,
+    /// which is what every variant drew before. The outlined variant passes
+    /// its `on-input` token here, so a declared `on-input` recolours the
+    /// placeholder along with everything else inside the box, as it already
+    /// does on Android. Without it the placeholder stays system grey, which
+    /// all but disappears on a dark `input-fill`.
+    var placeholderColor: Color? = nil
+
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
     @State private var initialized: Bool = false
     @State private var debounceTask: Task<Void, Never>? = nil
+    /// Whether a `secure` field is currently showing its contents.
+    ///
+    /// Local `@State` on purpose, and that is the whole safety argument for
+    /// this feature: toggling it never crosses the bridge, so it cannot
+    /// republish the tree, cannot perturb `text` / `lastSentValue`, cannot
+    /// trip the `sync_mode` state machine, and cannot move the caret. Reveal
+    /// state is also the kind of thing that must not be persisted or
+    /// round-tripped anywhere near a password.
+    @State private var revealed: Bool = false
     @FocusState private var isFocused: Bool
+
+    /// The enclosing vertical `<scroll-view>`'s proxy, published by
+    /// `NativeUIScrollViewRenderer`. Nil everywhere there isn't one — sheets,
+    /// modals, non-scrolling screens, and bottom-anchored chat logs, which run
+    /// their own keyboard policy — and nil means this field does not scroll.
+    @Environment(\.nativeUIScrollProxy) private var scrollProxy
 
     // ─── Selection / caret reporting (opt-in via `on_selection_change`) ──────
     //
@@ -51,6 +84,9 @@ struct NativeUITextInputCore: View {
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
+        // Nil unless the variant asked for a colour, and a nil prompt leaves the
+        // title as the placeholder, exactly as the prompt-less initializers do.
+        let prompt        = placeholderColor.map { Text(placeholder).foregroundColor($0) }
         let serverValue   = p.getString("value")
         let secure        = p.getBool("secure")
         let multiline     = p.getBool("multiline")
@@ -59,21 +95,34 @@ struct NativeUITextInputCore: View {
         let minLines      = p.getInt("min_lines")
         let disabled      = p.getBool("disabled")
         let readOnly      = p.getBool("read_only")
+        // The in-field eye. Only on a secure field, only where the variant has
+        // chrome to host it, and only while the field is interactive — there
+        // is nothing to reveal in a field the user cannot type into, and a
+        // disabled control that still responds to taps is its own bug.
+        let revealToggle  = supportsRevealToggle
+            && secure
+            && p.getBool("revealable")
+            && !(disabled || readOnly)
+        // A secure field is masked unless the user has revealed it.
+        let masked        = secure && !revealed
         let keyboardKind  = p.getString("keyboard")
         let keyboard      = resolveKeyboardType(keyboardKind)
-        // Capitalization and autocorrect are derived from the keyboard type
-        // unless the author overrode them — declaring a field `email` should
-        // carry its typing behaviour, not just its key layout.
+        // Capitalization and autocorrect are derived from `secure` and the
+        // keyboard type unless the author overrode them — declaring a field
+        // `email` should carry its typing behavior, not just its key layout,
+        // and declaring one `secure` should carry the behavior a secret needs.
         let capitalization = resolveAutocapitalization(
             explicit: p.getString("autocapitalize"),
+            secure: secure,
             keyboard: keyboardKind
         )
-        let autocorrect   = allowsAutocorrection(keyboard: keyboardKind)
+        let autocorrect   = allowsAutocorrection(secure: secure, keyboard: keyboardKind)
         let onChangeCb    = p.getCallbackId("on_change")
         let onSubmitCb    = p.getCallbackId("on_submit")
         let syncMode      = p.getString("sync_mode", default: "live")
         let debounceMs    = p.getInt("debounce_ms", default: 300)
         let keepFocus     = p.getBool("keep_focus_on_submit")
+        let autofocus     = p.getBool("autofocus")
         // Selection reporting is opt-in (0/absent ⇒ off) and never applies to
         // secure fields. Read exactly like `on_change` / `debounce_ms` above.
         let onSelectionCb = p.getCallbackId("on_selection_change")
@@ -99,10 +148,21 @@ struct NativeUITextInputCore: View {
         Group {
             if secure {
                 // SecureField has no selection binding — caret reporting is
-                // intentionally never available for secure fields.
-                SecureField(placeholder, text: $text)
-                    .foregroundColor(contentColor)
-                    .focused($isFocused)
+                // intentionally never available for secure fields. That holds
+                // for the revealed branch too: `selectionEnabled` is gated on
+                // `!secure`, so an unmasked password still reports nothing.
+                if masked {
+                    SecureField(placeholder, text: $text, prompt: prompt)
+                        .foregroundColor(contentColor)
+                        .focused($isFocused)
+                } else {
+                    // SecureField has no unmasked mode, so revealing means
+                    // swapping in a plain TextField. `multiline` is ignored on
+                    // a secure field in both branches, as before.
+                    TextField(placeholder, text: $text, prompt: prompt)
+                        .foregroundColor(contentColor)
+                        .focused($isFocused)
+                }
             } else if multiline {
                 // A vertical-axis TextField reports a ~0 intrinsic width when
                 // empty and won't expand to fill an ancestor's `maxWidth:
@@ -117,13 +177,13 @@ struct NativeUITextInputCore: View {
                 // (multiline) axis too. Kept as parallel branches so the
                 // feature-off path is byte-for-byte the original field.
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: prompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text, axis: .vertical)
+                    TextField(placeholder, text: $text, prompt: prompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,11 +191,11 @@ struct NativeUITextInputCore: View {
                 }
             } else {
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text)
+                    TextField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 }
@@ -153,11 +213,24 @@ struct NativeUITextInputCore: View {
         .autocorrectionDisabled(!autocorrect)
         .disabled(disabled || readOnly)
         .submitLabel(onSubmitCb != 0 ? .done : .return)
+        // Scroll target for `scrollIntoView()` below. `node.id` is already the
+        // ForEach identity of every node in the tree, so it is stable across
+        // republishes; and because it is applied to the view `body` returns
+        // rather than to this struct, it cannot reset the `@State` above.
+        .id(node.id)
         .onAppear {
             if !initialized {
                 text = serverValue
                 lastSentValue = serverValue
                 initialized = true
+
+                // First appearance only: a later re-render must not steal
+                // focus back from wherever the user has since moved it.
+                // Deferred a runloop because @FocusState does not take
+                // while the view is still being installed.
+                if autofocus && !disabled && !readOnly {
+                    DispatchQueue.main.async { isFocused = true }
+                }
             }
         }
         .onChange(of: serverValue) { _, newServerValue in
@@ -224,6 +297,8 @@ struct NativeUITextInputCore: View {
                 if selectionEnabled {
                     flushSelection(cb: onSelectionCb)
                 }
+            } else {
+                scrollIntoView()
             }
         }
         .onSubmit {
@@ -247,7 +322,52 @@ struct NativeUITextInputCore: View {
                 DispatchQueue.main.async { isFocused = true }
             }
         }
+        // Appended rather than woven in: when the toggle is off this modifier
+        // returns its content untouched, so every field that doesn't ask for
+        // an eye keeps the exact view tree it had.
+        .modifier(RevealToggleModifier(
+            enabled: revealToggle,
+            revealed: $revealed,
+            isFocused: $isFocused,
+            textSize: textSize,
+            contentColor: contentColor
+        ))
     }
+
+    // ─── Keyboard avoidance ──────────────────────────────────────────────────
+
+    /// Ask the enclosing `<scroll-view>` to bring this field into view.
+    ///
+    /// SwiftUI already shrinks the screen by the keyboard height, but that
+    /// only guarantees the field is somewhere in the SCROLLABLE CONTENT — not
+    /// that it is on screen. On a chat composer pinned to the bottom the two
+    /// amount to the same thing, which is why nothing needed this before; on a
+    /// login form the password field sits mid-page and a shrunk viewport
+    /// leaves it exactly where it was, under the keyboard.
+    ///
+    /// Deferred past the keyboard's own presentation so the scroll runs
+    /// against the already-shrunk viewport. Centering against the full height
+    /// first would put the field in the middle of a screen that is about to
+    /// lose its bottom half — i.e. back under the keyboard. The delay is a
+    /// little longer than the ~0.25s the system animates the keyboard in.
+    ///
+    /// Runs on focus rather than on `keyboardWillShow`, because moving from
+    /// one field to the next never re-shows the keyboard and is exactly when
+    /// this is needed. Where there is no proxy — sheets, modals, fixed
+    /// screens, bottom-anchored scroll views — this is a no-op.
+    private func scrollIntoView() {
+        guard let scrollProxy else { return }
+
+        let id = node.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusScrollDelay) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                scrollProxy.scrollTo(id, anchor: .center)
+            }
+        }
+    }
+
+    /// How long to wait after focus before scrolling, in seconds.
+    private static let focusScrollDelay: TimeInterval = 0.35
 
     // ─── Dispatch policy ─────────────────────────────────────────────────────
 
@@ -436,8 +556,9 @@ private func resolveKeyboardType(_ kind: String) -> UIKeyboardType {
     }
 }
 
-/// Capitalization for the field, from the explicit `autocapitalize` prop when
-/// the author set one, otherwise derived from the keyboard type.
+/// Capitalization for the field. `secure` wins outright; otherwise the
+/// explicit `autocapitalize` prop when the author set one, otherwise derived
+/// from the keyboard type.
 ///
 /// SwiftUI defaults an untouched TextField to `.sentences`, which is why an
 /// email field capitalized its first letter even though `.emailAddress` was
@@ -445,12 +566,23 @@ private func resolveKeyboardType(_ kind: String) -> UIKeyboardType {
 /// kind whose content is case-sensitive or non-alphabetic therefore has to opt
 /// out explicitly.
 ///
+/// A `secure` field is checked FIRST — ahead of the explicit prop, which is the
+/// only place in this resolver where the author's word is not final. A password
+/// is opaque bytes; there is no reading of `autocapitalize="sentences"` on a
+/// secret under which shifting its first character is what the author wanted,
+/// and the failure is silent (the field is masked, so the stray capital is
+/// invisible until the login is rejected). The element already suppresses
+/// selection reporting for secure fields at the source on the same reasoning —
+/// some invariants shouldn't be a prop away from being wrong.
+///
 /// Unknown `autocapitalize` values fall through to the derived behaviour rather
 /// than erroring — same policy as `resolveKeyboardType`.
-private func resolveAutocapitalization(explicit: String, keyboard: String) -> TextInputAutocapitalization {
+private func resolveAutocapitalization(explicit: String, secure: Bool, keyboard: String) -> TextInputAutocapitalization {
+    if secure { return .never }
+
     switch explicit.lowercased() {
-    case "none":       return .never
-    case "sentences":  return .sentences
+    case "none", "never", "off": return .never
+    case "sentences", "on":        return .sentences
     case "words":      return .words
     case "characters": return .characters
     default:           break
@@ -473,11 +605,84 @@ private func resolveAutocapitalization(explicit: String, keyboard: String) -> Te
 /// Whether autocorrect should run. Same reasoning as capitalization: iOS will
 /// happily "correct" an email local part or a URL slug into a dictionary word,
 /// and the field type is enough to know that's unwanted.
-private func allowsAutocorrection(keyboard: String) -> Bool {
+///
+/// `secure` is the strongest case of all: a password is by definition not a
+/// dictionary word, so every suggestion is a wrong one, and the candidate bar
+/// over a masked field is also a place the secret can be shoulder-surfed.
+private func allowsAutocorrection(secure: Bool, keyboard: String) -> Bool {
+    if secure { return false }
+
     switch keyboard.lowercased() {
     case "email", "url", "number", "decimal", "phone", "numberpassword", "password":
         return false
     default:
         return true
+    }
+}
+
+/// Places the reveal ("eye") control inside the field's own chrome, so it sits
+/// where the trailing icon sits rather than as a separate Show / Hide control
+/// next to the input — which is what an app has to build today, and which
+/// costs a bridge round-trip and a republish on every tap.
+///
+/// Disabled, this returns `content` unchanged: no HStack, no wrapper, nothing
+/// added to the view tree. Every existing field therefore lays out exactly as
+/// it did.
+private struct RevealToggleModifier: ViewModifier {
+    let enabled: Bool
+    @Binding var revealed: Bool
+    var isFocused: FocusState<Bool>.Binding
+    let textSize: CGFloat
+    let contentColor: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            HStack(spacing: 6) {
+                content
+                Button {
+                    // Read focus BEFORE the swap: flipping `revealed` changes
+                    // which branch of the field is built, and SwiftUI treats
+                    // SecureField and TextField as different views, so the
+                    // one that had first responder is torn down and focus is
+                    // dropped. Re-assert it on the next runloop turn — after
+                    // the new field exists — or the keyboard drops away on
+                    // every tap of the eye.
+                    let wasFocused = isFocused.wrappedValue
+                    revealed.toggle()
+                    if wasFocused {
+                        DispatchQueue.main.async { isFocused.wrappedValue = true }
+                    }
+                } label: {
+                    Image(systemName: revealed ? "eye.slash.fill" : "eye.fill")
+                        .nuiScaledFont(size: max(13, textSize - 2))
+                        .foregroundStyle(contentColor.opacity(0.85))
+                        // Deliberately NOT `.nuiMinTapTarget()`. That puts a
+                        // `minHeight: 44` on the icon, and this HStack sits
+                        // INSIDE the field's content — the variant renderer adds
+                        // its own vertical padding around the whole thing — so a
+                        // 44pt floor here makes a revealable field far taller
+                        // than a plain one. Measured on a login form: 42.7pt for
+                        // the email field, 64.7pt for the password field beside
+                        // it. Half again as tall, and it reads as a layout bug.
+                        //
+                        // `maxHeight: .infinity` fills the row rather than
+                        // demanding a height, so the field keeps exactly the
+                        // height it had before it grew an eye (re-measured at
+                        // 40.7pt, matching the same field with the toggle off).
+                        // The tap target is still >= 44 wide by the full height
+                        // of the field, and `contentShape` keeps all of that
+                        // tappable instead of just the glyph.
+                        .frame(minWidth: 44, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // Announce the ACTION the tap performs, not the current state.
+                // VoiceOver reads this as "Show password, button".
+                .accessibilityLabel(revealed ? "Hide password" : "Show password")
+            }
+        } else {
+            content
+        }
     }
 }

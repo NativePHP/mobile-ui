@@ -52,6 +52,7 @@ struct NativeUIScrollViewRenderer: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(ScrollViewBackgroundModifier(node: node))
         } else if horizontal {
             ScrollView(.horizontal, showsIndicators: showsIndicators) {
                 LazyHStack(alignment: .top, spacing: spacing) {
@@ -62,6 +63,7 @@ struct NativeUIScrollViewRenderer: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(ScrollViewBackgroundModifier(node: node))
         } else if hasFillHeightChild {
             // A `fill` / `h-full` child asked to be at least as tall as the
             // VIEWPORT — the "short screen centred, still scrolls when the
@@ -170,6 +172,20 @@ struct NativeUIScrollViewRenderer: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(ScrollViewBackgroundModifier(node: node))
+            // Hand this scroll view's proxy to its subtree, so a text input
+            // anywhere inside can bring ITSELF above the keyboard when it
+            // takes focus (`NativeUITextInputCore`). `ScrollViewReader`
+            // proposes its content the size it was proposed, so this is
+            // identity plumbing and nothing else — no layout of its own.
+            //
+            // Withheld from a bottom-anchored view on purpose. That mode
+            // already owns a keyboard policy (the show / hide re-pins below)
+            // and it is deliberately a different one: a chat log wants the
+            // LATEST MESSAGE above the keyboard, not the composer centered in
+            // what's left. Two policies driving one proxy would race, and the
+            // later one would win by accident.
+            .environment(\.nativeUIScrollProxy, stickBottom ? nil : proxy)
             .onAppear {
                 guard stickBottom else { return }
                 // Defer past first layout — lazy content isn't measured yet
@@ -255,6 +271,53 @@ private struct MinViewportHeightModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let minHeight, minHeight > 0 {
             content.frame(minHeight: minHeight)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Focus-driven scrolling
+
+/// The enclosing vertical `ScrollView`'s proxy, for descendants that need to
+/// scroll themselves into view.
+///
+/// `nil` by default, and nil is a real answer rather than a missing one: a
+/// sheet, a modal, a fixed screen or a bottom-anchored chat log all have no
+/// vertical scroll view whose scrolling is this descendant's business, and a
+/// descendant that finds no proxy correctly does nothing.
+struct NativeUIScrollProxyKey: EnvironmentKey {
+    static let defaultValue: ScrollViewProxy? = nil
+}
+
+extension EnvironmentValues {
+    var nativeUIScrollProxy: ScrollViewProxy? {
+        get { self[NativeUIScrollProxyKey.self] }
+        set { self[NativeUIScrollProxyKey.self] = newValue }
+    }
+}
+
+/// A `ScrollView` is laid out inside the safe area, so its background stops
+/// short of the home indicator and the window (black in dark mode) shows
+/// through as a band behind the tab bar. `List` doesn't have the problem: its
+/// `.scrollContentBackground(.hidden).background(…)` extends through the inset,
+/// which is why a list-based screen looks clean and a scroll-view one doesn't.
+///
+/// Give the scroll view the same reach — but only when the node actually
+/// declares a background, so a screen that never asked for one is untouched
+/// and keeps the system default.
+private struct ScrollViewBackgroundModifier: ViewModifier {
+    let node: NativeUINode
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let darkBg = colorScheme == .dark ? node.props.getColor("dark_bg_color", default: 0) : 0
+        let argb = darkBg != 0 ? darkBg : (node.style?.bgColor ?? 0)
+
+        if argb != 0 {
+            content
+                .scrollContentBackground(.hidden)
+                .background(Color(argb: argb).ignoresSafeArea())
         } else {
             content
         }

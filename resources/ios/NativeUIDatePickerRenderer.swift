@@ -47,6 +47,13 @@ struct NativeUIDatePickerRenderer: View {
         let disabled    = p.getBool("disabled")
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
+        let isError     = p.getBool("is_error")
+        let supporting  = p.getString("supporting")
+
+        // Error state rides the hint channel unless an explicit hint is
+        // set (same convention as the text inputs).
+        let errorText = (isError && !supporting.isEmpty) ? supporting : ""
+        let effectiveA11yHint = a11yHint.isEmpty ? errorText : a11yHint
 
         let calendar = resolvedCalendar()
         let locale   = resolvedLocale()
@@ -81,7 +88,7 @@ struct NativeUIDatePickerRenderer: View {
                     .padding(.vertical, 11)
                     .background(
                         RoundedRectangle(cornerRadius: theme.radiusMd, style: .continuous)
-                            .stroke(theme.outline, lineWidth: 1)
+                            .stroke(isError ? theme.destructive : theme.outline, lineWidth: 1)
                     )
                 }
                 .disabled(disabled)
@@ -106,6 +113,12 @@ struct NativeUIDatePickerRenderer: View {
                 // value, so a bare a11y-label still announces what's picked.
                 .accessibilityValue(displayString(mode: mode, locale: locale, calendar: calendar))
             }
+
+            if !supporting.isEmpty {
+                Text(supporting)
+                    .nuiScaledFont(size: theme.fontSm)
+                    .foregroundStyle(isError ? theme.destructive : theme.onSurfaceVariant)
+            }
         }
         .onAppear {
             guard !initialized else { return }
@@ -124,7 +137,7 @@ struct NativeUIDatePickerRenderer: View {
             commit(mode: mode, calendar: calendar, onChangeCb: onChangeCb)
         }
         .modifier(NativeUIDatePickerA11yLabel(label: a11yLabel))
-        .modifier(NativeUIDatePickerA11yHint(hint: a11yHint))
+        .modifier(NativeUIDatePickerA11yHint(hint: effectiveA11yHint))
     }
 
     // ── Picker construction ──────────────────────────────────────────────────

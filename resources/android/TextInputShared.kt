@@ -1,9 +1,14 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -46,6 +51,7 @@ internal data class TextInputProps(
     val leadingIcon: String,
     val trailingIcon: String,
     val secure: Boolean,
+    val revealable: Boolean,
     val multiline: Boolean,
     val maxLines: Int,
     val minLines: Int,
@@ -69,11 +75,32 @@ internal data class TextInputProps(
     val onSelectionChangeCb: Int,
     val syncMode: SyncMode,
     val debounceMs: Int,
+    val autofocus: Boolean,
     val selectionDebounceMs: Int,
 ) {
     val enabled: Boolean get() = !disabled && !loading
+
+    /**
+     * Masking for a field that may currently be revealed. The no-argument
+     * property is the always-masked case, which is what the chromeless
+     * variant uses — it has no decoration slot to put a toggle in, so it can
+     * never be revealed.
+     */
+    fun visualTransformation(revealed: Boolean): VisualTransformation =
+        if (secure && !revealed) PasswordVisualTransformation() else VisualTransformation.None
+
     val visualTransformation: VisualTransformation
-        get() = if (secure) PasswordVisualTransformation() else VisualTransformation.None
+        get() = visualTransformation(revealed = false)
+
+    /**
+     * Whether to draw the in-field reveal toggle. Opt-in via `revealable`,
+     * meaningless without `secure`, and suppressed while the field is not
+     * interactive — there is nothing to reveal in a field the user cannot
+     * type into, and a disabled control that still answers taps is its own
+     * bug.
+     */
+    val revealToggle: Boolean get() = secure && revealable && enabled && !readOnly
+
     val singleLine: Boolean get() = !multiline
 
     /** Numeric sp size for the chromeless variant. Tracks token fallbacks. */
@@ -110,12 +137,13 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         leadingIcon  = p.getString("leading_icon"),
         trailingIcon = p.getString("trailing_icon"),
         secure       = p.getBool("secure"),
+        revealable   = p.getBool("revealable"),
         multiline    = p.getBool("multiline"),
         maxLines     = p.getInt("max_lines").let { if (it > 0) it else if (p.getBool("multiline")) 5 else 1 },
         minLines     = p.getInt("min_lines").let { if (it > 0) it else 1 },
         maxLength    = p.getInt("max_length"),
         keyboard     = resolveKeyboardType(p.getString("keyboard")),
-        capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getString("keyboard")),
+        capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getBool("secure"), p.getString("keyboard")),
         disabled     = p.getBool("disabled"),
         readOnly     = p.getBool("read_only"),
         isError      = p.getBool("is_error"),
@@ -133,6 +161,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         onSelectionChangeCb = p.getCallbackId("on_selection_change"),
         syncMode     = parseSyncMode(p.getString("sync_mode", "live")),
         debounceMs   = p.getInt("debounce_ms").let { if (it > 0) it else 300 },
+        autofocus    = p.getBool("autofocus"),
         selectionDebounceMs = resolveSelectionDebounceMs(p.getInt("selection_debounce_ms")),
     )
 }
@@ -171,13 +200,20 @@ internal fun resolveKeyboardType(kind: String): KeyboardType = when (kind.lowerc
 }
 
 /**
- * Capitalization from the explicit `autocapitalize` prop when the author set
- * one, otherwise derived from the keyboard type. Null means "leave Compose's
- * own default alone".
+ * Capitalization for the field. [secure] wins outright; otherwise the explicit
+ * `autocapitalize` prop when the author set one, otherwise derived from the
+ * keyboard type. Null means "leave Compose's own default alone".
  *
  * Compose already defaults to no capitalization, so Android never had the iOS
  * bug (mobile-air #304) — it got the right answer by accident rather than on
  * purpose, and `autocapitalize` had no way to take effect at all.
+ *
+ * [secure] is checked FIRST, ahead of the explicit prop. Compose's default
+ * already got an unannotated secure field right, so on Android this only
+ * closes the one hole the `autocapitalize` prop opened: an author setting
+ * `words` on a form and inheriting it onto the password field. Capitalizing a
+ * secret is never what was meant, and the field is masked, so the stray
+ * capital stays invisible until the login is rejected.
  *
  * The plain-text case deliberately returns NULL rather than `Sentences`.
  * Sentences is what iOS does and would make the platforms agree, but it would
@@ -188,10 +224,12 @@ internal fun resolveKeyboardType(kind: String): KeyboardType = when (kind.lowerc
  * Unknown values fall through to the derived behaviour rather than erroring,
  * matching `resolveKeyboardType`.
  */
-internal fun resolveCapitalization(explicit: String, keyboard: String): KeyboardCapitalization? =
-    when (explicit.lowercase()) {
-        "none"       -> KeyboardCapitalization.None
-        "sentences"  -> KeyboardCapitalization.Sentences
+internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: String): KeyboardCapitalization? {
+    if (secure) return KeyboardCapitalization.None
+
+    return when (explicit.lowercase()) {
+        "none", "never", "off" -> KeyboardCapitalization.None
+        "sentences", "on"        -> KeyboardCapitalization.Sentences
         "words"      -> KeyboardCapitalization.Words
         "characters" -> KeyboardCapitalization.Characters
         else -> when (keyboard.lowercase()) {
@@ -201,6 +239,7 @@ internal fun resolveCapitalization(explicit: String, keyboard: String): Keyboard
             else -> null
         }
     }
+}
 
 internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions =
     props.capitalization
@@ -416,6 +455,38 @@ internal fun trailingIconSlot(name: String): (@Composable () -> Unit)? =
     if (name.isEmpty()) null else ({ MaterialIcon(name = name, contentDescription = null) })
 
 /**
+ * The in-field reveal ("eye") for a `secure` field, for the M3 `trailingIcon`
+ * slot — so it sits where the trailing icon sits rather than as a separate
+ * Show / Hide control beside the input, which is what an app has to build
+ * today and which costs a bridge round-trip and a republish on every tap.
+ *
+ * [revealed] is caller-owned local state and stays local: it must never be
+ * reported to PHP, republish the tree, or touch the value / caret / sync-mode
+ * machinery. Returns null when the field didn't ask for a toggle, so the
+ * caller's existing trailing slot is used unchanged.
+ *
+ * The content description announces the ACTION the tap performs rather than
+ * the current state — TalkBack reads "Show password, button".
+ */
+@Composable
+internal fun revealToggleSlot(
+    props: TextInputProps,
+    revealed: Boolean,
+    onToggle: () -> Unit,
+): (@Composable () -> Unit)? {
+    if (!props.revealToggle) return null
+
+    return {
+        IconButton(onClick = onToggle) {
+            MaterialIcon(
+                name = if (revealed) "visibility_off" else "visibility",
+                contentDescription = if (revealed) "Hide password" else "Show password",
+            )
+        }
+    }
+}
+
+/**
  * Apply optional a11y label/hint to a modifier.
  *
  * The hint is merged into the contentDescription (TalkBack reads it right
@@ -425,4 +496,24 @@ internal fun trailingIconSlot(name: String): (@Composable () -> Unit)? =
 internal fun Modifier.nuiA11y(label: String, hint: String): Modifier {
     val merged = listOf(label, hint).filter { it.isNotEmpty() }.joinToString(". ")
     return if (merged.isEmpty()) this else semantics { contentDescription = merged }
+}
+
+/**
+ * Focus the field and raise the keyboard on first composition.
+ *
+ * Keyed on [Unit] rather than on the flag: this fires once when the field
+ * appears, not again on every recomposition - otherwise a re-render would
+ * steal focus back from wherever the user has since moved it.
+ */
+@Composable
+internal fun Modifier.nuiAutofocus(enabled: Boolean): Modifier {
+    if (!enabled) return this
+
+    val requester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        runCatching { requester.requestFocus() }
+    }
+
+    return this.focusRequester(requester)
 }

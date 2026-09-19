@@ -5,6 +5,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.nativephp.mobile.ui.nativerender.NativeUINode
@@ -38,11 +39,19 @@ object ProgressBarRenderer {
                 trackColor = track,
             )
         } else {
+            // Determinate bars drop M3 1.7's expressive extras — the stop
+            // indicator dot at the track's end and the gap between progress
+            // tip and track. On the thin bars this element renders they read
+            // as stray dots at both edges (a near-empty bar shows exactly
+            // two dots and nothing else), and the iOS renderer's ProgressView
+            // draws a plain continuous bar — parity wins.
             LinearProgressIndicator(
                 progress = { p.getFloat("value").coerceIn(0f, 1f) },
                 modifier = barModifier,
                 color = tint,
                 trackColor = track,
+                gapSize = 0.dp,
+                drawStopIndicator = {},
             )
         }
     }

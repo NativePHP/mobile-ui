@@ -22,7 +22,11 @@ import com.nativephp.plugins.native_ui.ui.nuiThemeDefaultTypography
  * application context for asset-backed font loading.
  */
 fun registerNativeUIChrome(context: Context) {
-    NativeRootHostRegistry.register("native-ui.drawer", consumes = "native_drawer") { root, content ->
+    NativeRootHostRegistry.register(
+        "native-ui.drawer",
+        consumes = "native_drawer",
+        reservesNavigationBarSlot = true,
+    ) { root, content ->
         val drawerNode = root.children.firstOrNull { it.type == "native_drawer" }
         NativeLayoutDrawerHost(drawerNode = drawerNode, content = content)
     }
