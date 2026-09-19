@@ -31,6 +31,14 @@ struct NativeUITextInputCore: View {
     /// chromeless `BasicTextField` doesn't have).
     var supportsRevealToggle: Bool = false
 
+    /// Colour for the placeholder. Nil keeps SwiftUI's own placeholder style,
+    /// which is what every variant drew before. The outlined variant passes
+    /// its `on-input` token here, so a declared `on-input` recolours the
+    /// placeholder along with everything else inside the box, as it already
+    /// does on Android. Without it the placeholder stays system grey, which
+    /// all but disappears on a dark `input-fill`.
+    var placeholderColor: Color? = nil
+
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
     @State private var initialized: Bool = false
@@ -76,6 +84,9 @@ struct NativeUITextInputCore: View {
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
+        // Nil unless the variant asked for a colour, and a nil prompt leaves the
+        // title as the placeholder, exactly as the prompt-less initializers do.
+        let prompt        = placeholderColor.map { Text(placeholder).foregroundColor($0) }
         let serverValue   = p.getString("value")
         let secure        = p.getBool("secure")
         let multiline     = p.getBool("multiline")
@@ -141,14 +152,14 @@ struct NativeUITextInputCore: View {
                 // for the revealed branch too: `selectionEnabled` is gated on
                 // `!secure`, so an unmasked password still reports nothing.
                 if masked {
-                    SecureField(placeholder, text: $text)
+                    SecureField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 } else {
                     // SecureField has no unmasked mode, so revealing means
                     // swapping in a plain TextField. `multiline` is ignored on
                     // a secure field in both branches, as before.
-                    TextField(placeholder, text: $text)
+                    TextField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 }
@@ -166,13 +177,13 @@ struct NativeUITextInputCore: View {
                 // (multiline) axis too. Kept as parallel branches so the
                 // feature-off path is byte-for-byte the original field.
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: prompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text, axis: .vertical)
+                    TextField(placeholder, text: $text, prompt: prompt, axis: .vertical)
                         .lineLimit(lower...upper)
                         .foregroundColor(contentColor)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -180,11 +191,11 @@ struct NativeUITextInputCore: View {
                 }
             } else {
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text)
+                    TextField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 }

@@ -112,7 +112,11 @@ struct NativeUIOutlinedTextInputRenderer: View {
                     textSize: metrics.textSize,
                     contentColor: disabled ? fieldTextColor.opacity(0.6) : fieldTextColor,
                     tintColor: isError ? theme.destructive : theme.primary,
-                    supportsRevealToggle: true
+                    supportsRevealToggle: true,
+                    // `on-input` only, not the `fieldDecorationColor` fallback:
+                    // with no `on-input` declared the placeholder keeps the
+                    // system style it has always had.
+                    placeholderColor: theme.onInput
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
 
