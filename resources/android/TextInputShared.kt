@@ -115,7 +115,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         minLines     = p.getInt("min_lines").let { if (it > 0) it else 1 },
         maxLength    = p.getInt("max_length"),
         keyboard     = resolveKeyboardType(p.getString("keyboard")),
-        capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getString("keyboard")),
+        capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getBool("secure"), p.getString("keyboard")),
         disabled     = p.getBool("disabled"),
         readOnly     = p.getBool("read_only"),
         isError      = p.getBool("is_error"),
@@ -171,13 +171,20 @@ internal fun resolveKeyboardType(kind: String): KeyboardType = when (kind.lowerc
 }
 
 /**
- * Capitalization from the explicit `autocapitalize` prop when the author set
- * one, otherwise derived from the keyboard type. Null means "leave Compose's
- * own default alone".
+ * Capitalization for the field. [secure] wins outright; otherwise the explicit
+ * `autocapitalize` prop when the author set one, otherwise derived from the
+ * keyboard type. Null means "leave Compose's own default alone".
  *
  * Compose already defaults to no capitalization, so Android never had the iOS
  * bug (mobile-air #304) — it got the right answer by accident rather than on
  * purpose, and `autocapitalize` had no way to take effect at all.
+ *
+ * [secure] is checked FIRST, ahead of the explicit prop. Compose's default
+ * already got an unannotated secure field right, so on Android this only
+ * closes the one hole the `autocapitalize` prop opened: an author setting
+ * `words` on a form and inheriting it onto the password field. Capitalizing a
+ * secret is never what was meant, and the field is masked, so the stray
+ * capital stays invisible until the login is rejected.
  *
  * The plain-text case deliberately returns NULL rather than `Sentences`.
  * Sentences is what iOS does and would make the platforms agree, but it would
@@ -188,10 +195,12 @@ internal fun resolveKeyboardType(kind: String): KeyboardType = when (kind.lowerc
  * Unknown values fall through to the derived behaviour rather than erroring,
  * matching `resolveKeyboardType`.
  */
-internal fun resolveCapitalization(explicit: String, keyboard: String): KeyboardCapitalization? =
-    when (explicit.lowercase()) {
-        "none"       -> KeyboardCapitalization.None
-        "sentences"  -> KeyboardCapitalization.Sentences
+internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: String): KeyboardCapitalization? {
+    if (secure) return KeyboardCapitalization.None
+
+    return when (explicit.lowercase()) {
+        "none", "never", "off" -> KeyboardCapitalization.None
+        "sentences", "on"        -> KeyboardCapitalization.Sentences
         "words"      -> KeyboardCapitalization.Words
         "characters" -> KeyboardCapitalization.Characters
         else -> when (keyboard.lowercase()) {
@@ -201,6 +210,7 @@ internal fun resolveCapitalization(explicit: String, keyboard: String): Keyboard
             else -> null
         }
     }
+}
 
 internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions =
     props.capitalization
