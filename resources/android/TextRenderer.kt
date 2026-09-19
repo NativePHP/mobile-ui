@@ -12,6 +12,9 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -23,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 
@@ -142,11 +146,13 @@ private data class RunCtx(
     val italic: Boolean,
     val letterSpacingEm: Float,
     val textTransform: Int,
+    val pressCallbackId: Int,
+    val pressNodeId: Int,
 ) {
     companion object {
         // Root defaults — mirror the leaf path (16sp, normal, black, no dark
         // override, no custom font, no decoration/letter-spacing/transform).
-        val Root = RunCtx(16f, 0, 0, "", 0xFF000000.toInt(), 0, false, 0f, 0)
+        val Root = RunCtx(16f, 0, 0, "", 0xFF000000.toInt(), 0, false, 0f, 0, 0, 0)
     }
 }
 
@@ -168,6 +174,8 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
         italic = p.getInt("font_style", if (inherited.italic) 1 else 0) == 1,
         letterSpacingEm = p.getFloat("letter_spacing", inherited.letterSpacingEm),
         textTransform = p.getInt("text_transform", inherited.textTransform),
+        pressCallbackId = if (node.onPress != 0) node.onPress else inherited.pressCallbackId,
+        pressNodeId = if (node.onPress != 0) node.id else inherited.pressNodeId,
     )
 
     val ownText = applyTransform(p.getString("text"), ctx.textTransform)
@@ -191,7 +199,26 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
             textDecoration = resolveDecoration(p.getInt("underline"), p.getInt("line_through")),
             background = if (effectiveBg != 0) argbToComposeColor(effectiveBg) else Color.Unspecified,
         )
-        withStyle(span) { append(ownText) }
+        if (ctx.pressCallbackId != 0) {
+            // One Clickable per emitted span keeps annotation ranges flat
+            // for Compose hit-testing, even when pressable runs nest.
+            // Null link styles underline the range like a hyperlink,
+            // so the span's own decoration rides along instead.
+            val linkStyles = TextLinkStyles(
+                style = SpanStyle(textDecoration = resolveDecoration(p.getInt("underline"), p.getInt("line_through")) ?: TextDecoration.None)
+            )
+            val cb = ctx.pressCallbackId
+            val target = ctx.pressNodeId
+            withLink(
+                LinkAnnotation.Clickable(tag = "nativephp-press", styles = linkStyles, linkInteractionListener = {
+                    NativeUIBridge.sendPressEvent(cb, target)
+                })
+            ) {
+                withStyle(span) { append(ownText) }
+            }
+        } else {
+            withStyle(span) { append(ownText) }
+        }
     }
 
     node.children.filter { it.type == "text" }.forEach { child ->

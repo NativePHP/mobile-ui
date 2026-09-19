@@ -40,6 +40,8 @@ object SelectRenderer {
         val disabled    = p.getBool("disabled")
         val a11yLabel   = p.getString("a11y_label")
         val a11yHint    = p.getString("a11y_hint")
+        val isError     = p.getBool("is_error")
+        val supporting  = p.getString("supporting")
 
         val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
 
@@ -69,9 +71,15 @@ object SelectRenderer {
                 label = if (label.isNotEmpty()) ({ Text(label, fontFamily = nuiDefaultFontFamily()) }) else null,
                 placeholder = if (placeholder.isNotEmpty()) ({ Text(placeholder, fontFamily = nuiDefaultFontFamily()) }) else null,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                isError = isError,
+                supportingText = supportingSlot(supporting),
                 modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                 textStyle = TextStyle(color = theme.onSurface),
                 colors = OutlinedTextFieldDefaults.colors(
+                    errorBorderColor = theme.destructive,
+                    errorLabelColor = theme.destructive,
+                    errorSupportingTextColor = theme.destructive,
+                    errorTrailingIconColor = theme.destructive,
                     focusedTextColor = theme.onSurface,
                     unfocusedTextColor = theme.onSurface,
                     focusedBorderColor = theme.primary,
