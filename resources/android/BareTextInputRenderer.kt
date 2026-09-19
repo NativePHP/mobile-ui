@@ -129,7 +129,8 @@ object BareTextInputRenderer {
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
                 }
-                .then(modifier),
+                .then(modifier)
+                .nuiAutofocus(props.autofocus),
             enabled = !props.disabled,
             readOnly = props.readOnly,
             textStyle = LocalTextStyle.current.copy(
@@ -145,7 +146,14 @@ object BareTextInputRenderer {
                     else -> theme.primary
                 }
             ),
-            singleLine = !props.multiline,
+            singleLine = props.singleLine,
+            // Line limits were parsed (and defaulted: 5 for multiline) in
+            // parseTextInputProps but never forwarded here, so a multiline
+            // composer grew without bound instead of scrolling internally
+            // at the cap like iOS's lineLimit(min...max). Same forwarding as
+            // the filled/outlined variants.
+            maxLines = props.maxLines,
+            minLines = props.minLines,
             decorationBox = { innerTextField ->
                 if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
                     Text(

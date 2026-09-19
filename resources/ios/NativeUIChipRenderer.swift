@@ -29,6 +29,7 @@ struct NativeUIChipRenderer: View {
         let label       = p.getString("label")
         let iconName    = p.getString("icon")
         let onChangeCb  = p.getCallbackId("on_change")
+        let onPressCb   = p.getCallbackId("on_press") != 0 ? p.getCallbackId("on_press") : node.onPress
         let disabled    = p.getBool("disabled")
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
@@ -45,11 +46,18 @@ struct NativeUIChipRenderer: View {
 
         Button(action: {
             guard !disabled else { return }
-            let new = !isSelected
-            isSelected = new
-            lastSentValue = new
-            if onChangeCb != 0 {
-                NativeElementBridge.sendToggleChangeEvent(onChangeCb, nodeId: node.id, value: new)
+            if onPressCb != 0 {
+                // Server-driven: the press handler owns selection. Toggling
+                // locally would make the chip fight the state it is handed
+                // back, so a filter chip would flicker off on its own tap.
+                NativeElementBridge.sendPressEvent(onPressCb, nodeId: node.id)
+            } else {
+                let new = !isSelected
+                isSelected = new
+                lastSentValue = new
+                if onChangeCb != 0 {
+                    NativeElementBridge.sendToggleChangeEvent(onChangeCb, nodeId: node.id, value: new)
+                }
             }
         }) {
             HStack(spacing: 6) {

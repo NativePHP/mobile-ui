@@ -114,6 +114,11 @@ struct NativeUIListRenderer: View {
             .equatable()
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowInsets(EdgeInsets())
+            // Rows carry SwiftUI's opaque system fill, which paints over the
+            // list's own background — so hiding the scroll background via
+            // ListBackgroundModifier still left a white sheet on a themed
+            // screen. Clear the row and let its content decide.
+            .listRowBackground(Color.clear)
             // Drive dividers from the bottom edge only; always hide the top
             // edge. The top separator renders solely on a section's first row,
             // so hiding it removes the stray full-width line that otherwise
@@ -218,6 +223,15 @@ private struct GroupedOrPlainListStyle: ViewModifier {
 /// renders on the stock gray instead of the app's palette. When the node
 /// declares a background, hide the system scroll background and paint the
 /// node's color — matching how every other container element behaves.
+///
+/// Two more cases hide the system background without painting anything
+/// here, because the node's own `NodeStyleModifier` (which wraps this
+/// renderer) already draws what should show through:
+///   - a gradient (`bg-gradient-to-* from-* via-* to-*`, carried as
+///     `gradient_stops`), which the modifier paints behind the List;
+///   - `transparent` — the list sits directly on the screen's background
+///     (a gradient, an image, the background layer). `bg-transparent`
+///     can't express this: it packs to the same 0 as "no colour".
 private struct ListBackgroundModifier: ViewModifier {
     let node: NativeUINode
     @Environment(\.colorScheme) private var colorScheme
@@ -225,7 +239,13 @@ private struct ListBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
         let darkBg = colorScheme == .dark ? node.props.getColor("dark_bg_color", default: 0) : 0
         let argb = darkBg != 0 ? darkBg : (node.style?.bgColor ?? 0)
-        if argb != 0 {
+        let hasGradient = !node.props.getString("gradient_stops", default: "").isEmpty
+        let transparent = node.props.getBool("transparent")
+
+        if transparent || hasGradient {
+            content
+                .scrollContentBackground(.hidden)
+        } else if argb != 0 {
             content
                 .scrollContentBackground(.hidden)
                 .background(Color(argb: argb))
