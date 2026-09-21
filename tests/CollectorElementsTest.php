@@ -211,6 +211,38 @@ it('still serializes the selection callback when secure is explicitly false', fu
     expect($registry->kind($props['on_selection_change']))->toBe('text_selection');
 });
 
+it('carries the reveal toggle from the Blade attribute', function (string $type) {
+    NativeElementCollector::leaf($type, [
+        'secure' => true,
+        'revealable' => true,
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['revealable'])->toBeTrue();
+})->with(['bare_text_input', 'outlined_text_input', 'filled_text_input']);
+
+it('omits the reveal toggle when the attribute is absent', function () {
+    // Absence is what keeps every existing secure field looking the way it
+    // does — the renderers only draw the eye when the prop is present and
+    // true, so a serialized `false` would be indistinguishable but noisier.
+    NativeElementCollector::leaf('outlined_text_input', ['secure' => true]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props'])->not->toHaveKey('revealable');
+});
+
+it('registers the reveal toggle via the fluent API', function () {
+    $props = OutlinedTextInput::make()
+        ->secure()
+        ->revealable()
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($props['secure'])->toBeTrue();
+    expect($props['revealable'])->toBeTrue();
+});
+
 it('registers selection change via the fluent API', function () {
     $registry = new CallbackRegistry;
     $props = OutlinedTextInput::make()
@@ -483,4 +515,66 @@ it('parses string booleans on the new sheet props via filter_var', function () {
 
     expect($tree['props']['permanent'])->toBeFalse();
     expect($tree['props']['background_interaction'])->toBeFalse();
+});
+
+// ── autocapitalize (mobile-air #304) ─────────────────────────────────────────
+
+it('serializes autocapitalization via both fluent APIs', function () {
+    $short = OutlinedTextInput::make()
+        ->autocapitalize('Words')
+        ->toArray(new CallbackRegistry)['props'];
+    $long = OutlinedTextInput::make()
+        ->autocapitalization('never')
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($short['autocapitalize'])->toBe('words')
+        ->and($long['autocapitalize'])->toBe('none');
+});
+
+it('serializes every autocapitalization attribute spelling', function (string $attr) {
+    $el = OutlinedTextInput::make();
+    $el->applyAttributes([$attr => 'characters']);
+
+    expect($el->toArray(new CallbackRegistry)['props']['autocapitalize'])->toBe('characters');
+})->with([
+    'autocapitalize',
+    'autoCapitalize',
+    'auto-capitalize',
+    'autocapitalization',
+    'autoCapitalization',
+    'auto-capitalization',
+]);
+
+it('supports autocapitalization on every text input variant', function (string $elementClass) {
+    $el = $elementClass::make();
+    $el->applyAttributes(['autocapitalization' => 'never']);
+
+    expect($el->toArray(new CallbackRegistry)['props']['autocapitalize'])->toBe('none');
+})->with([
+    BareTextInput::class,
+    FilledTextInput::class,
+    OutlinedTextInput::class,
+]);
+
+it('normalizes common autocapitalization value aliases', function (string $value, string $expected) {
+    $props = BareTextInput::make()
+        ->autocapitalize($value)
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($props['autocapitalize'])->toBe($expected);
+})->with([
+    ['never', 'none'],
+    ['off', 'none'],
+    ['on', 'sentences'],
+]);
+
+it('omits autocapitalize entirely when the author did not set one', function () {
+    // Absent means "derive from the keyboard type" on both platforms — the
+    // native resolvers must not see an empty string as an explicit choice.
+    $props = OutlinedTextInput::make()
+        ->keyboard('email')
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($props)->not->toHaveKey('autocapitalize')
+        ->and($props['keyboard'])->toBe('email');
 });

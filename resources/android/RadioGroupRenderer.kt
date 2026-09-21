@@ -4,6 +4,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,8 +35,15 @@ object RadioGroupRenderer {
         val groupDisabled = p.getBool("disabled")
         val a11yLabel   = p.getString("a11y_label")
         val a11yHint    = p.getString("a11y_hint")
+        val isError     = p.getBool("is_error")
+        val supporting  = p.getString("supporting")
 
         val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+
+        // Error state rides the hint channel unless an explicit hint is
+        // set (same convention as the text inputs).
+        val errorText = if (isError && supporting.isNotEmpty()) supporting else ""
+        val effectiveA11yHint = a11yHint.ifEmpty { errorText }
 
         var selectedValue by remember(node.id) { mutableStateOf(serverValue) }
         var lastSentValue by remember(node.id) { mutableStateOf(serverValue) }
@@ -47,11 +55,11 @@ object RadioGroupRenderer {
             }
         }
 
-        val groupModifier = modifier.nuiA11y(a11yLabel, a11yHint)
+        val groupModifier = modifier.nuiA11y(a11yLabel, effectiveA11yHint)
 
         Column(modifier = groupModifier) {
             if (label.isNotEmpty()) {
-                Text(text = label, fontFamily = nuiDefaultFontFamily(), color = theme.onSurfaceVariant)
+                Text(text = label, fontFamily = nuiDefaultFontFamily(), color = if (isError) theme.destructive else theme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
             }
             node.children.forEach { child ->
@@ -72,6 +80,15 @@ object RadioGroupRenderer {
                 } else {
                     RenderNode(child)
                 }
+            }
+
+            if (supporting.isNotEmpty()) {
+                Text(
+                    text = supporting,
+                    fontFamily = nuiDefaultFontFamily(),
+                    color = if (isError) theme.destructive else theme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }

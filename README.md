@@ -56,6 +56,13 @@ Disabled controls draw from the `surface-variant` (fill) and
 `on-surface-variant` (label) tokens on both platforms — adjust those two
 tokens to tune disabled contrast app-wide.
 
+`outlined-text-input` draws a transparent box by default (Material 3's
+outlined container), so on a colored screen the field reads as part of the
+page rather than as a field. Declare the optional `input-fill` / `on-input`
+pair to give it a body of its own — `input-fill` paints the box, `on-input`
+recolors everything inside it (typed text, placeholder, icons,
+prefix/suffix). Leave them unset and nothing changes.
+
 Icons accept platform enum overrides in Blade, matching the fluent API:
 
 ```blade

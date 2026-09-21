@@ -29,6 +29,25 @@ struct NativeUITokens: Equatable {
     let accent: Color
     let onAccent: Color
 
+    // Text-field container. Named for the ROLE, not for a variant: this is
+    // the box the user types into, wherever it is drawn.
+    //
+    // `inputFill` is transparent unless the app declares `input-fill`, which
+    // is Material 3's outlined container and also exactly what the outlined
+    // renderer painted before the token existed — so an app that says nothing
+    // sees nothing change.
+    //
+    // `onInput` is NIL when undeclared rather than resolved to a default,
+    // because there is no single default to resolve to: content inside a text
+    // field is deliberately two-tone today (typed text `onSurface`, icons and
+    // affixes `onSurfaceVariant`), and collapsing that pair onto one token
+    // would restyle every existing field. Nil therefore means "keep each call
+    // site's existing color"; a declared value overrides the lot, which is
+    // what you want the moment `input-fill` is dark enough that the M3 grays
+    // stop being legible on it.
+    let inputFill: Color
+    let onInput: Color?
+
     // Radii (points)
     let radiusSm: CGFloat
     let radiusMd: CGFloat
@@ -63,6 +82,8 @@ struct NativeUITokens: Equatable {
         onSuccess:        Color(hex: "#FFFFFF"),
         accent:           Color(hex: "#C2410C"),
         onAccent:         Color(hex: "#FFFFFF"),
+        inputFill:        .clear,
+        onInput:          nil,
         radiusSm: 4, radiusMd: 8, radiusLg: 16, radiusFull: 9999,
         fontSm: 14, fontMd: 16, fontLg: 20, fontXl: 24,
         fontFamily: "System"
@@ -131,6 +152,13 @@ final class NativeUITheme: ObservableObject {
                 onSuccess:        hex(map["on-success"],         fallback: fallbackTo.onSuccess),
                 accent:           hex(map["accent"],             fallback: fallbackTo.accent),
                 onAccent:         hex(map["on-accent"],          fallback: fallbackTo.onAccent),
+                inputFill:        hex(map["input-fill"],         fallback: fallbackTo.inputFill),
+                // Optional on purpose — see the token declaration. `hex()`
+                // can't express "absent", so this one keeps the fallback's own
+                // nil-ness instead of substituting a color for it. The dark
+                // block's fallback is the resolved LIGHT token set, so
+                // declaring `on-input` under `light` alone still covers both.
+                onInput:          optionalHex(map["on-input"],   fallback: fallbackTo.onInput),
                 radiusSm: radiusSm, radiusMd: radiusMd, radiusLg: radiusLg, radiusFull: radiusFull,
                 fontSm: fontSm, fontMd: fontMd, fontLg: fontLg, fontXl: fontXl,
                 fontFamily: fontFamily
@@ -195,6 +223,14 @@ extension EnvironmentValues {
 // MARK: - Parsing helpers
 
 private func hex(_ any: Any?, fallback: Color) -> Color {
+    guard let s = any as? String, s.hasPrefix("#") else { return fallback }
+    return Color(hex: s)
+}
+
+/// `hex()` for tokens whose absence is meaningful. An undeclared token yields
+/// the fallback — including when the fallback is itself nil — so "nobody has
+/// declared this" survives the light → dark inheritance chain intact.
+private func optionalHex(_ any: Any?, fallback: Color?) -> Color? {
     guard let s = any as? String, s.hasPrefix("#") else { return fallback }
     return Color(hex: s)
 }

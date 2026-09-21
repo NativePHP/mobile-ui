@@ -155,19 +155,19 @@ struct NativeUIImageRenderer: View {
 
     @ViewBuilder
     private func imageContent(src: String, contentMode: ContentMode, tintArgb: Int, cornerRadius: CGFloat) -> some View {
-        if src.isEmpty {
-            Color.clear
-        } else if let path = Self.localFilePath(for: src) {
-            // Local device file — camera capture, gallery selection, etc.
+        switch NativeUIImageSource.resolve(src) {
+        case .local(let path):
+            // Local device file — camera capture, gallery selection, or an
+            // asset shipped in the app's `public/` directory.
             // `AsyncImage`/`URLSession` can't load `file://` or bare
-            // filesystem paths, so decode directly with UIImage. Handles
-            // HEIC/HEIF transparently (UIImage decodes them natively).
-            if let uiImage = UIImage(contentsOfFile: path) {
+            // filesystem paths, so decode directly with UIImage (cached, and
+            // HEIC/HEIF handled transparently — UIImage decodes them natively).
+            if let uiImage = NativeUIImageCache.image(atPath: path) {
                 tinted(Image(uiImage: uiImage), contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
             } else {
                 Color.clear
             }
-        } else if let url = URL(string: src) {
+        case .remote(let url):
             // Remote URL (http/https) — load asynchronously.
             AsyncImage(url: url) { phase in
                 switch phase {
@@ -181,7 +181,7 @@ struct NativeUIImageRenderer: View {
                     Color.clear
                 }
             }
-        } else {
+        case .unresolvable:
             Color.clear
         }
     }
@@ -227,19 +227,6 @@ struct NativeUIImageRenderer: View {
                     .accessibilityAddTraits(.isImage)
             }
         }
-    }
-
-    /// Resolves `src` to a local filesystem path when it points at an
-    /// on-device file (`file://…` URL or an absolute `/…` path), or nil
-    /// when it's a remote URL that should go through AsyncImage.
-    private static func localFilePath(for src: String) -> String? {
-        if src.hasPrefix("file://") {
-            return URL(string: src)?.path ?? String(src.dropFirst("file://".count))
-        }
-        if src.hasPrefix("/") {
-            return src
-        }
-        return nil
     }
 
     private func resolveContentMode(_ fit: Int) -> ContentMode {
