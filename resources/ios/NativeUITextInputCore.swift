@@ -341,10 +341,13 @@ struct NativeUITextInputCore: View {
         // inserts a line break and `@submit` is only reachable through a
         // dedicated send button. Blur still flushes pending changes above.
         //
+        // `secure` wins over `multiline` when the field is built above, so a
+        // secure field is a single-line SecureField and keeps its submit path.
+        //
         // Grouped so the reveal-toggle modifier below has a single view to
         // attach to, whichever branch was taken.
         Group {
-            if multiline {
+            if multiline && !secure {
                 core
             } else {
                 core
