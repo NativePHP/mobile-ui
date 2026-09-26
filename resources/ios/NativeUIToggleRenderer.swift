@@ -45,6 +45,9 @@ struct NativeUIToggleRenderer: View {
                 }
             }
             .onChange(of: isOn) { _, new in
+                // Setting isOn from the server value (onAppear, a server
+                // push) also lands here; only a user tap should report.
+                guard new != lastSentValue else { return }
                 lastSentValue = new
                 if onChangeCb != 0 {
                     NativeElementBridge.sendToggleChangeEvent(onChangeCb, nodeId: node.id, value: new)
