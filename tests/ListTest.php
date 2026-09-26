@@ -71,3 +71,21 @@ it('exposes transparent on the fluent builder', function () {
 
     expect($opaque->toArray(new CallbackRegistry)['props']['transparent'])->toBeFalse();
 });
+
+it('serializes the end reached buffer from attributes', function () {
+    $tree = collectList(['end-reached-buffer' => 5]);
+
+    expect($tree['props']['end_reached_buffer'])->toBe(5);
+});
+
+it('accepts the end reached buffer on the fluent builder', function () {
+    $list = NativeList::make()->endReachedBuffer(5);
+
+    expect($list->toArray(new CallbackRegistry)['props']['end_reached_buffer'])->toBe(5);
+});
+
+it('clamps a negative end reached buffer to one', function () {
+    $list = NativeList::make()->endReachedBuffer(-1);
+
+    expect($list->toArray(new CallbackRegistry)['props']['end_reached_buffer'])->toBe(1);
+});
