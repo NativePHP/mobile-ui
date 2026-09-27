@@ -200,6 +200,12 @@ class ListItem extends Element
             $this->onTrailingChange($attrs['on-trailing-change'] ?? $attrs['onTrailingChange']);
         }
 
+        // Trailing icon button press, same spellings as the change
+        // callbacks above.
+        if (isset($attrs['on-trailing-press']) || isset($attrs['onTrailingPress'])) {
+            $this->onTrailingPress($attrs['on-trailing-press'] ?? $attrs['onTrailingPress']);
+        }
+
         // Swipe actions — new structured multi-action API. Each entry
         // is `['method' => …, 'label' => …, 'icon' => …, 'tint' => …,
         // 'role' => …]`. Both arrays support 1+ actions.
