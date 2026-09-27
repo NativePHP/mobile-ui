@@ -154,6 +154,12 @@ class ListItem extends Element
         if (isset($attrs['headlineColor'])) {
             $this->headlineColor($attrs['headlineColor']);
         }
+        // Struck-through headline, e.g. a completed todo. Same name as the
+        // `line-through` text decoration on `<native:text>`.
+        $lineThrough = $attrs['headline-line-through'] ?? $attrs['headlineLineThrough'] ?? null;
+        if ($lineThrough !== null) {
+            $this->headlineLineThrough(filter_var($lineThrough, FILTER_VALIDATE_BOOLEAN));
+        }
         if (isset($attrs['supportingColor'])) {
             $this->supportingColor($attrs['supportingColor']);
         }
@@ -466,6 +472,16 @@ class ListItem extends Element
     public function headlineColor(string $color): static
     {
         $this->listItemProps['headline_color'] = $this->resolveColorValue($color);
+
+        return $this;
+    }
+
+    /**
+     * Draw a line through the headline, e.g. to mark a todo as done.
+     */
+    public function headlineLineThrough(bool $lineThrough = true): static
+    {
+        $this->listItemProps['headline_line_through'] = $lineThrough;
 
         return $this;
     }

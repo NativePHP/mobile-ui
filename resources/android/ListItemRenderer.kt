@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
@@ -49,6 +50,7 @@ object ListItemRenderer {
 
         // Colors
         val headlineColor = p.getColor("headline_color", 0)
+        val headlineLineThrough = p.getBool("headline_line_through")
         val supportingColor = p.getColor("supporting_color", 0)
         val overlineColor = p.getColor("overline_color", 0)
         val containerColor = p.getColor("container_color", 0)
@@ -117,7 +119,8 @@ object ListItemRenderer {
                 Text(
                     text = headline,
                     fontFamily = nuiDefaultFontFamily(),
-                    color = if (headlineColor != 0) Color(headlineColor) else Color.Unspecified
+                    color = if (headlineColor != 0) Color(headlineColor) else Color.Unspecified,
+                    textDecoration = if (headlineLineThrough) TextDecoration.LineThrough else null
                 )
             },
             modifier = clickModifier,
