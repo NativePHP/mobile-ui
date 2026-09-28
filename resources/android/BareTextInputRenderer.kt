@@ -131,6 +131,7 @@ object BareTextInputRenderer {
                     wasFocused = state.isFocused
                 }
                 .then(modifier)
+                .nuiContentType(props.contentType)
                 .nuiAutofocus(props.autofocus),
             enabled = !props.disabled,
             readOnly = props.readOnly,
