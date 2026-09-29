@@ -58,6 +58,9 @@ object OutlinedTextInputRenderer {
         // the server-push behavior below).
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
+        // tracked from the InteractionSource below so
+        // the server-value sync can tell a focused field from a blurred one.
+        var isFieldFocused by remember { mutableStateOf(false) }
 
         // Reveal state for a `revealable` secure field. Local on purpose, and
         // that is the whole safety argument for the feature: flipping it never
@@ -85,6 +88,13 @@ object OutlinedTextInputRenderer {
 
         LaunchedEffect(props.serverValue) {
             if (props.serverValue != lastSentValue) {
+                // while focused the user owns the text.
+                // A differing server value mid-typing is a stale echo of an
+                // earlier keystroke (multiple commits in flight) — applying it
+                // would clobber in-flight edits. Resyncs on blur / unfocused
+                // renders. Returning here also skips the end-caret selection
+                // flush below, so a dropped push reports nothing.
+                if (isFieldFocused) return@LaunchedEffect
                 // Programmatic server push: replace the text and drop the caret
                 // at the very end (parity with the pre-migration String sync,
                 // which reset the field wholesale). We do NOT emit stale
@@ -106,10 +116,14 @@ object OutlinedTextInputRenderer {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
                 when (interaction) {
-                    is FocusInteraction.Focus   -> focusStack += interaction
+                    is FocusInteraction.Focus   -> {
+                        focusStack += interaction
+                        isFieldFocused = true
+                    }
                     is FocusInteraction.Unfocus -> {
                         focusStack.remove(interaction.focus)
                         if (focusStack.isEmpty()) {
+                            isFieldFocused = false
                             // Flush the pending selection first so the final
                             // caret lands, then flush any deferred text change.
                             selectionReporter.flush(value)
