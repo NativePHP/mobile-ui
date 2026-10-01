@@ -99,7 +99,12 @@ struct NativeUIButtonRenderer: View {
 
         let action = {
             if pressCb != 0 {
-                NativeElementBridge.sendPressEvent(pressCb, nodeId: node.id)
+                // Through the focus policy so a focused field's pending
+                // change (an autocorrection this tap just committed)
+                // reaches PHP before the press does (mobile-air #335).
+                KeyboardFocusPolicy.dispatchPress {
+                    NativeElementBridge.sendPressEvent(pressCb, nodeId: node.id)
+                }
             }
         }
 

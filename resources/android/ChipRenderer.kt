@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -73,6 +74,9 @@ object ChipRenderer {
                     // Server-driven: the press handler owns selection. Toggling
                     // locally would make the chip fight the state it is handed
                     // back, so a filter chip would flicker off on its own tap.
+                    // The chip consumes the tap, so drop the keyboard here
+                    // unless the focused field keeps focus (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
                     NativeUIBridge.sendPressEvent(onPressCb, node.id)
                 } else {
                     val new = !isSelected
