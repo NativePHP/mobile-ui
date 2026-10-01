@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +85,15 @@ object BareTextInputRenderer {
         var wasFocused by remember { mutableStateOf(false) }
         val focusManager = LocalFocusManager.current
 
+        // This field's identity in KeyboardFocusPolicy. A blur only releases
+        // the policy while this field still owns it, so a late blur can't
+        // clobber the field focus moved to. Released on dispose too, for a
+        // field that leaves composition while focused.
+        val focusToken = remember { Any() }
+        DisposableEffect(focusToken) {
+            onDispose { KeyboardFocusPolicy.fieldBlurred(focusToken) }
+        }
+
         // Caret / selection reporter — independent of the direct change/submit
         // dispatchers; no-op unless `on_selection_change` is wired and the
         // field isn't secure.
@@ -127,15 +137,20 @@ object BareTextInputRenderer {
             // layout mode) still wins since it comes later in the chain.
             // onFocusChanged is Bare's blur hook (no InteractionSource here):
             // flush the pending selection on the focused → unfocused edge.
-            // The KeyboardFocusPolicy flag lets interactive taps elsewhere
-            // honor this field's keep-focus-on-submit (mobile-air #335).
+            // Registering with KeyboardFocusPolicy lets interactive taps
+            // elsewhere honor this field's keep-focus-on-submit (mobile-air
+            // #335). The unfocused call this fires on first composition is a
+            // no-op there, since this field doesn't own the policy yet.
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
-                    KeyboardFocusPolicy.focusedFieldKeepsFocus =
-                        state.isFocused && props.keepFocusOnSubmit
+                    if (state.isFocused) {
+                        KeyboardFocusPolicy.fieldFocused(focusToken, props.keepFocusOnSubmit)
+                    } else {
+                        KeyboardFocusPolicy.fieldBlurred(focusToken)
+                    }
                 }
                 .then(modifier)
                 .nuiAutofocus(props.autofocus),

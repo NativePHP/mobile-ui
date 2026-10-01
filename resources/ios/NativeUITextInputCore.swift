@@ -53,6 +53,10 @@ struct NativeUITextInputCore: View {
     /// round-tripped anywhere near a password.
     @State private var revealed: Bool = false
     @FocusState private var isFocused: Bool
+    /// This field's identity in `KeyboardFocusPolicy`. A blur only releases
+    /// the policy while this field still owns it, so a blur that lands after
+    /// the next field's focus can't clobber that field's state.
+    @State private var focusToken = UUID()
 
     /// The enclosing vertical `<scroll-view>`'s proxy, published by
     /// `NativeUIScrollViewRenderer`. Nil everywhere there isn't one — sheets,
@@ -290,11 +294,13 @@ struct NativeUITextInputCore: View {
             // keep-focus-on-submit, and gives press dispatch a
             // flush hook so a tap-committed autocorrection's
             // change reaches PHP first (mobile-air #335).
-            KeyboardFocusPolicy.focusedFieldKeepsFocus = focused && keepFocus
-            KeyboardFocusPolicy.focusedFieldActive = focused
-            KeyboardFocusPolicy.flushFocusedField = focused
-                ? { flushPending(onChangeCb: onChangeCb) }
-                : nil
+            if focused {
+                KeyboardFocusPolicy.fieldFocused(focusToken, keepsFocus: keepFocus) {
+                    flushPending(onChangeCb: onChangeCb)
+                }
+            } else {
+                KeyboardFocusPolicy.fieldBlurred(focusToken)
+            }
             // On blur, flush any pending change — covers both `blur` mode
             // (never dispatched mid-typing) and `debounce` mode (in-flight
             // timer that should commit immediately rather than race with
@@ -341,6 +347,11 @@ struct NativeUITextInputCore: View {
             textSize: textSize,
             contentColor: contentColor
         ))
+        // A field popped off screen while focused gets no blur, so release
+        // the policy here rather than leave it holding this view's flush
+        // closure. Last in the chain so it sits outside the reveal toggle,
+        // whose SecureField / TextField swap is not the field leaving.
+        .onDisappear { KeyboardFocusPolicy.fieldBlurred(focusToken) }
     }
 
     // ─── Keyboard avoidance ──────────────────────────────────────────────────

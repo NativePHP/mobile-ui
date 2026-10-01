@@ -12,11 +12,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -88,6 +90,13 @@ object FilledTextInputRenderer {
 
         val interactionSource = remember { MutableInteractionSource() }
         val focusManager = LocalFocusManager.current
+        // This field's identity in KeyboardFocusPolicy. A blur only releases
+        // the policy while this field still owns it, so a blur that lands
+        // after the next field's focus can't clobber that field's state.
+        val focusToken = remember { Any() }
+        // The effect below keeps the `props` of the first composition, so
+        // the keep-focus value is read through updated state.
+        val keepFocusOnSubmit by rememberUpdatedState(props.keepFocusOnSubmit)
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
@@ -96,7 +105,7 @@ object FilledTextInputRenderer {
                         focusStack += interaction
                         // Lets interactive taps elsewhere honor this
                         // field's keep-focus-on-submit (mobile-air #335).
-                        KeyboardFocusPolicy.focusedFieldKeepsFocus = props.keepFocusOnSubmit
+                        KeyboardFocusPolicy.fieldFocused(focusToken, keepFocusOnSubmit)
                     }
                     is FocusInteraction.Unfocus -> {
                         focusStack.remove(interaction.focus)
@@ -104,12 +113,17 @@ object FilledTextInputRenderer {
                             // Flush the pending selection, then any deferred text.
                             selectionReporter.flush(value)
                             dispatcher.onBlur(value.text)
-                            KeyboardFocusPolicy.focusedFieldKeepsFocus = false
+                            KeyboardFocusPolicy.fieldBlurred(focusToken)
                         }
                     }
                     else -> { /* ignore */ }
                 }
             }
+        }
+        // A field that leaves composition while focused never sees its
+        // Unfocus, so release the policy here.
+        DisposableEffect(focusToken) {
+            onDispose { KeyboardFocusPolicy.fieldBlurred(focusToken) }
         }
 
         val textSize = when (props.size) {
