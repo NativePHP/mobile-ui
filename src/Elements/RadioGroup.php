@@ -42,6 +42,13 @@ class RadioGroup extends Element
             $this->disabled();
         }
 
+        if (isset($attrs['supporting'])) {
+            $this->supporting($attrs['supporting']);
+        }
+        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
+            $this->error();
+        }
+
         $this->applyA11yAttributes($attrs);
 
         if (isset($attrs['sync-mode']) || isset($attrs['syncMode'])) {
@@ -100,5 +107,21 @@ class RadioGroup extends Element
     public function getStyle(): array
     {
         return [];
+    }
+
+    /** Supporting/helper text under the control (error-colored when error()). */
+    public function supporting(string $text): static
+    {
+        $this->radioGroupProps['supporting'] = $text;
+
+        return $this;
+    }
+
+    /** Flag the control as invalid — destructive tint + supporting text color. */
+    public function error(bool $on = true): static
+    {
+        $this->radioGroupProps['is_error'] = $on;
+
+        return $this;
     }
 }

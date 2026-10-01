@@ -43,6 +43,25 @@ data class NativeUITokens(
     val accent:           Color,
     val onAccent:         Color,
 
+    // Text-field container. Named for the ROLE, not for a variant: this is
+    // the box the user types into, wherever it is drawn.
+    //
+    // [inputFill] is transparent unless the app declares `input-fill`, which
+    // is both Material 3's outlined container and what
+    // `OutlinedTextFieldDefaults.colors()` already resolved to — so an app
+    // that says nothing sees nothing change.
+    //
+    // [onInput] is NULL when undeclared rather than resolved to a default,
+    // because there is no single default to resolve to: content inside a text
+    // field is deliberately two-tone today (typed text `onSurface`, icons,
+    // labels and placeholders `onSurfaceVariant`), and collapsing that pair
+    // onto one token would restyle every existing field. Null therefore means
+    // "keep each slot's existing color"; a declared value overrides the lot,
+    // which is what you want the moment `input-fill` is dark enough that the
+    // M3 grays stop being legible on it.
+    val inputFill:        Color,
+    val onInput:          Color?,
+
     // Radii
     val radiusSm:   Dp,
     val radiusMd:   Dp,
@@ -81,6 +100,8 @@ data class NativeUITokens(
             onSuccess        = parseHex("#FFFFFF"),
             accent           = parseHex("#FB923C"),
             onAccent         = parseHex("#FFFFFF"),
+            inputFill        = Color.Transparent,
+            onInput          = null,
             radiusSm = 4.dp, radiusMd = 8.dp, radiusLg = 16.dp, radiusFull = 9999.dp,
             fontSm = 14.sp, fontMd = 16.sp, fontLg = 20.sp, fontXl = 24.sp,
             fontFamily = "System",
@@ -173,6 +194,13 @@ object NativeUITheme {
         onSuccess        = color(map["on-success"],         fb.onSuccess),
         accent           = color(map["accent"],             fb.accent),
         onAccent         = color(map["on-accent"],          fb.onAccent),
+        inputFill        = color(map["input-fill"],         fb.inputFill),
+        // Optional on purpose — see the token declaration. `color()` can't
+        // express "absent", so this one keeps the fallback's own null-ness
+        // instead of substituting a color for it. The dark block's fallback
+        // is the resolved LIGHT token set, so declaring `on-input` under
+        // `light` alone still covers both.
+        onInput          = optionalColor(map["on-input"],   fb.onInput),
         radiusSm = radiusSm, radiusMd = radiusMd, radiusLg = radiusLg, radiusFull = radiusFull,
         fontSm = fontSm, fontMd = fontMd, fontLg = fontLg, fontXl = fontXl,
         fontFamily = fontFamily,
@@ -268,6 +296,14 @@ private fun asMap(any: Any?): Map<String, Any?> = when (any) {
 }
 
 private fun color(any: Any?, fallback: Color): Color =
+    (any as? String)?.takeIf { it.startsWith("#") }?.let(::parseHex) ?: fallback
+
+/**
+ * [color] for tokens whose absence is meaningful. An undeclared token yields
+ * the fallback — including when the fallback is itself null — so "nobody has
+ * declared this" survives the light → dark inheritance chain intact.
+ */
+private fun optionalColor(any: Any?, fallback: Color?): Color? =
     (any as? String)?.takeIf { it.startsWith("#") }?.let(::parseHex) ?: fallback
 
 private fun numDp(any: Any?, fallback: Dp): Dp = when (any) {
