@@ -19,7 +19,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalization` / `autocapitalize`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalization` / `autocapitalize`, `content-type` / `autocomplete`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -95,6 +95,13 @@ abstract class BaseTextInput extends Element
             ?? null;
         if ($autocapitalization !== null) {
             $this->autocapitalize((string) $autocapitalization);
+        }
+        $contentType = $attrs['content-type']
+            ?? $attrs['contentType']
+            ?? $attrs['autocomplete']
+            ?? null;
+        if ($contentType !== null && trim((string) $contentType) !== '') {
+            $this->contentType((string) $contentType);
         }
         if (! empty($attrs['secure'])) {
             $this->secure();
@@ -304,6 +311,44 @@ abstract class BaseTextInput extends Element
     public function autocapitalization(string $mode): static
     {
         return $this->autocapitalize($mode);
+    }
+
+    /**
+     * What the field holds, for the platform's AutoFill — "username" |
+     * "email" | "password" | "new-password" | "one-time-code". Spelled as
+     * HTML's `autocomplete` tokens; `current-password` is accepted as an alias
+     * for `password`, and camelCase (`newPassword`) is normalized.
+     *
+     * This is what lets a login form fill as a pair: iOS maps it to
+     * `textContentType` and Android to the Compose autofill `contentType`.
+     * Without it, iOS has no declared credential pair to fill, and a `secure`
+     * field filled as the partner of another field can be written without the
+     * value ever reaching `@change` (NativePHP/mobile-air#422).
+     *
+     * `new-password` is worth setting on its own account: a sign-up or
+     * change-password field without it gets no strong-password suggestion.
+     * `one-time-code` is what surfaces an SMS code above the keyboard.
+     *
+     * Nothing is inferred when this is unset, so every existing field keeps
+     * exactly the behavior it had. Unknown values are ignored natively rather
+     * than erroring, the same policy as `keyboard` and `autocapitalize`.
+     *
+     * Blade: `content-type`, `contentType`, or HTML's `autocomplete`.
+     */
+    public function contentType(string $type): static
+    {
+        // camelCase and snake_case → kebab-case, so `newPassword`,
+        // `new_password` and `new-password` all reach the natives as one form.
+        $type = (string) preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '-', trim($type));
+        $type = strtolower(str_replace('_', '-', $type));
+
+        $this->inputProps['content_type'] = match ($type) {
+            'current-password' => 'password',
+            'email-address' => 'email',
+            default => $type,
+        };
+
+        return $this;
     }
 
     /**

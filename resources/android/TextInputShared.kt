@@ -7,9 +7,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -58,6 +60,7 @@ internal data class TextInputProps(
     val maxLength: Int,
     val keyboard: KeyboardType,
     val capitalization: KeyboardCapitalization?,
+    val contentType: ContentType?,
     val disabled: Boolean,
     val keepFocusOnSubmit: Boolean,
     val readOnly: Boolean,
@@ -145,6 +148,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         maxLength    = p.getInt("max_length"),
         keyboard     = resolveKeyboardType(p.getString("keyboard")),
         capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getBool("secure"), p.getString("keyboard")),
+        contentType  = resolveContentType(p.getString("content_type")),
         disabled     = p.getBool("disabled"),
         keepFocusOnSubmit = p.getBool("keep_focus_on_submit"),
         readOnly     = p.getBool("read_only"),
@@ -242,6 +246,43 @@ internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: 
         }
     }
 }
+
+/**
+ * The `content_type` prop → Compose autofill [ContentType]. Tokens are HTML's
+ * `autocomplete` vocabulary, normalized to kebab-case by the element; iOS
+ * resolves the same prop to `UITextContentType` (`NativeUITextInputCore.swift`)
+ * — keep the two in sync.
+ *
+ * Compose already derives a content type from the keyboard type (Email →
+ * EmailAddress, Password → Password, Phone → PhoneNumber) in
+ * `CoreTextFieldSemanticsModifier`. An explicit one set through [nuiContentType]
+ * wins over that: the author's modifier sits at the head of the text field's
+ * chain, and a node's semantics are applied tail to head, so it is written
+ * last. That is what lets `keyboard="email"` and `content-type="username"`
+ * coexist on a login field.
+ *
+ * Note a `secure` field with no `keyboard="password"` gets NO derived type —
+ * masking is a visual transformation, not a keyboard type — so on Android this
+ * prop is the only way such a field is declared a password at all.
+ *
+ * Unknown and empty values return null, matching `resolveKeyboardType`.
+ */
+internal fun resolveContentType(kind: String): ContentType? = when (kind.lowercase()) {
+    "username"      -> ContentType.Username
+    "email"         -> ContentType.EmailAddress
+    "password"      -> ContentType.Password
+    "new-password"  -> ContentType.NewPassword
+    "one-time-code" -> ContentType.SmsOtpCode
+    else            -> null
+}
+
+/**
+ * Declare the field's autofill [ContentType]. Null leaves the modifier chain
+ * untouched, so a field that doesn't set `content-type` keeps exactly the
+ * semantics — including Compose's own keyboard-derived type — it had.
+ */
+internal fun Modifier.nuiContentType(type: ContentType?): Modifier =
+    if (type == null) this else semantics { contentType = type }
 
 internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions =
     props.capitalization
