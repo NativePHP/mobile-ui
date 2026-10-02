@@ -70,13 +70,13 @@ object ChipRenderer {
         FilterChip(
             selected = isSelected,
             onClick = {
+                // The chip consumes the tap, so drop the keyboard here unless
+                // the focused field keeps focus (mobile-air #335).
+                KeyboardFocusPolicy.dismissForInteractiveTap()
                 if (onPressCb != 0) {
                     // Server-driven: the press handler owns selection. Toggling
                     // locally would make the chip fight the state it is handed
                     // back, so a filter chip would flicker off on its own tap.
-                    // The chip consumes the tap, so drop the keyboard here
-                    // unless the focused field keeps focus (mobile-air #335).
-                    KeyboardFocusPolicy.dismissForInteractiveTap()
                     NativeUIBridge.sendPressEvent(onPressCb, node.id)
                 } else {
                     val new = !isSelected

@@ -313,6 +313,7 @@ object ListItemRenderer {
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, newValue)
@@ -326,6 +327,7 @@ object ListItemRenderer {
                     RadioButton(
                         selected = selected,
                         onClick = {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             selected = !selected
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, selected)
@@ -424,6 +426,7 @@ object ListItemRenderer {
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, newValue)
@@ -437,6 +440,7 @@ object ListItemRenderer {
                     Switch(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendToggleChangeEvent(onChangeCb, nodeId, newValue)

@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -67,6 +68,10 @@ object ButtonGroupRenderer {
                 SegmentedButton(
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                     onClick = {
+                        // The segment consumes the tap, so drop the keyboard
+                        // here unless the focused field keeps focus
+                        // (mobile-air #335).
+                        KeyboardFocusPolicy.dismissForInteractiveTap()
                         selectedIndex = index
                         lastSentValue = index
                         if (onChangeCb != 0) {

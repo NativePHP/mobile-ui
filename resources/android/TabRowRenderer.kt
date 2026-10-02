@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -67,6 +68,10 @@ object TabRowRenderer {
                     Tab(
                         selected = isSelected,
                         onClick = {
+                            // The tab consumes the tap, so drop the keyboard
+                            // here unless the focused field keeps focus
+                            // (mobile-air #335).
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             selectedIndex = index
                             lastSentValue = index
                             if (onChangeCb != 0) {

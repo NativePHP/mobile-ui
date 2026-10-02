@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -194,6 +195,10 @@ object DatePickerRenderer {
                         Modifier
                             .matchParentSize()
                             .clickable(enabled = !disabled) {
+                                // The trigger consumes the tap, so drop the
+                                // keyboard here unless the focused field
+                                // keeps focus (mobile-air #335).
+                                KeyboardFocusPolicy.dismissForInteractiveTap()
                                 pendingDate = null
                                 showDialog = true
                             }
