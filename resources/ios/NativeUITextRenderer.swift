@@ -146,7 +146,11 @@ struct NativeUITextRenderer: View {
                 guard url.scheme == "nativephp-press" else { return .systemAction }
                 let parts = url.pathComponents.filter { $0 != "/" }
                 if parts.count == 2, let cb = Int(parts[0]), let nodeId = Int(parts[1]), cb != 0 {
-                    NativeElementBridge.sendPressEvent(cb, nodeId: nodeId)
+                    // Through the focus policy so a focused field's pending
+                    // change reaches PHP before the press does (mobile-air #335).
+                    KeyboardFocusPolicy.dispatchPress {
+                        NativeElementBridge.sendPressEvent(cb, nodeId: nodeId)
+                    }
                 }
                 return .handled
             })

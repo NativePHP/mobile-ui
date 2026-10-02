@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
@@ -211,6 +212,9 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
             val target = ctx.pressNodeId
             withLink(
                 LinkAnnotation.Clickable(tag = "nativephp-press", styles = linkStyles, linkInteractionListener = {
+                    // The link consumes the tap, so drop the keyboard here
+                    // unless the focused field keeps focus (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
                     NativeUIBridge.sendPressEvent(cb, target)
                 })
             ) {

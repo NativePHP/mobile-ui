@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 
@@ -81,17 +82,21 @@ object ListItemRenderer {
         val pressCbId = node.onPress
         val longPressCbId = node.onLongPress
 
-        // Click / gesture modifier
+        // Click / gesture modifier. These consume the tap, so the root's
+        // tap-away never runs; each one drops the keyboard itself unless
+        // the focused field keeps focus (mobile-air #335).
         val clickModifier = if (longPressCbId != 0) {
             modifier.pointerInput(pressCbId, longPressCbId) {
                 detectTapGestures(
                     onTap = {
                         if (!disabled && pressCbId != 0) {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             NativeUIBridge.sendPressEvent(pressCbId, node.id)
                         }
                     },
                     onLongPress = {
                         if (!disabled) {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             NativeUIBridge.sendLongPressEvent(longPressCbId, node.id)
                         }
                     }
@@ -99,6 +104,7 @@ object ListItemRenderer {
             }
         } else if (pressCbId != 0) {
             modifier.clickable(enabled = !disabled, role = Role.Button) {
+                KeyboardFocusPolicy.dismissForInteractiveTap()
                 NativeUIBridge.sendPressEvent(pressCbId, node.id)
             }
         } else {
@@ -307,6 +313,7 @@ object ListItemRenderer {
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, newValue)
@@ -320,6 +327,7 @@ object ListItemRenderer {
                     RadioButton(
                         selected = selected,
                         onClick = {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             selected = !selected
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, selected)
@@ -418,6 +426,7 @@ object ListItemRenderer {
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, newValue)
@@ -431,6 +440,7 @@ object ListItemRenderer {
                     Switch(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendToggleChangeEvent(onChangeCb, nodeId, newValue)
@@ -470,6 +480,7 @@ object ListItemRenderer {
                         IconButton(
                             onClick = {
                                 if (onPressCb != 0) {
+                                    KeyboardFocusPolicy.dismissForInteractiveTap()
                                     NativeUIBridge.sendPressEvent(onPressCb, nodeId)
                                 }
                             },

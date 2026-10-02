@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 
@@ -41,6 +42,9 @@ object IconRenderer {
             Modifier
                 .minimumInteractiveComponentSize()
                 .clickable(role = Role.Button) {
+                    // `clickable` consumes the tap, so drop the keyboard
+                    // here unless the focused field keeps focus (#335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
                     NativeUIBridge.sendPressEvent(node.onPress, node.id)
                 }
         } else {
