@@ -69,6 +69,29 @@ Icons accept platform enum overrides in Blade, matching the fluent API:
 <native:icon :ios="Ios::House" :android="Android::Home" :size="24" />
 ```
 
+## Lists
+
+The `native:list` element supports an optional end-reached buffer for loading more items before the user reaches the end of the list.
+
+```blade
+<native:list
+    on-end-reached="loadMore"
+    :end-reached-buffer="5"
+/>
+```
+
+A buffer of `5` starts the existing `on-end-reached` callback when the list reaches the configured buffer near the end. The default buffer is `3` when the attribute is omitted.
+
+The same option is available through the fluent API:
+
+```php
+use Native\Mobile\UI\Elements\NativeList;
+
+NativeList::make()
+    ->endReachedBuffer(5)
+    ->onEndReached('loadMore');
+```
+
 ## Accessibility
 
 Every element accepts a screen-reader label and an optional hint, via Blade

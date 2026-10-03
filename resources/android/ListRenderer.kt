@@ -59,19 +59,20 @@ object ListRenderer {
         val separator = node.props.getBool("separator")
         val onRefreshCb = node.props.getCallbackId("on_refresh")
         val onEndReachedCb = node.props.getCallbackId("on_end_reached")
+        val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
 
         val scrollState = rememberLazyListState()
         val isRefreshing = remember { mutableStateOf(false) }
         val endReachedFired = remember { mutableStateOf(false) }
 
-        // Detect end reached — fire when within 3 items of the bottom
+        // Detect end reached — fire when within the configured number of items of the bottom
         if (onEndReachedCb != 0) {
             LaunchedEffect(scrollState) {
                 snapshotFlow {
                     val info = scrollState.layoutInfo
                     val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
                     val total = info.totalItemsCount
-                    total > 0 && lastVisible >= total - 3
+                    total > 0 && lastVisible >= total - endReachedBuffer
                 }.collect { nearEnd ->
                     if (nearEnd && !endReachedFired.value) {
                         endReachedFired.value = true

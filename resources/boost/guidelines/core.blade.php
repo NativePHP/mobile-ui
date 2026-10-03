@@ -188,7 +188,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 - Use `a11y-hint` sparingly, for supplementary guidance the label doesn't
   cover ("Double-tap to reorder"). Never repeat the label in the hint.
 - List items with a trailing icon button take `trailing-a11y-label` to label
-  that button separately from the row.
+  that button separately from the row, and `on-trailing-press` for its handler.
 - Text scales with the user's system font size on both platforms
   automatically — don't hardcode layouts that break at larger type sizes.
 
@@ -197,6 +197,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 <native:button icon="trash" a11y-label="Delete draft" a11y-hint="Deletes the draft permanently" @tap="deleteDraft" />
 <native:icon name="checkmark.seal" a11y-label="Verified" />
 <native:list-item headline="Team meeting" trailingIconButton="ellipsis" trailing-a11y-label="More options" />
+<native:list-item headline="Buy milk" trailingIconButton="trash" trailing-a11y-label="Delete" on-trailing-press="deleteTodo({{ $todo->id }})" />
 </code-snippet>
 @endverbatim
 

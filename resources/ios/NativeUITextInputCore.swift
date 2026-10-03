@@ -8,8 +8,10 @@ import UIKit
 ///     value we sent out)
 ///   - `sync_mode` dispatch policy (live | debounce | blur) — controlled by
 ///     the `native:model` directive modifier chain
-///   - secure / multiline input, with an optional in-field reveal toggle
-///   - keyboard type, submit label
+///   - secure input, with an optional in-field reveal toggle; multiline
+///     input (TextEditor-backed — the return key always inserts a line
+///     break, so submit is send-button-only there)
+///   - keyboard type, submit label (single-line only)
 ///   - disabled / readOnly state
 ///   - onChange / onSubmit callbacks
 ///
@@ -53,6 +55,10 @@ struct NativeUITextInputCore: View {
     /// round-tripped anywhere near a password.
     @State private var revealed: Bool = false
     @FocusState private var isFocused: Bool
+    /// This field's identity in `KeyboardFocusPolicy`. A blur only releases
+    /// the policy while this field still owns it, so a blur that lands after
+    /// the next field's focus can't clobber that field's state.
+    @State private var focusToken = UUID()
 
     /// The enclosing vertical `<scroll-view>`'s proxy, published by
     /// `NativeUIScrollViewRenderer`. Nil everywhere there isn't one — sheets,
@@ -146,7 +152,7 @@ struct NativeUITextInputCore: View {
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
         // reliably pick up `.foregroundStyle` for the input text on older
         // iOS runtimes — `.foregroundColor` on the field itself always works.
-        Group {
+        let core = Group {
             if secure {
                 // SecureField has no selection binding — caret reporting is
                 // intentionally never available for secure fields. That holds
@@ -165,31 +171,61 @@ struct NativeUITextInputCore: View {
                         .focused($isFocused)
                 }
             } else if multiline {
-                // A vertical-axis TextField reports a ~0 intrinsic width when
-                // empty and won't expand to fill an ancestor's `maxWidth:
-                // .infinity` the way a single-line field does — so without this
-                // explicit fill it collapses to its content (just the icon).
-                // `min-lines` reserves visible height up front (a textarea
-                // that LOOKS like a textarea before you type); `max-lines`
-                // caps growth. Clamp so a min above the max still renders.
+                // NOT a vertical-axis TextField: with a hardware keyboard
+                // (simulator typed from the Mac keyboard, iPad + external
+                // keyboard) Return UNFOCUSES a vertical TextField instead of
+                // inserting a newline — confirmed as-designed by Apple DTS
+                // (developer.apple.com/forums/thread/760511). TextEditor's
+                // return key inserts a line break on every keyboard.
+                //
+                // The invisible Text mirror re-creates the auto-growing
+                // `lineLimit(min...max)` window the vertical TextField had:
+                // it sizes the branch (the trailing space keeps a just-typed
+                // empty last line measurable — Text collapses a trailing
+                // newline on its own), and the editor fills the overlay.
                 let lower = max(minLines, 1)
                 let upper = maxLines > 0 ? max(maxLines, lower) : max(5, lower)
-                // The iOS 18 `selection:` binding is honored on the vertical
-                // (multiline) axis too. Kept as parallel branches so the
-                // feature-off path is byte-for-byte the original field.
-                if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection, prompt: prompt, axis: .vertical)
-                        .lineLimit(lower...upper)
+                Text(text + " ")
+                    .lineLimit(lower...upper)
+                    .opacity(0)
+                    // Sizing-only: without this VoiceOver reads the typed
+                    // text twice (mirror + editor).
+                    .accessibilityHidden(true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay {
+                        Group {
+                            // The iOS 18 `selection:` binding exists on
+                            // TextEditor too. Parallel branches so the
+                            // feature-off path carries no selection state.
+                            if selectionEnabled {
+                                TextEditor(text: $text, selection: $selection)
+                            } else {
+                                TextEditor(text: $text)
+                            }
+                        }
+                        // Let the variant chrome paint the background.
+                        .scrollContentBackground(.hidden)
                         .foregroundColor(contentColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // Pull back UITextView's internal text-container
+                        // padding (5pt line-fragment + ~8pt vertical inset)
+                        // so the typed text lines up with the single-line
+                        // variants inside the same chrome — and with the
+                        // sizing mirror above.
+                        .padding(.horizontal, -5)
+                        .padding(.vertical, -8)
                         .focused($isFocused)
-                } else {
-                    TextField(placeholder, text: $text, prompt: prompt, axis: .vertical)
-                        .lineLimit(lower...upper)
-                        .foregroundColor(contentColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .focused($isFocused)
-                }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        // TextEditor has no placeholder slot. Same colour rule
+                        // as the `prompt` the TextField branches take: the
+                        // variant's colour when it passed one, else the system
+                        // placeholder grey.
+                        if text.isEmpty && !placeholder.isEmpty {
+                            Text(placeholder)
+                                .foregroundStyle(placeholderColor ?? Color(UIColor.placeholderText))
+                                .allowsHitTesting(false)
+                        }
+                    }
             } else {
                 if selectionEnabled {
                     TextField(placeholder, text: $text, selection: $selection, prompt: prompt)
@@ -213,7 +249,6 @@ struct NativeUITextInputCore: View {
         .textInputAutocapitalization(capitalization)
         .autocorrectionDisabled(!autocorrect)
         .disabled(disabled || readOnly)
-        .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0))
         // Scroll target for `scrollIntoView()` below. `node.id` is already the
         // ForEach identity of every node in the tree, so it is stable across
         // republishes; and because it is applied to the view `body` returns
@@ -287,6 +322,17 @@ struct NativeUITextInputCore: View {
             scheduleSelectionEmit(text: text, cb: onSelectionCb, debounceMs: selDebounceMs)
         }
         .onChange(of: isFocused) { _, focused in
+            // Lets interactive taps elsewhere honor this field's
+            // keep-focus-on-submit, and gives press dispatch a
+            // flush hook so a tap-committed autocorrection's
+            // change reaches PHP first (mobile-air #335).
+            if focused {
+                KeyboardFocusPolicy.fieldFocused(focusToken, keepsFocus: keepFocus) {
+                    flushPending(onChangeCb: onChangeCb)
+                }
+            } else {
+                KeyboardFocusPolicy.fieldBlurred(focusToken)
+            }
             // On blur, flush any pending change — covers both `blur` mode
             // (never dispatched mid-typing) and `debounce` mode (in-flight
             // timer that should commit immediately rather than race with
@@ -302,25 +348,47 @@ struct NativeUITextInputCore: View {
                 scrollIntoView()
             }
         }
-        .onSubmit {
-            // Submit also acts as a commit point — flush pending, then dispatch.
-            flushPending(onChangeCb: onChangeCb)
-            // Selection is flushed BEFORE the submit event so PHP sees the final
-            // caret/selection state ahead of (or alongside) the submit.
-            if selectionEnabled {
-                flushSelection(cb: onSelectionCb)
-            }
-            if onSubmitCb != 0 {
-                NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
-            }
-            // Chat "send and keep typing": SwiftUI resigns first responder on
-            // return by default. Re-assert focus so the keyboard stays up. NOTE:
-            // this causes a small keyboard "bounce" on return (resign → refocus)
-            // that the send button doesn't have — the smooth fix needs a
-            // UIKit-backed field (see notes), not the multiline workaround which
-            // mis-sized the field in the flex layout.
-            if keepFocus {
-                DispatchQueue.main.async { isFocused = true }
+        // Return-key policy — parity with Android. `.onSubmit` must NOT be
+        // attached to a multiline (vertical-axis) field: the soft keyboard's
+        // return key inserts a newline either way, but with `.onSubmit`
+        // attached a HARDWARE keyboard's Return (simulator typed from the Mac,
+        // iPad + external keyboard) fires the submit path and swallows the
+        // newline. Android multiline behaves the same on purpose: Enter always
+        // inserts a line break and `@submit` is only reachable through a
+        // dedicated send button. Blur still flushes pending changes above.
+        //
+        // `secure` wins over `multiline` when the field is built above, so a
+        // secure field is a single-line SecureField and keeps its submit path.
+        //
+        // Grouped so the reveal-toggle modifier below has a single view to
+        // attach to, whichever branch was taken.
+        Group {
+            if multiline && !secure {
+                core
+            } else {
+                core
+                    .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0))
+                    .onSubmit {
+                        // Submit also acts as a commit point — flush pending, then dispatch.
+                        flushPending(onChangeCb: onChangeCb)
+                        // Selection is flushed BEFORE the submit event so PHP sees the final
+                        // caret/selection state ahead of (or alongside) the submit.
+                        if selectionEnabled {
+                            flushSelection(cb: onSelectionCb)
+                        }
+                        if onSubmitCb != 0 {
+                            NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
+                        }
+                        // Chat "send and keep typing": SwiftUI resigns first responder on
+                        // return by default. Re-assert focus so the keyboard stays up. NOTE:
+                        // this causes a small keyboard "bounce" on return (resign → refocus)
+                        // that the send button doesn't have — the smooth fix needs a
+                        // UIKit-backed field (see notes), not the multiline workaround which
+                        // mis-sized the field in the flex layout.
+                        if keepFocus {
+                            DispatchQueue.main.async { isFocused = true }
+                        }
+                    }
             }
         }
         // Appended rather than woven in: when the toggle is off this modifier
@@ -333,6 +401,11 @@ struct NativeUITextInputCore: View {
             textSize: textSize,
             contentColor: contentColor
         ))
+        // A field popped off screen while focused gets no blur, so release
+        // the policy here rather than leave it holding this view's flush
+        // closure. Last in the chain so it sits outside the reveal toggle,
+        // whose SecureField / TextField swap is not the field leaving.
+        .onDisappear { KeyboardFocusPolicy.fieldBlurred(focusToken) }
     }
 
     // ─── Keyboard avoidance ──────────────────────────────────────────────────

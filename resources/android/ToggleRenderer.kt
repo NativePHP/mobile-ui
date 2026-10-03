@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -64,6 +65,9 @@ object ToggleRenderer {
         )
 
         val onChanged = { new: Boolean ->
+            // The switch consumes the tap, so drop the keyboard here unless
+            // the focused field keeps focus (mobile-air #335).
+            KeyboardFocusPolicy.dismissForInteractiveTap()
             checked = new
             lastSentValue = new
             if (onChangeCb != 0) {

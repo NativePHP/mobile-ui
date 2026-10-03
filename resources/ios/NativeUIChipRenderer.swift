@@ -50,7 +50,11 @@ struct NativeUIChipRenderer: View {
                 // Server-driven: the press handler owns selection. Toggling
                 // locally would make the chip fight the state it is handed
                 // back, so a filter chip would flicker off on its own tap.
-                NativeElementBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                // Through the focus policy so a focused field's pending
+                // change reaches PHP before the press does (mobile-air #335).
+                KeyboardFocusPolicy.dispatchPress {
+                    NativeElementBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                }
             } else {
                 let new = !isSelected
                 isSelected = new
