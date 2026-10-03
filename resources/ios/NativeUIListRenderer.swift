@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A decoded swipe-action descriptor (one button on either edge).
 private struct SwipeActionSpec: Decodable, Identifiable {
@@ -27,6 +28,8 @@ private func colorFromHex(_ hex: String) -> Color? {
 
 struct NativeUIListRenderer: View {
     let node: NativeUINode
+
+    @Environment(\.defaultMinListRowHeight) private var minRowHeight
 
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
@@ -89,6 +92,7 @@ struct NativeUIListRenderer: View {
                 }
             }
             .modifier(GroupedOrPlainListStyle(grouped: grouped))
+            .environment(\.nativeUIListRowMargin, NativeUIListRowMargin.system)
             .modifier(ListBackgroundModifier(node: node))
             // `List` has no showsIndicators initializer — the modifier is
             // the supported route (iOS 16+).
@@ -115,7 +119,12 @@ struct NativeUIListRenderer: View {
 
         NodeView(node: child)
             .equatable()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // A node fills the height it is offered with its content pinned
+            // to the top, so a one-line row in a cell taller than itself (the
+            // list's minimum row height, 52pt on iOS 26) sat high. Keep the
+            // row at its own height and centre it in that minimum instead.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: minRowHeight, alignment: .leading)
             .listRowInsets(EdgeInsets())
             // Rows carry SwiftUI's opaque system fill, which paints over the
             // list's own background — so hiding the scroll background via
@@ -274,5 +283,34 @@ private struct ListRefreshModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// The horizontal inset of a list row's content: the system's minimum
+/// layout margin (16pt on most iPhones, 20pt on the wide ones), which is
+/// where iOS puts section headers, footers and its own cell content. Rows
+/// pad by it so their text lines up with their headers on every device.
+enum NativeUIListRowMargin {
+    @MainActor
+    static var system: CGFloat {
+        let root = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController
+
+        return root?.systemMinimumLayoutMargins.leading ?? 16
+    }
+}
+
+private struct NativeUIListRowMarginKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 16
+}
+
+extension EnvironmentValues {
+    /// Horizontal padding for list rows; 16pt outside a `native:list`.
+    var nativeUIListRowMargin: CGFloat {
+        get { self[NativeUIListRowMarginKey.self] }
+        set { self[NativeUIListRowMarginKey.self] = newValue }
     }
 }
