@@ -251,6 +251,7 @@ fun NativeUITokens.toMaterialColorScheme(isDark: Boolean = false): ColorScheme {
         surfaceVariant   = surfaceVariant,
         onSurfaceVariant = onSurfaceVariant,
         outline          = outline,
+        outlineVariant   = outlineVariant,
         error            = destructive,
         onError          = onDestructive,
         surfaceTint      = primary,
