@@ -155,7 +155,8 @@ object ListItemRenderer {
                 iconBgColor = leadingIconBgColor,
                 onChangeCb = onLeadingChangeCb,
                 nodeId = node.id,
-                disabled = disabled
+                disabled = disabled,
+                imageFit = p.getString("leading_image_fit")
             ),
             trailingContent = run {
                 // Multi-badge stack (e.g. flag + pin both visible)
@@ -198,7 +199,8 @@ object ListItemRenderer {
         iconBgColor: Int,
         onChangeCb: Int,
         nodeId: Int,
-        disabled: Boolean
+        disabled: Boolean,
+        imageFit: String = ""
     ): (@Composable () -> Unit)? {
         // Determine effective type — backward compat: fall back to icon if leading_type empty
         val effectiveType = type.ifEmpty {
@@ -291,7 +293,8 @@ object ListItemRenderer {
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(4.dp)),
-                        contentScale = ContentScale.Crop,
+                        // `contain` letterboxes instead of cropping to the square.
+                        contentScale = if (imageFit == "contain") ContentScale.Fit else ContentScale.Crop,
                         loading = {
                             Box(
                                 modifier = Modifier
