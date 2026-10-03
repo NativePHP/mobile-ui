@@ -4,9 +4,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,10 +21,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -81,7 +84,17 @@ object BareTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
-        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
+        val focusManager = LocalFocusManager.current
+
+        // This field's identity in KeyboardFocusPolicy. A blur only releases
+        // the policy while this field still owns it, so a late blur can't
+        // clobber the field focus moved to. Released on dispose too, for a
+        // field that leaves composition while focused.
+        val focusToken = remember { Any() }
+        DisposableEffect(focusToken) {
+            onDispose { KeyboardFocusPolicy.fieldBlurred(focusToken) }
+        }
 
         // Caret / selection reporter — independent of the direct change/submit
         // dispatchers; no-op unless `on_selection_change` is wired and the
@@ -126,14 +139,24 @@ object BareTextInputRenderer {
             // layout mode) still wins since it comes later in the chain.
             // onFocusChanged is Bare's blur hook (no InteractionSource here):
             // flush the pending selection on the focused → unfocused edge.
+            // Registering with KeyboardFocusPolicy lets interactive taps
+            // elsewhere honor this field's keep-focus-on-submit (mobile-air
+            // #335). The unfocused call this fires on first composition is a
+            // no-op there, since this field doesn't own the policy yet.
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
+                    if (state.isFocused) {
+                        KeyboardFocusPolicy.fieldFocused(focusToken, props.keepFocusOnSubmit)
+                    } else {
+                        KeyboardFocusPolicy.fieldBlurred(focusToken)
+                    }
                 }
-                .then(modifier),
+                .then(modifier)
+                .nuiAutofocus(props.autofocus),
             enabled = !props.disabled,
             readOnly = props.readOnly,
             textStyle = LocalTextStyle.current.copy(
@@ -149,7 +172,15 @@ object BareTextInputRenderer {
                     else -> theme.primary
                 }
             ),
-            singleLine = !props.multiline,
+            visualTransformation = props.visualTransformation,
+            singleLine = props.singleLine,
+            // Line limits were parsed (and defaulted: 5 for multiline) in
+            // parseTextInputProps but never forwarded here, so a multiline
+            // composer grew without bound instead of scrolling internally
+            // at the cap like iOS's lineLimit(min...max). Same forwarding as
+            // the filled/outlined variants.
+            maxLines = props.maxLines,
+            minLines = props.minLines,
             decorationBox = { innerTextField ->
                 if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
                     Text(
@@ -160,6 +191,11 @@ object BareTextInputRenderer {
                 }
                 innerTextField()
             },
+            // Filled and Outlined pass this since day one; Bare never did, so
+            // `keyboard="number"` (and the derived capitalization) were
+            // silently ignored on bare inputs — the plain text keyboard
+            // always came up.
+            keyboardOptions = keyboardOptionsFor(props),
             keyboardActions = KeyboardActions(onAny = {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
@@ -168,14 +204,11 @@ object BareTextInputRenderer {
                 // target field. A missing target is a no-op.
                 if (props.nextFocus.isNotEmpty()) {
                     NativeUIFocusRegistry.request(props.nextFocus)
-                } else {
-                    // Consuming the IME action suppresses its platform
-                    // default, so Done/Go/Send/Search left the keyboard up.
-                    // Restore it — close the keyboard like the platform (and
-                    // iOS's return key) does. Next keeps the keyboard: the
-                    // chain moved it, or the target is gone and there is
-                    // nothing sensible to do.
-                    defaultKeyboardAction(ImeAction.Done)
+                } else if (!props.keepFocusOnSubmit) {
+                    // Supplying KeyboardActions replaces Compose's default
+                    // hide-on-Done, so dismissal is restored here to match
+                    // the iOS renderer and the documented default (#335).
+                    focusManager.clearFocus()
                 }
             })
         )

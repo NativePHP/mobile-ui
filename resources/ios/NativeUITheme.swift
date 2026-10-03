@@ -29,6 +29,25 @@ struct NativeUITokens: Equatable {
     let accent: Color
     let onAccent: Color
 
+    // Text-field container. Named for the ROLE, not for a variant: this is
+    // the box the user types into, wherever it is drawn.
+    //
+    // `inputFill` is transparent unless the app declares `input-fill`, which
+    // is Material 3's outlined container and also exactly what the outlined
+    // renderer painted before the token existed — so an app that says nothing
+    // sees nothing change.
+    //
+    // `onInput` is NIL when undeclared rather than resolved to a default,
+    // because there is no single default to resolve to: content inside a text
+    // field is deliberately two-tone today (typed text `onSurface`, icons and
+    // affixes `onSurfaceVariant`), and collapsing that pair onto one token
+    // would restyle every existing field. Nil therefore means "keep each call
+    // site's existing color"; a declared value overrides the lot, which is
+    // what you want the moment `input-fill` is dark enough that the M3 grays
+    // stop being legible on it.
+    let inputFill: Color
+    let onInput: Color?
+
     // Radii (points)
     let radiusSm: CGFloat
     let radiusMd: CGFloat
@@ -63,6 +82,8 @@ struct NativeUITokens: Equatable {
         onSuccess:        Color(hex: "#FFFFFF"),
         accent:           Color(hex: "#C2410C"),
         onAccent:         Color(hex: "#FFFFFF"),
+        inputFill:        .clear,
+        onInput:          nil,
         radiusSm: 4, radiusMd: 8, radiusLg: 16, radiusFull: 9999,
         fontSm: 14, fontMd: 16, fontLg: 20, fontXl: 24,
         fontFamily: "System"
@@ -131,6 +152,13 @@ final class NativeUITheme: ObservableObject {
                 onSuccess:        hex(map["on-success"],         fallback: fallbackTo.onSuccess),
                 accent:           hex(map["accent"],             fallback: fallbackTo.accent),
                 onAccent:         hex(map["on-accent"],          fallback: fallbackTo.onAccent),
+                inputFill:        hex(map["input-fill"],         fallback: fallbackTo.inputFill),
+                // Optional on purpose — see the token declaration. `hex()`
+                // can't express "absent", so this one keeps the fallback's own
+                // nil-ness instead of substituting a color for it. The dark
+                // block's fallback is the resolved LIGHT token set, so
+                // declaring `on-input` under `light` alone still covers both.
+                onInput:          optionalHex(map["on-input"],   fallback: fallbackTo.onInput),
                 radiusSm: radiusSm, radiusMd: radiusMd, radiusLg: radiusLg, radiusFull: radiusFull,
                 fontSm: fontSm, fontMd: fontMd, fontLg: fontLg, fontXl: fontXl,
                 fontFamily: fontFamily
@@ -199,6 +227,14 @@ private func hex(_ any: Any?, fallback: Color) -> Color {
     return Color(hex: s)
 }
 
+/// `hex()` for tokens whose absence is meaningful. An undeclared token yields
+/// the fallback — including when the fallback is itself nil — so "nobody has
+/// declared this" survives the light → dark inheritance chain intact.
+private func optionalHex(_ any: Any?, fallback: Color?) -> Color? {
+    guard let s = any as? String, s.hasPrefix("#") else { return fallback }
+    return Color(hex: s)
+}
+
 private func cgf(_ any: Any?, fallback: CGFloat) -> CGFloat {
     if let n = any as? CGFloat { return n }
     if let n = any as? Double { return CGFloat(n) }
@@ -231,21 +267,34 @@ struct NUIScaledFontModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
-        // A resolvable custom font wins; the weight still applies (SwiftUI
-        // selects/synthesizes it within the family). Unknown names — or none —
-        // fall back to the system font unchanged. `size` is already Dynamic-
-        // Type-scaled by `@ScaledMetric`, so the custom font uses it as-is.
+        // A resolvable custom font wins. Unknown names — or none — fall back
+        // to the system font unchanged, which DOES use `weight` (there is no
+        // named face to lose). `size` is already Dynamic-Type-scaled by
+        // `@ScaledMetric`, so the custom font uses it as-is.
         // `italic` only matters for single-style custom fonts: the font stays
         // upright (so SwiftUI rasterizes the full glyphs — a matrix-skewed
         // font leans past its advances and gets clipped at line ends) and the
         // rendered view is slanted instead. Real italic faces and the system
         // font get the trait from the caller's `Text.italic()`.
+        //
+        // `weight` is intentionally NOT applied to a resolved custom font.
+        // Every font this resolver hands back names one specific bundled
+        // static face (see NativeUIFontResolver — one `.ttf`/`.otf` per
+        // weight, registered and referenced by its own PostScript name, never
+        // a variable-font family with sibling weights to select between).
+        // Chaining `.weight()` onto that exact name asks CoreText to
+        // synthesize a different weight it has nothing else to draw from, and
+        // on iOS that silently drops the custom font entirely in favor of the
+        // system font — colors and everything else stay correct, since those
+        // are separate modifiers, so the only visible symptom is the custom
+        // font quietly not applying. The right weight is already selected by
+        // which font file/token was resolved.
         if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size) {
             if italic, NativeUIFontResolver.needsSyntheticOblique(name) {
-                content.font(custom.weight(weight))
+                content.font(custom)
                     .transformEffect(NativeUIFontResolver.obliqueTransform(name, size: size))
             } else {
-                content.font(custom.weight(weight))
+                content.font(custom)
             }
         } else {
             content.font(.system(size: size, weight: weight, design: design))

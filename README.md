@@ -56,10 +56,40 @@ Disabled controls draw from the `surface-variant` (fill) and
 `on-surface-variant` (label) tokens on both platforms — adjust those two
 tokens to tune disabled contrast app-wide.
 
+`outlined-text-input` draws a transparent box by default (Material 3's
+outlined container), so on a colored screen the field reads as part of the
+page rather than as a field. Declare the optional `input-fill` / `on-input`
+pair to give it a body of its own — `input-fill` paints the box, `on-input`
+recolors everything inside it (typed text, placeholder, icons,
+prefix/suffix). Leave them unset and nothing changes.
+
 Icons accept platform enum overrides in Blade, matching the fluent API:
 
 ```blade
 <native:icon :ios="Ios::House" :android="Android::Home" :size="24" />
+```
+
+## Lists
+
+The `native:list` element supports an optional end-reached buffer for loading more items before the user reaches the end of the list.
+
+```blade
+<native:list
+    on-end-reached="loadMore"
+    :end-reached-buffer="5"
+/>
+```
+
+A buffer of `5` starts the existing `on-end-reached` callback when the list reaches the configured buffer near the end. The default buffer is `3` when the attribute is omitted.
+
+The same option is available through the fluent API:
+
+```php
+use Native\Mobile\UI\Elements\NativeList;
+
+NativeList::make()
+    ->endReachedBuffer(5)
+    ->onEndReached('loadMore');
 ```
 
 ## Accessibility

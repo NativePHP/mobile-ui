@@ -5,32 +5,48 @@ use Native\Mobile\UI\Elements\BareTextInput;
 use Native\Mobile\UI\Elements\FilledTextInput;
 use Native\Mobile\UI\Elements\OutlinedTextInput;
 
-it('serializes autofocus on every variant', function (string $inputClass) {
+function autofocusProps(string $inputClass, array $attrs): array
+{
     $input = new $inputClass;
-    $input->applyAttributes(['autofocus' => true]);
+    $input->applyAttributes($attrs);
 
-    $props = $input->getResolvedProps(new CallbackRegistry);
+    return $input->getResolvedProps(new CallbackRegistry);
+}
 
-    expect($props['autofocus'])->toBeTrue();
+it('is absent unless asked for, so no field grabs the keyboard by default', function (string $inputClass) {
+    expect(autofocusProps($inputClass, ['label' => 'Name'])['autofocus'] ?? null)->toBeNull();
 })->with([
-    'bare' => [BareTextInput::class],
-    'filled' => [FilledTextInput::class],
-    'outlined' => [OutlinedTextInput::class],
+    'outlined' => OutlinedTextInput::class,
+    'filled' => FilledTextInput::class,
+    'bare' => BareTextInput::class,
 ]);
 
-it('is absent when not requested', function () {
-    $input = new BareTextInput;
+it('resolves the autofocus attribute in both spellings', function (string $inputClass, string $attribute) {
+    expect(autofocusProps($inputClass, [$attribute => true])['autofocus'])->toBeTrue();
+})->with([
+    'outlined' => OutlinedTextInput::class,
+    'filled' => FilledTextInput::class,
+    'bare' => BareTextInput::class,
+])->with([
+    'autofocus',
+    'auto-focus',
+]);
 
-    $props = $input->getResolvedProps(new CallbackRegistry);
-
-    expect($props)->not->toHaveKey('autofocus');
+it('ignores a falsy attribute rather than focusing on it', function () {
+    // `autofocus="{{ $condition }}"` renders an empty string when the
+    // condition is false, which must not read as opt-in.
+    expect(autofocusProps(OutlinedTextInput::class, ['autofocus' => ''])['autofocus'] ?? null)->toBeNull()
+        ->and(autofocusProps(OutlinedTextInput::class, ['autofocus' => false])['autofocus'] ?? null)->toBeNull();
 });
 
-it('is absent when the bound expression is false', function () {
-    $input = new BareTextInput;
-    $input->applyAttributes(['autofocus' => false]);
+it('is settable fluently', function () {
+    $props = OutlinedTextInput::make()->autofocus()->getResolvedProps(new CallbackRegistry);
 
-    $props = $input->getResolvedProps(new CallbackRegistry);
+    expect($props['autofocus'])->toBeTrue();
+});
 
-    expect($props)->not->toHaveKey('autofocus');
+it('can be turned back off fluently', function () {
+    $props = OutlinedTextInput::make()->autofocus()->autofocus(false)->getResolvedProps(new CallbackRegistry);
+
+    expect($props['autofocus'])->toBeFalse();
 });

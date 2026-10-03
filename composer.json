@@ -10,8 +10,8 @@
         }
     ],
     "require": {
-        "php": "^8.2",
-        "nativephp/mobile": "^4.0"
+        "php": "^8.3",
+        "nativephp/mobile": "^4.6"
     },
     "autoload": {
         "psr-4": {

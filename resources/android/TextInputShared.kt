@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -8,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -51,6 +53,7 @@ internal data class TextInputProps(
     val leadingIcon: String,
     val trailingIcon: String,
     val secure: Boolean,
+    val revealable: Boolean,
     val multiline: Boolean,
     val maxLines: Int,
     val minLines: Int,
@@ -60,8 +63,8 @@ internal data class TextInputProps(
     val submitLabel: String,
     val focusRef: String,
     val nextFocus: String,
-    val autofocus: Boolean,
     val disabled: Boolean,
+    val keepFocusOnSubmit: Boolean,
     val readOnly: Boolean,
     val isError: Boolean,
     val loading: Boolean,
@@ -78,11 +81,32 @@ internal data class TextInputProps(
     val onSelectionChangeCb: Int,
     val syncMode: SyncMode,
     val debounceMs: Int,
+    val autofocus: Boolean,
     val selectionDebounceMs: Int,
 ) {
     val enabled: Boolean get() = !disabled && !loading
+
+    /**
+     * Masking for a field that may currently be revealed. The no-argument
+     * property is the always-masked case, which is what the chromeless
+     * variant uses — it has no decoration slot to put a toggle in, so it can
+     * never be revealed.
+     */
+    fun visualTransformation(revealed: Boolean): VisualTransformation =
+        if (secure && !revealed) PasswordVisualTransformation() else VisualTransformation.None
+
     val visualTransformation: VisualTransformation
-        get() = if (secure) PasswordVisualTransformation() else VisualTransformation.None
+        get() = visualTransformation(revealed = false)
+
+    /**
+     * Whether to draw the in-field reveal toggle. Opt-in via `revealable`,
+     * meaningless without `secure`, and suppressed while the field is not
+     * interactive — there is nothing to reveal in a field the user cannot
+     * type into, and a disabled control that still answers taps is its own
+     * bug.
+     */
+    val revealToggle: Boolean get() = secure && revealable && enabled && !readOnly
+
     val singleLine: Boolean get() = !multiline
 
     /** Numeric sp size for the chromeless variant. Tracks token fallbacks. */
@@ -119,6 +143,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         leadingIcon  = p.getString("leading_icon"),
         trailingIcon = p.getString("trailing_icon"),
         secure       = p.getBool("secure"),
+        revealable   = p.getBool("revealable"),
         multiline    = p.getBool("multiline"),
         maxLines     = p.getInt("max_lines").let { if (it > 0) it else if (p.getBool("multiline")) 5 else 1 },
         minLines     = p.getInt("min_lines").let { if (it > 0) it else 1 },
@@ -128,8 +153,8 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         submitLabel  = p.getString("submit_label"),
         focusRef     = p.getString("focus_ref"),
         nextFocus    = p.getString("next_focus"),
-        autofocus    = p.getBool("autofocus"),
         disabled     = p.getBool("disabled"),
+        keepFocusOnSubmit = p.getBool("keep_focus_on_submit"),
         readOnly     = p.getBool("read_only"),
         isError      = p.getBool("is_error"),
         loading      = p.getBool("loading"),
@@ -146,6 +171,7 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         onSelectionChangeCb = p.getCallbackId("on_selection_change"),
         syncMode     = parseSyncMode(p.getString("sync_mode", "live")),
         debounceMs   = p.getInt("debounce_ms").let { if (it > 0) it else 300 },
+        autofocus    = p.getBool("autofocus"),
         selectionDebounceMs = resolveSelectionDebounceMs(p.getInt("selection_debounce_ms")),
     )
 }
@@ -212,8 +238,8 @@ internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: 
     if (secure) return KeyboardCapitalization.None
 
     return when (explicit.lowercase()) {
-        "none"       -> KeyboardCapitalization.None
-        "sentences"  -> KeyboardCapitalization.Sentences
+        "none", "never", "off" -> KeyboardCapitalization.None
+        "sentences", "on"        -> KeyboardCapitalization.Sentences
         "words"      -> KeyboardCapitalization.Words
         "characters" -> KeyboardCapitalization.Characters
         else -> when (keyboard.lowercase()) {
@@ -319,7 +345,7 @@ internal object NativeUIFocusRegistry {
  * plain, unregistered requester.
  */
 @Composable
-internal fun rememberRegisteredFocusRequester(focusRef: String, autofocus: Boolean = false): FocusRequester {
+internal fun rememberRegisteredFocusRequester(focusRef: String): FocusRequester {
     val requester = remember { FocusRequester() }
     DisposableEffect(focusRef) {
         if (focusRef.isNotEmpty()) {
@@ -329,17 +355,6 @@ internal fun rememberRegisteredFocusRequester(focusRef: String, autofocus: Boole
             if (focusRef.isNotEmpty()) {
                 NativeUIFocusRegistry.unregister(focusRef, requester)
             }
-        }
-    }
-    // `autofocus`: focus (and raise the IME on) the field the user came to
-    // fill, once per composition — a re-render that moves the attribute to
-    // an already-composed field never steals focus mid-edit. The short
-    // delay lets the host (screen push, bottom sheet) finish laying out;
-    // requesting focus on an unplaced node is silently dropped.
-    if (autofocus) {
-        LaunchedEffect(Unit) {
-            delay(200)
-            runCatching { requester.requestFocus() }
         }
     }
     return requester
@@ -554,6 +569,38 @@ internal fun trailingIconSlot(name: String): (@Composable () -> Unit)? =
     if (name.isEmpty()) null else ({ MaterialIcon(name = name, contentDescription = null) })
 
 /**
+ * The in-field reveal ("eye") for a `secure` field, for the M3 `trailingIcon`
+ * slot — so it sits where the trailing icon sits rather than as a separate
+ * Show / Hide control beside the input, which is what an app has to build
+ * today and which costs a bridge round-trip and a republish on every tap.
+ *
+ * [revealed] is caller-owned local state and stays local: it must never be
+ * reported to PHP, republish the tree, or touch the value / caret / sync-mode
+ * machinery. Returns null when the field didn't ask for a toggle, so the
+ * caller's existing trailing slot is used unchanged.
+ *
+ * The content description announces the ACTION the tap performs rather than
+ * the current state — TalkBack reads "Show password, button".
+ */
+@Composable
+internal fun revealToggleSlot(
+    props: TextInputProps,
+    revealed: Boolean,
+    onToggle: () -> Unit,
+): (@Composable () -> Unit)? {
+    if (!props.revealToggle) return null
+
+    return {
+        IconButton(onClick = onToggle) {
+            MaterialIcon(
+                name = if (revealed) "visibility_off" else "visibility",
+                contentDescription = if (revealed) "Hide password" else "Show password",
+            )
+        }
+    }
+}
+
+/**
  * Apply optional a11y label/hint to a modifier.
  *
  * The hint is merged into the contentDescription (TalkBack reads it right
@@ -563,4 +610,24 @@ internal fun trailingIconSlot(name: String): (@Composable () -> Unit)? =
 internal fun Modifier.nuiA11y(label: String, hint: String): Modifier {
     val merged = listOf(label, hint).filter { it.isNotEmpty() }.joinToString(". ")
     return if (merged.isEmpty()) this else semantics { contentDescription = merged }
+}
+
+/**
+ * Focus the field and raise the keyboard on first composition.
+ *
+ * Keyed on [Unit] rather than on the flag: this fires once when the field
+ * appears, not again on every recomposition - otherwise a re-render would
+ * steal focus back from wherever the user has since moved it.
+ */
+@Composable
+internal fun Modifier.nuiAutofocus(enabled: Boolean): Modifier {
+    if (!enabled) return this
+
+    val requester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        runCatching { requester.requestFocus() }
+    }
+
+    return this.focusRequester(requester)
 }

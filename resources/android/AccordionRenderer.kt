@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
@@ -55,8 +56,11 @@ object AccordionRenderer {
         }
 
         // One definition of "the user toggled it", shared by the header row
-        // and the chevron button so either route reports back to PHP.
+        // and the chevron button so either route reports back to PHP. Both
+        // consume the tap, so drop the keyboard here unless the focused
+        // field keeps focus (mobile-air #335).
         val toggle = {
+            KeyboardFocusPolicy.dismissForInteractiveTap()
             val new = !isExpanded
             isExpanded = new
             lastSentValue = new

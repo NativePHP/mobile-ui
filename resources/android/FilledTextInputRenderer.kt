@@ -12,21 +12,24 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
@@ -51,6 +54,12 @@ object FilledTextInputRenderer {
         // the end of any pre-filled value, matching the server-push below.
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
+
+        // Reveal state for a `revealable` secure field. Local on purpose, and
+        // that is the whole safety argument for the feature: flipping it never
+        // crosses the bridge, so it cannot republish the tree, disturb `value`
+        // / `lastSentValue`, trip the sync-mode dispatcher, or move the caret.
+        var revealed by remember { mutableStateOf(false) }
 
         val dispatcher = remember(props.syncMode, props.debounceMs, props.onChangeCb) {
             TextInputDispatcher(
@@ -81,23 +90,42 @@ object FilledTextInputRenderer {
         }
 
         val interactionSource = remember { MutableInteractionSource() }
-        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
+        val focusManager = LocalFocusManager.current
+        // This field's identity in KeyboardFocusPolicy. A blur only releases
+        // the policy while this field still owns it, so a blur that lands
+        // after the next field's focus can't clobber that field's state.
+        val focusToken = remember { Any() }
+        // The effect below keeps the `props` of the first composition, so
+        // the keep-focus value is read through updated state.
+        val keepFocusOnSubmit by rememberUpdatedState(props.keepFocusOnSubmit)
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
                 when (interaction) {
-                    is FocusInteraction.Focus   -> focusStack += interaction
+                    is FocusInteraction.Focus   -> {
+                        focusStack += interaction
+                        // Lets interactive taps elsewhere honor this
+                        // field's keep-focus-on-submit (mobile-air #335).
+                        KeyboardFocusPolicy.fieldFocused(focusToken, keepFocusOnSubmit)
+                    }
                     is FocusInteraction.Unfocus -> {
                         focusStack.remove(interaction.focus)
                         if (focusStack.isEmpty()) {
                             // Flush the pending selection, then any deferred text.
                             selectionReporter.flush(value)
                             dispatcher.onBlur(value.text)
+                            KeyboardFocusPolicy.fieldBlurred(focusToken)
                         }
                     }
                     else -> { /* ignore */ }
                 }
             }
+        }
+        // A field that leaves composition while focused never sees its
+        // Unfocus, so release the policy here.
+        DisposableEffect(focusToken) {
+            onDispose { KeyboardFocusPolicy.fieldBlurred(focusToken) }
         }
 
         val textSize = when (props.size) {
@@ -127,7 +155,8 @@ object FilledTextInputRenderer {
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint),
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
+                .nuiAutofocus(props.autofocus),
             enabled = props.enabled,
             readOnly = props.readOnly,
             interactionSource = interactionSource,
@@ -139,12 +168,20 @@ object FilledTextInputRenderer {
             leadingIcon = leadingIconSlot(props.leadingIcon),
             trailingIcon = if (props.loading) {
                 { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.onSurfaceVariant) }
-            } else trailingIconSlot(props.trailingIcon),
+            } else {
+                // The reveal toggle owns the trailing slot whenever it is on.
+                // An author who set a trailing icon AND `revealable` asked for
+                // the toggle by asking for `revealable`, which the icon slot
+                // has no other way to express; the icon is still drawn on
+                // every field that didn't.
+                revealToggleSlot(props, revealed) { revealed = !revealed }
+                    ?: trailingIconSlot(props.trailingIcon)
+            },
             isError = props.isError,
             singleLine = props.singleLine,
             maxLines = props.maxLines,
             minLines = props.minLines,
-            visualTransformation = props.visualTransformation,
+            visualTransformation = props.visualTransformation(revealed),
             keyboardOptions = keyboardOptionsFor(props),
             // onAny, not onDone: `submit-label` can make the IME action Next /
             // Go / Search / Send, and an onDone-only handler would silently
@@ -157,14 +194,11 @@ object FilledTextInputRenderer {
                 // target field. A missing target is a no-op.
                 if (props.nextFocus.isNotEmpty()) {
                     NativeUIFocusRegistry.request(props.nextFocus)
-                } else {
-                    // Consuming the IME action suppresses its platform
-                    // default, so Done/Go/Send/Search left the keyboard up.
-                    // Restore it — close the keyboard like the platform (and
-                    // iOS's return key) does. Next keeps the keyboard: the
-                    // chain moved it, or the target is gone and there is
-                    // nothing sensible to do.
-                    defaultKeyboardAction(ImeAction.Done)
+                } else if (!props.keepFocusOnSubmit) {
+                    // Supplying KeyboardActions replaces Compose's default
+                    // hide-on-Done, so dismissal is restored here to match
+                    // the iOS renderer and the documented default (#335).
+                    focusManager.clearFocus()
                 }
             }),
             textStyle = TextStyle(fontSize = textSize, color = theme.onSurface, fontFamily = customFontFamily, lineHeight = lineHeight),

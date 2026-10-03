@@ -12,21 +12,24 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
@@ -37,6 +40,11 @@ import com.nativephp.plugins.native_ui.NativeUITheme
  *
  * All colors drawn from [NativeUITheme] — per-instance color overrides are
  * intentionally not honored (plan doc Model 3).
+ *
+ * The container is filled with the `input-fill` theme token and its contents
+ * take `on-input`. Both are transparent / absent by default, which is what
+ * `OutlinedTextFieldDefaults.colors()` already resolved to, so an app that
+ * declares neither renders exactly as before.
  */
 object OutlinedTextInputRenderer {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -55,6 +63,12 @@ object OutlinedTextInputRenderer {
         // the server-push behavior below).
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
+
+        // Reveal state for a `revealable` secure field. Local on purpose, and
+        // that is the whole safety argument for the feature: flipping it never
+        // crosses the bridge, so it cannot republish the tree, disturb `value`
+        // / `lastSentValue`, trip the sync-mode dispatcher, or move the caret.
+        var revealed by remember { mutableStateOf(false) }
 
         // Sync-mode dispatcher (plan L). Owns the live / blur / debounce
         // decision for outbound change events.
@@ -93,12 +107,25 @@ object OutlinedTextInputRenderer {
         // modes. Passing our own source also means we don't pay for M3's
         // default ripple-focus-hover machinery elsewhere.
         val interactionSource = remember { MutableInteractionSource() }
-        val focusRequester = rememberRegisteredFocusRequester(props.focusRef, props.autofocus)
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
+        val focusManager = LocalFocusManager.current
+        // This field's identity in KeyboardFocusPolicy. A blur only releases
+        // the policy while this field still owns it, so a blur that lands
+        // after the next field's focus can't clobber that field's state.
+        val focusToken = remember { Any() }
+        // The effect below keeps the `props` of the first composition, so
+        // the keep-focus value is read through updated state.
+        val keepFocusOnSubmit by rememberUpdatedState(props.keepFocusOnSubmit)
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
                 when (interaction) {
-                    is FocusInteraction.Focus   -> focusStack += interaction
+                    is FocusInteraction.Focus   -> {
+                        focusStack += interaction
+                        // Lets interactive taps elsewhere honor this
+                        // field's keep-focus-on-submit (mobile-air #335).
+                        KeyboardFocusPolicy.fieldFocused(focusToken, keepFocusOnSubmit)
+                    }
                     is FocusInteraction.Unfocus -> {
                         focusStack.remove(interaction.focus)
                         if (focusStack.isEmpty()) {
@@ -106,12 +133,30 @@ object OutlinedTextInputRenderer {
                             // caret lands, then flush any deferred text change.
                             selectionReporter.flush(value)
                             dispatcher.onBlur(value.text)
+                            KeyboardFocusPolicy.fieldBlurred(focusToken)
                         }
                     }
                     else -> { /* ignore press/hover/drag */ }
                 }
             }
         }
+        // A field that leaves composition while focused never sees its
+        // Unfocus, so release the policy here.
+        DisposableEffect(focusToken) {
+            onDispose { KeyboardFocusPolicy.fieldBlurred(focusToken) }
+        }
+
+        // Everything INSIDE the box. Two tones by default — typed text at full
+        // emphasis, labels, placeholders and icons muted — which is the M3
+        // hierarchy this renderer has always drawn. A declared `on-input`
+        // collapses both onto itself, because the moment `input-fill` is a
+        // saturated color the muted gray stops being a hierarchy and starts
+        // being unreadable. Supporting text is excluded: M3 draws it BELOW the
+        // box, on the surface behind the field, so it keeps that surface's
+        // colors. So is the focused label color, which is a focus accent
+        // (`primary`) rather than in-field content.
+        val fieldTextColor = theme.onInput ?: theme.onSurface
+        val fieldDecorationColor = theme.onInput ?: theme.onSurfaceVariant
 
         val textSize = when (props.size) {
             "sm" -> theme.fontSm
@@ -140,7 +185,8 @@ object OutlinedTextInputRenderer {
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint),
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
+                .nuiAutofocus(props.autofocus),
             enabled = props.enabled,
             readOnly = props.readOnly,
             interactionSource = interactionSource,
@@ -151,13 +197,21 @@ object OutlinedTextInputRenderer {
             suffix = suffixSlot(props.suffix),
             leadingIcon = leadingIconSlot(props.leadingIcon),
             trailingIcon = if (props.loading) {
-                { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = theme.onSurfaceVariant) }
-            } else trailingIconSlot(props.trailingIcon),
+                { CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = fieldDecorationColor) }
+            } else {
+                // The reveal toggle owns the trailing slot whenever it is on.
+                // An author who set a trailing icon AND `revealable` asked for
+                // the toggle by asking for `revealable`, which the icon slot
+                // has no other way to express; the icon is still drawn on
+                // every field that didn't.
+                revealToggleSlot(props, revealed) { revealed = !revealed }
+                    ?: trailingIconSlot(props.trailingIcon)
+            },
             isError = props.isError,
             singleLine = props.singleLine,
             maxLines = props.maxLines,
             minLines = props.minLines,
-            visualTransformation = props.visualTransformation,
+            visualTransformation = props.visualTransformation(revealed),
             keyboardOptions = keyboardOptionsFor(props),
             // onAny, not onDone: `submit-label` can make the IME action Next /
             // Go / Search / Send, and an onDone-only handler would silently
@@ -170,22 +224,28 @@ object OutlinedTextInputRenderer {
                 // target field. A missing target is a no-op.
                 if (props.nextFocus.isNotEmpty()) {
                     NativeUIFocusRegistry.request(props.nextFocus)
-                } else {
-                    // Consuming the IME action suppresses its platform
-                    // default, so Done/Go/Send/Search left the keyboard up.
-                    // Restore it — close the keyboard like the platform (and
-                    // iOS's return key) does. Next keeps the keyboard: the
-                    // chain moved it, or the target is gone and there is
-                    // nothing sensible to do.
-                    defaultKeyboardAction(ImeAction.Done)
+                } else if (!props.keepFocusOnSubmit) {
+                    // Supplying KeyboardActions replaces Compose's default
+                    // hide-on-Done, so dismissal is restored here to match
+                    // the iOS renderer and the documented default (#335).
+                    focusManager.clearFocus()
                 }
             }),
-            textStyle = TextStyle(fontSize = textSize, color = theme.onSurface, fontFamily = customFontFamily, lineHeight = lineHeight),
+            textStyle = TextStyle(fontSize = textSize, color = fieldTextColor, fontFamily = customFontFamily, lineHeight = lineHeight),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = theme.onSurface,
-                unfocusedTextColor = theme.onSurface,
-                disabledTextColor = theme.onSurface.copy(alpha = 0.6f),
-                errorTextColor = theme.onSurface,
+                focusedTextColor = fieldTextColor,
+                unfocusedTextColor = fieldTextColor,
+                disabledTextColor = fieldTextColor.copy(alpha = 0.6f),
+                errorTextColor = fieldTextColor,
+                // The container defaults to Transparent in
+                // OutlinedTextFieldDefaults, so naming it here changes nothing
+                // until `input-fill` is declared. All four states take the
+                // same value: a field that vanishes into the page is just as
+                // wrong once it's focused or in error.
+                focusedContainerColor = theme.inputFill,
+                unfocusedContainerColor = theme.inputFill,
+                disabledContainerColor = theme.inputFill,
+                errorContainerColor = theme.inputFill,
                 cursorColor = theme.primary,
                 errorCursorColor = theme.destructive,
                 focusedBorderColor = theme.primary,
@@ -193,18 +253,18 @@ object OutlinedTextInputRenderer {
                 disabledBorderColor = theme.outline.copy(alpha = 0.5f),
                 errorBorderColor = theme.destructive,
                 focusedLabelColor = theme.primary,
-                unfocusedLabelColor = theme.onSurfaceVariant,
-                disabledLabelColor = theme.onSurfaceVariant.copy(alpha = 0.6f),
+                unfocusedLabelColor = fieldDecorationColor,
+                disabledLabelColor = fieldDecorationColor.copy(alpha = 0.6f),
                 errorLabelColor = theme.destructive,
-                focusedPlaceholderColor = theme.onSurfaceVariant,
-                unfocusedPlaceholderColor = theme.onSurfaceVariant,
+                focusedPlaceholderColor = fieldDecorationColor,
+                unfocusedPlaceholderColor = fieldDecorationColor,
                 focusedSupportingTextColor = theme.onSurfaceVariant,
                 unfocusedSupportingTextColor = theme.onSurfaceVariant,
                 errorSupportingTextColor = theme.destructive,
-                focusedLeadingIconColor = theme.onSurfaceVariant,
-                unfocusedLeadingIconColor = theme.onSurfaceVariant,
-                focusedTrailingIconColor = theme.onSurfaceVariant,
-                unfocusedTrailingIconColor = theme.onSurfaceVariant,
+                focusedLeadingIconColor = fieldDecorationColor,
+                unfocusedLeadingIconColor = fieldDecorationColor,
+                focusedTrailingIconColor = fieldDecorationColor,
+                unfocusedTrailingIconColor = fieldDecorationColor,
             ),
         )
     }
