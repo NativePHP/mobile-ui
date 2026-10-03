@@ -57,6 +57,8 @@ object ListRenderer {
     fun Render(node: NativeUINode, modifier: Modifier) {
         val horizontal = node.props.getBool("horizontal")
         val separator = node.props.getBool("separator")
+        val rowColor = node.props.getColor("row_color", 0)
+        val rowBackground = if (rowColor != 0) Color(rowColor) else null
         val onRefreshCb = node.props.getCallbackId("on_refresh")
         val onEndReachedCb = node.props.getCallbackId("on_end_reached")
         val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
@@ -133,9 +135,10 @@ object ListRenderer {
                                         SectionRow(
                                             isFirst = i == 0,
                                             isLast = i == child.children.size - 1,
+                                            background = rowBackground,
                                         ) { ListRow(row) }
                                     } else {
-                                        ListRow(row)
+                                        ListRow(row, rowBackground)
                                         if (separator && i < child.children.size - 1) {
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         }
@@ -147,7 +150,7 @@ object ListRenderer {
                             }
                         } else {
                             item(key = child.id) {
-                                ListRow(child)
+                                ListRow(child, rowBackground)
                                 if (separator && index < node.children.size - 1) {
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 }
@@ -192,7 +195,7 @@ object ListRenderer {
  * destructive trailing action when no structured actions are present.
  */
 @Composable
-private fun ListRow(child: NativeUINode) {
+private fun ListRow(child: NativeUINode, background: Color? = null) {
     val legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
     val leading = decodeSwipeActions(child.props.getString("leading_actions_json", ""))
     val trailing = decodeSwipeActions(child.props.getString("trailing_actions_json", ""))
@@ -208,8 +211,18 @@ private fun ListRow(child: NativeUINode) {
             trailing = effectiveTrailing,
             onAction = { cb -> NativeElementBridge.sendPressEvent(cb, child.id) }
         ) {
-            NodeView(node = child)
+            RowContent(child, background)
         }
+    } else {
+        RowContent(child, background)
+    }
+}
+
+/** The row's node, on the list's row colour when it declares one. */
+@Composable
+private fun RowContent(child: NativeUINode, background: Color?) {
+    if (background != null) {
+        Box(Modifier.fillMaxWidth().background(background)) { NodeView(node = child) }
     } else {
         NodeView(node = child)
     }
@@ -258,7 +271,7 @@ private fun SectionGap() {
  * look SwiftUI's `.insetGrouped` gives for free.
  */
 @Composable
-private fun SectionRow(isFirst: Boolean, isLast: Boolean, content: @Composable () -> Unit) {
+private fun SectionRow(isFirst: Boolean, isLast: Boolean, background: Color? = null, content: @Composable () -> Unit) {
     val radius = 12.dp
     val shape = RoundedCornerShape(
         topStart = if (isFirst) radius else 0.dp,
@@ -271,7 +284,7 @@ private fun SectionRow(isFirst: Boolean, isLast: Boolean, content: @Composable (
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(background ?: MaterialTheme.colorScheme.surfaceVariant)
         ) {
             content()
             if (!isLast) {
