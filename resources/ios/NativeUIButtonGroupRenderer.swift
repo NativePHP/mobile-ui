@@ -4,7 +4,8 @@ import UIKit
 /// Single-choice segmented selector: the system `UISegmentedControl` (Liquid
 /// Glass on iOS 26), like Android's Material `SingleChoiceSegmentedButtonRow`.
 /// The selected segment takes theme.primary with onPrimary text, the same
-/// colours as Android.
+/// colours as Android; labels keep the theme font at `fontSm`, scaled with
+/// Dynamic Type.
 ///
 /// Echo-prevention on selected-index (plan K). Theme-sourced colors — no
 /// per-instance `color` override (Model 3).
@@ -13,6 +14,8 @@ struct NativeUIButtonGroupRenderer: View {
 
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
+    // Read so a Dynamic Type change re-renders and rescales the labels
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let theme = themeStore.resolve(for: colorScheme)
@@ -31,11 +34,24 @@ struct NativeUIButtonGroupRenderer: View {
                 onChangeCb: p.getCallbackId("on_change"),
                 selectedTint: UIColor(theme.primary),
                 selectedText: UIColor(theme.onPrimary),
-                text: UIColor(theme.onSurface)
+                text: UIColor(theme.onSurface),
+                font: Self.labelFont(family: theme.fontFamily, size: theme.fontSm)
             )
             .disabled(disabled)
             .modifier(A11yLabelModifier(label: a11yLabel))
         )
+    }
+
+    /// The app font when one is set, else the system font, medium like the
+    /// rest of the plugin's controls.
+    private static func labelFont(family: String, size: CGFloat) -> UIFont {
+        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
+        if family != "System", !family.isEmpty,
+           let name = NativeUIFontResolver.postScriptName(for: family),
+           let custom = UIFont(name: name, size: scaled) {
+            return custom
+        }
+        return UIFont.systemFont(ofSize: scaled, weight: .medium)
     }
 }
 
@@ -47,6 +63,7 @@ private struct SegmentedControl: UIViewRepresentable {
     let selectedTint: UIColor
     let selectedText: UIColor
     let text: UIColor
+    let font: UIFont
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -80,8 +97,8 @@ private struct SegmentedControl: UIViewRepresentable {
         }
 
         control.selectedSegmentTintColor = selectedTint
-        control.setTitleTextAttributes([.foregroundColor: selectedText], for: .selected)
-        control.setTitleTextAttributes([.foregroundColor: text], for: .normal)
+        control.setTitleTextAttributes([.foregroundColor: selectedText, .font: font], for: .selected)
+        control.setTitleTextAttributes([.foregroundColor: text, .font: font], for: .normal)
         control.isEnabled = context.environment.isEnabled
     }
 
