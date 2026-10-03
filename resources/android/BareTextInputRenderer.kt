@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -83,6 +84,7 @@ object BareTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
         val focusManager = LocalFocusManager.current
 
         // This field's identity in KeyboardFocusPolicy. A blur only releases
@@ -143,6 +145,7 @@ object BareTextInputRenderer {
             // no-op there, since this field doesn't own the policy yet.
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRequester(focusRequester)
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
@@ -197,10 +200,14 @@ object BareTextInputRenderer {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 props.dispatchSubmit?.invoke(value.text)
-                // Supplying KeyboardActions replaces Compose's default
-                // hide-on-Done, so dismissal is restored here to match
-                // the iOS renderer and the documented default (#335).
-                if (!props.keepFocusOnSubmit) {
+                // Chained focus (`next-focus`): move the keyboard to the
+                // target field. A missing target is a no-op.
+                if (props.nextFocus.isNotEmpty()) {
+                    NativeUIFocusRegistry.request(props.nextFocus)
+                } else if (!props.keepFocusOnSubmit) {
+                    // Supplying KeyboardActions replaces Compose's default
+                    // hide-on-Done, so dismissal is restored here to match
+                    // the iOS renderer and the documented default (#335).
                     focusManager.clearFocus()
                 }
             })

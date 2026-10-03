@@ -21,6 +21,14 @@ func registerNativeUIChrome() {
         return AnyView(NativeUIBackgroundLayerHost(layerNode: layerNode) { content })
     }
 
+    // Keyboard accessory bar for pad-keyboard text inputs on plain screens
+    // (fields inside a bottom sheet use the sheet renderer's own host — a
+    // root-level bar would sit behind the sheet). No sentinel element:
+    // the host is driven by the shared focus state, not the tree.
+    NativeRootHostRegistry.shared.register("native-ui.keyboard-accessory") { _, content in
+        AnyView(NativeUIKeyboardAccessoryHost(hidesUnderSheets: true) { content })
+    }
+
     // Resolve chrome font tokens (per-layout / per-bar `font_name` props on
     // the root sentinels) for core's chrome renderers — bundle lookup +
     // CoreText registration + PostScript naming is this plugin's knowledge.
