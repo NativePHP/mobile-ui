@@ -32,6 +32,7 @@ struct NativeUIListRenderer: View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let separator = node.props.getBool("separator")
+        let rowColor = node.props.getColor("row_color", default: 0)
         let onRefreshCb = node.props.getCallbackId("on_refresh")
         let onEndReachedCb = node.props.getCallbackId("on_end_reached")
         let endReachedBuffer = max(1, node.props.getInt("end_reached_buffer", default: 3))
@@ -66,7 +67,7 @@ struct NativeUIListRenderer: View {
                         let footer = child.props.getString("footer", default: "")
                         Section {
                             ForEach(Array(child.children.enumerated()), id: \.element.id) { index, row in
-                                rowView(row, separator: separator, isLastInSection: index == child.children.count - 1)
+                                rowView(row, separator: separator, rowColor: rowColor, grouped: grouped, isLastInSection: index == child.children.count - 1)
                                     .onAppear {
                                         fireEndReached(rowId: row.id, leafIndex: leafIndex,
                                                        leafCount: leafCount, buffer: endReachedBuffer,
@@ -79,7 +80,7 @@ struct NativeUIListRenderer: View {
                             if !footer.isEmpty { Text(footer).nuiScaledFont(size: 13) }
                         }
                     } else {
-                        rowView(child, separator: separator)
+                        rowView(child, separator: separator, rowColor: rowColor, grouped: grouped)
                             .onAppear {
                                 fireEndReached(rowId: child.id, leafIndex: leafIndex,
                                                leafCount: leafCount, buffer: endReachedBuffer,
@@ -106,7 +107,7 @@ struct NativeUIListRenderer: View {
     /// One list row: the node plus its leading/trailing swipe actions and
     /// row-level styling. Shared by both flat rows and section children.
     @ViewBuilder
-    private func rowView(_ child: NativeUINode, separator: Bool, isLastInSection: Bool = false) -> some View {
+    private func rowView(_ child: NativeUINode, separator: Bool, rowColor: Int = 0, grouped: Bool = false, isLastInSection: Bool = false) -> some View {
         // Legacy single-action API.
         let legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
         // New multi-action API.
@@ -117,11 +118,12 @@ struct NativeUIListRenderer: View {
             .equatable()
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowInsets(EdgeInsets())
-            // Rows carry SwiftUI's opaque system fill, which paints over the
-            // list's own background — so hiding the scroll background via
-            // ListBackgroundModifier still left a white sheet on a themed
-            // screen. Clear the row and let its content decide.
-            .listRowBackground(Color.clear)
+            // Plain rows are cleared: SwiftUI's opaque system fill paints
+            // over the list's own background, leaving a white sheet on a
+            // themed screen. Grouped rows keep a card — the system grouped
+            // cell colour, which is what draws the rounded inset-grouped
+            // sections — and `row_color` themes either.
+            .listRowBackground(Self.rowBackground(rowColor: rowColor, grouped: grouped))
             // Drive dividers from the bottom edge only; always hide the top
             // edge. The top separator renders solely on a section's first row,
             // so hiding it removes the stray full-width line that otherwise
@@ -150,6 +152,13 @@ struct NativeUIListRenderer: View {
                     }
                 }
             }
+    }
+
+    /// A row's fill: the list's `row_color` when set, else the system card
+    /// colour in the grouped style and nothing in the plain one.
+    private static func rowBackground(rowColor: Int, grouped: Bool) -> Color {
+        if rowColor != 0 { return Color(argb: rowColor) }
+        return grouped ? Color(uiColor: .secondarySystemGroupedBackground) : .clear
     }
 
     /// Fire the end-reached callback when a row within the configured number
