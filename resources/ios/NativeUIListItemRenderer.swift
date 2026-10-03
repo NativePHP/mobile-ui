@@ -69,7 +69,8 @@ struct NativeUIListItemRenderer: View {
                 monogramColor: leadingMonogramColor,
                 iconBgColor: leadingIconBgColor,
                 checked: leadingChecked,
-                changeCb: onLeadingChangeCb
+                changeCb: onLeadingChangeCb,
+                imageFit: p.getString("leading_image_fit")
             )
 
             // Text content
@@ -124,7 +125,7 @@ struct NativeUIListItemRenderer: View {
     }
 
     @ViewBuilder
-    private func buildLeadingContent(type: String, value: String, monogramColor: Int, iconBgColor: Int = 0, checked: Bool = false, changeCb: Int = 0) -> some View {
+    private func buildLeadingContent(type: String, value: String, monogramColor: Int, iconBgColor: Int = 0, checked: Bool = false, changeCb: Int = 0, imageFit: String = "") -> some View {
         switch type {
         case "icon":
             if iconBgColor != 0 {
@@ -161,7 +162,8 @@ struct NativeUIListItemRenderer: View {
             .accessibilityHidden(true)
         case "image":
             // Decorative — the row's text content carries the meaning.
-            NativeUIRowImage(src: value) {
+            // `contain` letterboxes instead of cropping to the square.
+            NativeUIRowImage(src: value, contentMode: imageFit == "contain" ? .fit : .fill) {
                 RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
             }
             .frame(width: 56, height: 56)
