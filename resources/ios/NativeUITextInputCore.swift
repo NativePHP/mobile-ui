@@ -33,12 +33,9 @@ struct NativeUITextInputCore: View {
     /// chromeless `BasicTextField` doesn't have).
     var supportsRevealToggle: Bool = false
 
-    /// Colour for the placeholder. Nil keeps SwiftUI's own placeholder style,
-    /// which is what every variant drew before. The outlined variant passes
-    /// its `on-input` token here, so a declared `on-input` recolours the
-    /// placeholder along with everything else inside the box, as it already
-    /// does on Android. Without it the placeholder stays system grey, which
-    /// all but disappears on a dark `input-fill`.
+    /// Optional placeholder override (for example, the outlined variant's
+    /// `on-input` token). Otherwise use a muted field text colour so a custom
+    /// surface stays readable even when it differs from the system appearance.
     var placeholderColor: Color? = nil
 
     @State private var text: String = ""
@@ -90,9 +87,8 @@ struct NativeUITextInputCore: View {
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
-        // Nil unless the variant asked for a colour, and a nil prompt leaves the
-        // title as the placeholder, exactly as the prompt-less initializers do.
-        let prompt        = placeholderColor.map { Text(placeholder).foregroundColor($0) }
+        let resolvedPlaceholderColor = placeholderColor ?? contentColor.opacity(0.6)
+        let prompt        = Text(placeholder).foregroundColor(resolvedPlaceholderColor)
         let serverValue   = p.getString("value")
         let secure        = p.getBool("secure")
         let multiline     = p.getBool("multiline")
@@ -215,13 +211,11 @@ struct NativeUITextInputCore: View {
                         .focused($isFocused)
                     }
                     .overlay(alignment: .topLeading) {
-                        // TextEditor has no placeholder slot. Same colour rule
-                        // as the `prompt` the TextField branches take: the
-                        // variant's colour when it passed one, else the system
-                        // placeholder grey.
+                        // TextEditor has no placeholder slot. Match the prompt
+                        // used by the single-line and secure fields.
                         if text.isEmpty && !placeholder.isEmpty {
                             Text(placeholder)
-                                .foregroundStyle(placeholderColor ?? Color(UIColor.placeholderText))
+                                .foregroundStyle(resolvedPlaceholderColor)
                                 .allowsHitTesting(false)
                         }
                     }
