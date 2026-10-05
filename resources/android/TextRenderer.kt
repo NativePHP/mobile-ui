@@ -248,7 +248,8 @@ private fun resolveFontStyle(style: Int): FontStyle {
 }
 
 // 0/absent = default (sans); only override for serif/mono so a custom default
-// font isn't clobbered.
+// font isn't clobbered. 3 (`font-rounded`) has no system face on Android and
+// keeps the default, like iOS designs Compose can't draw.
 private fun resolveFontFamily(family: Int): FontFamily? = when (family) {
     1 -> FontFamily.Serif
     2 -> FontFamily.Monospace
