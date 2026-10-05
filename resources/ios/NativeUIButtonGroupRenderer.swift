@@ -47,6 +47,10 @@ struct NativeUIButtonGroupRenderer: View {
                             .frame(maxWidth: .infinity)
                             .foregroundStyle(isSelected ? theme.onPrimary : theme.onSurface)
                             .background(isSelected ? theme.primary : Color.clear)
+                            // A plain-style button only hit-tests drawn content, so an
+                            // unselected segment's clear background would leave just the
+                            // label tappable. Make the whole segment the tap target.
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(disabled)
