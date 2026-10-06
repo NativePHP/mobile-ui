@@ -259,6 +259,7 @@ internal class TextInputDispatcher(
     private val nodeId: Int,
     private val setLastSent: (String) -> Unit,
     private val getLastSent: () -> String,
+    private val echoes: TextEchoTracker,
 ) {
     private var debounceJob: Job? = null
 
@@ -307,8 +308,64 @@ internal class TextInputDispatcher(
     private fun commit(value: String) {
         setLastSent(value)
         if (props.onChangeCb != 0) {
+            echoes.sent(value)
             NativeUIBridge.sendTextChangeEvent(props.onChangeCb, nodeId, value)
         }
+    }
+}
+
+/**
+ * Tells an echo of our own change apart from a value PHP actually set.
+ *
+ * Every change event makes PHP re-render, and the tree it publishes carries
+ * the value from THAT event. When keystrokes arrive faster than the round
+ * trip, several of those renders are in flight at once. The field used to
+ * remember only the newest value it sent, so the echo of an older keystroke
+ * looked like a real server change and replaced everything typed since
+ * ("Buy milk" saved as "Buyilk").
+ *
+ * PHP handles events one at a time and in order, so echoes come back in the
+ * order they were sent, though recomposition may skip some when trees arrive
+ * faster than it draws. Matching an incoming value against the queue and
+ * dropping everything up to it handles both. A value that isn't in the queue
+ * is something PHP chose (clearing the field after "Add", say) and is applied
+ * as before.
+ *
+ * Main-thread only, like the rest of the field state.
+ */
+internal class TextEchoTracker(private var serverValue: String) {
+    /** Unacknowledged values, oldest first. */
+    private val inFlight = ArrayDeque<String>()
+
+    /** Record a value just sent to PHP. */
+    fun sent(value: String) {
+        // With nothing in flight PHP already holds this value, so its echo
+        // won't change the published tree and would never be seen. Leaving it
+        // out of the queue stops it from later masking a real push of the
+        // same value.
+        if (inFlight.isEmpty() && value == serverValue) return
+        inFlight.addLast(value)
+        while (inFlight.size > LIMIT) inFlight.removeFirst()
+    }
+
+    /**
+     * Record a newly published server value. Returns true when it should be
+     * applied to the field, false when it is an echo of our own change.
+     */
+    fun receive(value: String): Boolean {
+        serverValue = value
+        val index = inFlight.indexOf(value)
+        if (index >= 0) {
+            repeat(index + 1) { inFlight.removeFirst() }
+            return false
+        }
+        inFlight.clear()
+        return true
+    }
+
+    private companion object {
+        /** Bounds the queue for a field whose model PHP never publishes back. */
+        const val LIMIT = 64
     }
 }
 
