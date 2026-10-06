@@ -39,6 +39,7 @@ struct NativeUIListItemRenderer: View {
 
         // Colors
         let headlineColor = p.getColor("headline_color", default: 0)
+        let headlineLineThrough = p.getBool("headline_line_through")
         let supportingColor = p.getColor("supporting_color", default: 0)
         let overlineColor = p.getColor("overline_color", default: 0)
         let containerColor = p.getColor("container_color", default: 0)
@@ -79,7 +80,8 @@ struct NativeUIListItemRenderer: View {
                         .nuiScaledFont(size: 12)
                         .foregroundColor(overlineColor != 0 ? Color(argb: overlineColor) : .secondary)
                 }
-                Text(headline)
+                // Text-level strikethrough (iOS 13+), same as NativeUITextRenderer.
+                (headlineLineThrough ? Text(headline).strikethrough() : Text(headline))
                     .nuiScaledFont(size: 17)
                     .foregroundColor(headlineColor != 0 ? Color(argb: headlineColor) : .primary)
                 if !supporting.isEmpty {
