@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
@@ -106,6 +107,7 @@ object OutlinedTextInputRenderer {
         // modes. Passing our own source also means we don't pay for M3's
         // default ripple-focus-hover machinery elsewhere.
         val interactionSource = remember { MutableInteractionSource() }
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
         val focusManager = LocalFocusManager.current
         // This field's identity in KeyboardFocusPolicy. A blur only releases
         // the policy while this field still owns it, so a blur that lands
@@ -183,7 +185,7 @@ object OutlinedTextInputRenderer {
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
-            modifier = Modifier.fillMaxWidth().then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
                 .nuiAutofocus(props.autofocus),
             enabled = props.enabled,
             readOnly = props.readOnly,
@@ -211,14 +213,21 @@ object OutlinedTextInputRenderer {
             minLines = props.minLines,
             visualTransformation = props.visualTransformation(revealed),
             keyboardOptions = keyboardOptionsFor(props),
-            keyboardActions = KeyboardActions(onDone = {
+            // onAny, not onDone: `submit-label` can make the IME action Next /
+            // Go / Search / Send, and an onDone-only handler would silently
+            // drop the submit for those. Matches the bare renderer.
+            keyboardActions = KeyboardActions(onAny = {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 dispatcher.onSubmit(value.text)
-                // Supplying KeyboardActions replaces Compose's default
-                // hide-on-Done, so dismissal is restored here to match
-                // the iOS renderer and the documented default (#335).
-                if (!props.keepFocusOnSubmit) {
+                // Chained focus (`next-focus`): move the keyboard to the
+                // target field. A missing target is a no-op.
+                if (props.nextFocus.isNotEmpty()) {
+                    NativeUIFocusRegistry.request(props.nextFocus)
+                } else if (!props.keepFocusOnSubmit) {
+                    // Supplying KeyboardActions replaces Compose's default
+                    // hide-on-Done, so dismissal is restored here to match
+                    // the iOS renderer and the documented default (#335).
                     focusManager.clearFocus()
                 }
             }),
