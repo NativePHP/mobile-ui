@@ -8,6 +8,13 @@ paths serialize to the same wire tree.
 
 ### Core rules
 
+- Activate the `nativephp-mobile-ui` skill when writing a screen's view. It lists each element's props and
+  events, list-item swipe actions, and the text input traps.
+- Text fields are `outlined-text-input`, `filled-text-input` and `bare-text-input`. There is no `text-input`.
+  Bind them with `native:model.debounce.300ms` and also read the text `@submit` passes as the handler's last
+  argument; live binding can drop characters under fast typing.
+- `<native:list-item>` props are camelCase as written (`leadingCheckbox`, `trailingIconButton`). Swipe actions
+  only work on list items that are direct children of `<native:list>`.
 - Visual styling is theme-driven ("Model 3"): buttons, inputs, toggles, and
   other controls take their colors, radii, and typography from the theme
   (`Native\Mobile\UI\Theme`). Use semantic props like `variant="primary"`
