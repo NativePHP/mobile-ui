@@ -29,6 +29,7 @@ struct NativeUIListItemRenderer: View {
 
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.nativeUIListRowMargin) private var rowMargin
 
     var body: some View {
         let p = node.props
@@ -111,7 +112,7 @@ struct NativeUIListItemRenderer: View {
                 )
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, rowMargin)
         .padding(.vertical, 12)
         .background(containerColor != 0 ? Color(argb: containerColor) : Color.clear)
         .opacity(disabled ? 0.5 : 1.0)
