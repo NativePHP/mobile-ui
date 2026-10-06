@@ -86,7 +86,7 @@ class ListItem extends Element
             $this->leadingIconBackgroundColor($attrs['leadingIconBgColor']);
         }
         if (isset($attrs['leadingImage'])) {
-            $this->leadingImage($attrs['leadingImage']);
+            $this->leadingImage($attrs['leadingImage'], $attrs['leadingImageFit'] ?? $attrs['leading-image-fit'] ?? null);
         }
         if (isset($attrs['leadingCheckbox'])) {
             $this->leadingCheckbox((bool) $attrs['leadingCheckbox']);
@@ -333,10 +333,20 @@ class ListItem extends Element
         return $this;
     }
 
-    public function leadingImage(string $url): static
+    /**
+     * Leading thumbnail, drawn in a 56pt square. `$fit` is `cover` (the
+     * default: fill the square, cropping) or `contain` (letterbox), for
+     * artwork whose aspect ratio carries the meaning — a wide illustration,
+     * a logo. Blade: `leadingImageFit="contain"`.
+     */
+    public function leadingImage(string $url, ?string $fit = null): static
     {
         $this->listItemProps['leading_type'] = 'image';
         $this->listItemProps['leading_value'] = ImageSource::forDevice($url);
+
+        if ($fit !== null && $fit !== '') {
+            $this->listItemProps['leading_image_fit'] = $fit;
+        }
 
         return $this;
     }
