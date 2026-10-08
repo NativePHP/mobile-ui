@@ -267,21 +267,34 @@ struct NUIScaledFontModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
-        // A resolvable custom font wins; the weight still applies (SwiftUI
-        // selects/synthesizes it within the family). Unknown names — or none —
-        // fall back to the system font unchanged. `size` is already Dynamic-
-        // Type-scaled by `@ScaledMetric`, so the custom font uses it as-is.
+        // A resolvable custom font wins. Unknown names — or none — fall back
+        // to the system font unchanged, which DOES use `weight` (there is no
+        // named face to lose). `size` is already Dynamic-Type-scaled by
+        // `@ScaledMetric`, so the custom font uses it as-is.
         // `italic` only matters for single-style custom fonts: the font stays
         // upright (so SwiftUI rasterizes the full glyphs — a matrix-skewed
         // font leans past its advances and gets clipped at line ends) and the
         // rendered view is slanted instead. Real italic faces and the system
         // font get the trait from the caller's `Text.italic()`.
+        //
+        // `weight` is intentionally NOT applied to a resolved custom font.
+        // Every font this resolver hands back names one specific bundled
+        // static face (see NativeUIFontResolver — one `.ttf`/`.otf` per
+        // weight, registered and referenced by its own PostScript name, never
+        // a variable-font family with sibling weights to select between).
+        // Chaining `.weight()` onto that exact name asks CoreText to
+        // synthesize a different weight it has nothing else to draw from, and
+        // on iOS that silently drops the custom font entirely in favor of the
+        // system font — colors and everything else stay correct, since those
+        // are separate modifiers, so the only visible symptom is the custom
+        // font quietly not applying. The right weight is already selected by
+        // which font file/token was resolved.
         if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size) {
             if italic, NativeUIFontResolver.needsSyntheticOblique(name) {
-                content.font(custom.weight(weight))
+                content.font(custom)
                     .transformEffect(NativeUIFontResolver.obliqueTransform(name, size: size))
             } else {
-                content.font(custom.weight(weight))
+                content.font(custom)
             }
         } else {
             content.font(.system(size: size, weight: weight, design: design))

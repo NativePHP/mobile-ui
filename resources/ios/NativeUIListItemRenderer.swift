@@ -281,7 +281,12 @@ struct NativeUIListItemRenderer: View {
                 Button(action: {
                     let onPressCb = node.props.getCallbackId("on_trailing_press")
                     if onPressCb != 0 {
-                        NativeUIBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                        // Through the focus policy so a focused field's
+                        // pending change reaches PHP before the press
+                        // does (mobile-air #335).
+                        KeyboardFocusPolicy.dispatchPress {
+                            NativeUIBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                        }
                     }
                 }) {
                     Image(systemName: getIconForName(value))

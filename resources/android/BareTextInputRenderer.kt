@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,9 +20,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -80,6 +83,16 @@ object BareTextInputRenderer {
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
+        val focusManager = LocalFocusManager.current
+
+        // This field's identity in KeyboardFocusPolicy. A blur only releases
+        // the policy while this field still owns it, so a late blur can't
+        // clobber the field focus moved to. Released on dispose too, for a
+        // field that leaves composition while focused.
+        val focusToken = remember { Any() }
+        DisposableEffect(focusToken) {
+            onDispose { KeyboardFocusPolicy.fieldBlurred(focusToken) }
+        }
 
         // Caret / selection reporter — independent of the direct change/submit
         // dispatchers; no-op unless `on_selection_change` is wired and the
@@ -124,11 +137,20 @@ object BareTextInputRenderer {
             // layout mode) still wins since it comes later in the chain.
             // onFocusChanged is Bare's blur hook (no InteractionSource here):
             // flush the pending selection on the focused → unfocused edge.
+            // Registering with KeyboardFocusPolicy lets interactive taps
+            // elsewhere honor this field's keep-focus-on-submit (mobile-air
+            // #335). The unfocused call this fires on first composition is a
+            // no-op there, since this field doesn't own the policy yet.
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
+                    if (state.isFocused) {
+                        KeyboardFocusPolicy.fieldFocused(focusToken, props.keepFocusOnSubmit)
+                    } else {
+                        KeyboardFocusPolicy.fieldBlurred(focusToken)
+                    }
                 }
                 .then(modifier)
                 .nuiContentType(props.contentType)
@@ -176,6 +198,12 @@ object BareTextInputRenderer {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 props.dispatchSubmit?.invoke(value.text)
+                // Supplying KeyboardActions replaces Compose's default
+                // hide-on-Done, so dismissal is restored here to match
+                // the iOS renderer and the documented default (#335).
+                if (!props.keepFocusOnSubmit) {
+                    focusManager.clearFocus()
+                }
             })
         )
     }

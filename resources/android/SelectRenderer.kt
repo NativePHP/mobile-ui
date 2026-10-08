@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -60,7 +61,14 @@ object SelectRenderer {
 
         ExposedDropdownMenuBox(
             expanded = expanded,
-            onExpandedChange = { if (!disabled) expanded = it },
+            onExpandedChange = {
+                if (!disabled) {
+                    // The anchor consumes the tap, so drop the keyboard here
+                    // unless the focused field keeps focus (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
+                    expanded = it
+                }
+            },
             modifier = anchorModifier,
         ) {
             OutlinedTextField(
