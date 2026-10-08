@@ -119,6 +119,9 @@ struct NativeUITextInputCore: View {
             keyboard: keyboardKind
         )
         let autocorrect   = allowsAutocorrection(secure: secure, keyboard: keyboardKind)
+        // What the field holds, for AutoFill. Nil when the author didn't say,
+        // and nil applies nothing at all — see `TextContentTypeModifier`.
+        let contentType   = resolveTextContentType(p.getString("content_type"))
         let onChangeCb    = p.getCallbackId("on_change")
         let onSubmitCb    = p.getCallbackId("on_submit")
         let syncMode      = p.getString("sync_mode", default: "live")
@@ -241,6 +244,7 @@ struct NativeUITextInputCore: View {
         .keyboardType(keyboard)
         .textInputAutocapitalization(capitalization)
         .autocorrectionDisabled(!autocorrect)
+        .modifier(TextContentTypeModifier(contentType: contentType))
         .disabled(disabled || readOnly)
         // Scroll target for `scrollIntoView()` below. `node.id` is already the
         // ForEach identity of every node in the tree, so it is stable across
@@ -684,6 +688,47 @@ private func allowsAutocorrection(secure: Bool, keyboard: String) -> Bool {
         return false
     default:
         return true
+    }
+}
+
+/// The `content_type` prop → `UITextContentType`, for AutoFill. Tokens are
+/// HTML's `autocomplete` vocabulary, normalized to kebab-case by the element.
+///
+/// This is what declares a login form's credential pair to iOS: a `username`
+/// field beside a `password` one. Without it iOS has no pair to fill, which is
+/// how a secure field filled as the partner of another field could be written
+/// in UIKit without SwiftUI's `text` binding ever seeing the value
+/// (NativePHP/mobile-air#422).
+///
+/// Unknown and empty values return nil — same policy as `resolveKeyboardType`.
+private func resolveTextContentType(_ kind: String) -> UITextContentType? {
+    switch kind.lowercased() {
+    case "username":      return .username
+    case "email":         return .emailAddress
+    case "password":      return .password
+    case "new-password":  return .newPassword
+    case "one-time-code": return .oneTimeCode
+    default:              return nil
+    }
+}
+
+/// Applies `.textContentType` only when the author declared one.
+///
+/// Deliberately not `.textContentType(nil)` for the unset case. That is not
+/// guaranteed to be a no-op: SwiftUI may assign its own content type to a
+/// `SecureField` internally, and an explicit nil applied over it would change
+/// the AutoFill behavior of every existing password field. Returning `content`
+/// untouched keeps each field that doesn't set the prop exactly as it was.
+private struct TextContentTypeModifier: ViewModifier {
+    let contentType: UITextContentType?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let contentType {
+            content.textContentType(contentType)
+        } else {
+            content
+        }
     }
 }
 
