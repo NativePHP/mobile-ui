@@ -170,4 +170,35 @@ return [
         'default' => 'System',
     ],
 
+    /*
+    |---------------------------------------------------------------------------
+    | Tree-Shaking
+    |---------------------------------------------------------------------------
+    |
+    | Control which native UI component renderers are copied into your app
+    | bundle at build time. Tree-shaking analyzes your code to copy only the
+    | components you actually use, reducing app size.
+    |
+    | Modes:
+    |   - 'auto'   : Scan your code and copy only used renderers (default)
+    |   - 'all'    : Copy all renderers (current behavior, zero risk)
+    |   - 'manual' : Specify an explicit component list below
+    |
+    | Set NATIVEUI_TREE_SHAKING=false in .env to disable entirely.
+    |
+    */
+
+    'tree_shaking' => [
+        'enabled' => env('NATIVEUI_TREE_SHAKING', true),
+        'mode' => env('NATIVEUI_TREE_SHAKING_MODE', 'auto'),
+
+        // When mode is 'manual', specify component types to include
+        'components' => [
+            // 'button', 'text', 'column', 'row', 'image', ...
+        ],
+
+        // Include all renderers when uncertainty is detected (dynamic names, etc.)
+        'include_all_on_uncertainty' => true,
+    ],
+
 ];
