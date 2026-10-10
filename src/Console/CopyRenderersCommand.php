@@ -18,8 +18,9 @@ use Native\Mobile\UI\TreeShaking\RendererMapper;
  *   - Dynamic component names detected (e.g., <native:{{ $type }}>)
  *   - Detection fails or throws
  *
- * Wired as the plugin's `copy_native_sources` hook in nativephp.json; the build's
- * PluginHookRunner invokes it per platform during `native:run` / `native:build`.
+ * Wired as part of the plugin's `copy_assets` hook in nativephp.json (alongside
+ * copy-fonts); the build's PluginHookRunner invokes it per platform during
+ * `native:run` / `native:build`.
  */
 class CopyRenderersCommand extends NativePluginHookCommand
 {

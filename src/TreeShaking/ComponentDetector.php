@@ -28,7 +28,14 @@ class ComponentDetector
 
         // Scan Blade templates
         $bladeDetector = new BladeComponentScanner();
-        $result = $bladeDetector->scan($this->getBladeFiles());
+        $bladeFiles = $this->getBladeFiles();
+
+        // Check for unreadable marker
+        if (in_array('*UNREADABLE*', $bladeFiles, true)) {
+            return ['*'];
+        }
+
+        $result = $bladeDetector->scan($bladeFiles);
 
         if ($result['uncertain']) {
             $hasUncertainty = true;
@@ -37,7 +44,14 @@ class ComponentDetector
 
         // Scan PHP files for Element class usage
         $phpDetector = new PhpElementScanner();
-        $result = $phpDetector->scan($this->getPhpFiles());
+        $phpFiles = $this->getPhpFiles();
+
+        // Check for unreadable marker
+        if (in_array('*UNREADABLE*', $phpFiles, true)) {
+            return ['*'];
+        }
+
+        $result = $phpDetector->scan($phpFiles);
 
         if ($result['uncertain']) {
             $hasUncertainty = true;
@@ -81,53 +95,44 @@ class ComponentDetector
             $files = array_merge($files, $this->globRecursive($appPath, '*.php'));
         }
 
-        // Vendor PHP files (packages may use Element API)
+        // Vendor PHP files - scan ALL (packages may use Element API anywhere)
         $vendorPath = $this->basePath.'/vendor';
         if (is_dir($vendorPath)) {
-            // Only scan Livewire components and similar, not all vendor code
-            $files = array_merge($files, $this->globRecursive($vendorPath, '*.php', [
-                '*/livewire/*',
-                '*/Http/Livewire/*',
-            ]));
+            $files = array_merge($files, $this->globRecursive($vendorPath, '*.php'));
         }
 
         return $files;
     }
 
-    protected function globRecursive(string $dir, string $pattern, array $pathFilters = []): array
+    protected function globRecursive(string $dir, string $pattern): array
     {
         if (! is_dir($dir)) {
             return [];
         }
 
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS)
-        );
+        try {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CATCH_GET_CHILD
+            );
+        } catch (\UnexpectedValueException $e) {
+            // Directory not readable - fail safe and include everything
+            return ['*UNREADABLE*'];
+        }
 
         $files = [];
         foreach ($iterator as $file) {
-            if (! $file->isFile()) {
-                continue;
-            }
-
-            $path = $file->getPathname();
-
-            // Apply path filters if specified
-            if (! empty($pathFilters)) {
-                $matched = false;
-                foreach ($pathFilters as $filter) {
-                    if (fnmatch($filter, $path)) {
-                        $matched = true;
-                        break;
-                    }
-                }
-                if (! $matched) {
+            try {
+                if (! $file->isFile()) {
                     continue;
                 }
-            }
 
-            if (fnmatch('*'.$pattern, basename($path))) {
-                $files[] = $path;
+                if (fnmatch('*'.$pattern, basename($file->getFilename()))) {
+                    $files[] = $file->getPathname();
+                }
+            } catch (\UnexpectedValueException $e) {
+                // File not readable - fail safe and include everything
+                return ['*UNREADABLE*'];
             }
         }
 

@@ -20,14 +20,25 @@ namespace Native\Mobile\UI\TreeShaking;
 class PhpElementScanner
 {
     protected array $uncertaintyPatterns = [
-        // Variable element types
+        // Variable element types in collector
         '/NativeElementCollector::(leaf|open)\s*\(\s*\$/',
         '/ElementCollector::(leaf|open)\s*\(\s*\$/',
+        
+        // String concatenation in collector (. operator)
+        '/NativeElementCollector::(leaf|open)\s*\([^)]*\./',
+        '/ElementCollector::(leaf|open)\s*\([^)]*\./',
+        
+        // Ternary or conditional expressions
+        '/NativeElementCollector::(leaf|open)\s*\([^)]*\?/',
+        '/ElementCollector::(leaf|open)\s*\([^)]*\?/',
 
         // Reflection/dynamic instantiation
         '/app\(\)->make\s*\(\s*\$/',
         '/resolve\s*\(\s*\$.*Element/',
         '/new\s+\$/',
+        
+        // Variable class names
+        '/\$[a-zA-Z_]+\s*::\s*make/',
 
         // Config-driven (rare but possible)
         '/config\s*\(["\'][^"\']*component/',
@@ -40,20 +51,33 @@ class PhpElementScanner
 
         foreach ($files as $file) {
             if (! is_readable($file)) {
-                continue;
-            }
-
-            $content = file_get_contents($file);
-
-            // Check for uncertainty patterns first
-            if ($this->hasUncertainty($content)) {
+                // Unreadable file - fail safe
                 $uncertain = true;
                 continue;
             }
 
-            // Extract component usage
-            $components = array_merge($components, $this->extractFromElementApi($content));
-            $components = array_merge($components, $this->extractFromCollector($content));
+            try {
+                $content = @file_get_contents($file);
+
+                if ($content === false) {
+                    // Failed to read - fail safe
+                    $uncertain = true;
+                    continue;
+                }
+
+                // Check for uncertainty patterns first
+                if ($this->hasUncertainty($content)) {
+                    $uncertain = true;
+                    continue;
+                }
+
+                // Extract component usage
+                $components = array_merge($components, $this->extractFromElementApi($content));
+                $components = array_merge($components, $this->extractFromCollector($content));
+            } catch (\Throwable $e) {
+                // Any error during parsing - fail safe
+                $uncertain = true;
+            }
         }
 
         return [

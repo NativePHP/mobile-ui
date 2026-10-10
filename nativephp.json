@@ -521,7 +521,6 @@
         }
     },
     "hooks": {
-        "copy_assets": "nativephp:native-ui:copy-fonts",
-        "copy_native_sources": "nativephp:native-ui:copy-renderers"
+        "copy_assets": "nativephp:native-ui:copy-assets-combined"
     }
 }

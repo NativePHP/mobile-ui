@@ -78,6 +78,32 @@ it('marks uncertainty for variable in @component', function () {
     expect($result['uncertain'])->toBeTrue();
 });
 
+it('marks uncertainty for partial dynamic component names', function () {
+    $scanner = new BladeComponentScanner();
+    
+    $cases = [
+        '<native:button-{{ $suffix }}>',
+        '<native:{{ $type }}-button>',
+        '<native:button$var>',
+        '<x-native::button-{{ $id }}>',
+        '@component("native:button" . $suffix)',
+    ];
+    
+    foreach ($cases as $blade) {
+        $result = $scanner->scan([tempFile($blade)]);
+        expect($result['uncertain'])->toBeTrue("Failed to detect uncertainty in: {$blade}");
+    }
+});
+
+it('marks uncertainty for unreadable files', function () {
+    $scanner = new BladeComponentScanner();
+    
+    // Non-existent file
+    $result = $scanner->scan(['/nonexistent/file.blade.php']);
+    
+    expect($result['uncertain'])->toBeTrue();
+});
+
 it('handles multiple files', function () {
     $scanner = new BladeComponentScanner();
 

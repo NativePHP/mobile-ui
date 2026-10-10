@@ -123,6 +123,54 @@ PHP;
     expect($result['uncertain'])->toBeTrue();
 });
 
+it('marks uncertainty for string concatenation in collector', function () {
+    $scanner = new PhpElementScanner();
+    $php = <<<'PHP'
+<?php
+NativeElementCollector::leaf('button' . $suffix, []);
+NativeElementCollector::open($prefix . '_column', []);
+PHP;
+
+    $result = $scanner->scan([tempPhpFile($php)]);
+
+    expect($result['uncertain'])->toBeTrue();
+});
+
+it('marks uncertainty for ternary expressions in collector', function () {
+    $scanner = new PhpElementScanner();
+    $php = <<<'PHP'
+<?php
+$type = $condition ? 'button' : 'text';
+NativeElementCollector::leaf($type, []);
+PHP;
+
+    $result = $scanner->scan([tempPhpFile($php)]);
+
+    expect($result['uncertain'])->toBeTrue();
+});
+
+it('marks uncertainty for variable class names', function () {
+    $scanner = new PhpElementScanner();
+    $php = <<<'PHP'
+<?php
+$className = 'Button';
+$className::make();
+PHP;
+
+    $result = $scanner->scan([tempPhpFile($php)]);
+
+    expect($result['uncertain'])->toBeTrue();
+});
+
+it('marks uncertainty for unreadable files', function () {
+    $scanner = new PhpElementScanner();
+    
+    // Non-existent file
+    $result = $scanner->scan(['/nonexistent/file.php']);
+    
+    expect($result['uncertain'])->toBeTrue();
+});
+
 it('handles multiple PHP files', function () {
     $scanner = new PhpElementScanner();
 

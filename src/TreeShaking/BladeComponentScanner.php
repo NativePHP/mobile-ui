@@ -14,14 +14,19 @@ namespace Native\Mobile\UI\TreeShaking;
 class BladeComponentScanner
 {
     protected array $uncertaintyPatterns = [
-        // Dynamic component names
-        '/<native:\{\{/',
-        '/<native:@/',
-        '/<x-native::\{\{/',
+        // Dynamic component names with expressions
+        '/<native:[^>\s]*\{\{/',  // <native:button-{{ or <native:{{ 
+        '/<native:[^>\s]*@/',     // <native:button@something (PHP expression)
+        '/<native:[^>\s]*\$/',    // <native:button$var or variable interpolation
+        '/<x-native::[^>\s]*\{\{/',
+        '/<x-native::[^>\s]*\$/',
 
         // Dynamic component directive
         '/<x-dynamic-component/',
+        
+        // @component with variables or concatenation
         '/@component\s*\(\s*\$/',
+        '/@component\s*\([^)]*\./',  // String concatenation
     ];
 
     public function scan(array $files): array
@@ -31,19 +36,32 @@ class BladeComponentScanner
 
         foreach ($files as $file) {
             if (! is_readable($file)) {
-                continue;
-            }
-
-            $content = file_get_contents($file);
-
-            // Check for uncertainty patterns first
-            if ($this->hasUncertainty($content)) {
+                // Unreadable file - fail safe
                 $uncertain = true;
                 continue;
             }
 
-            // Extract component names
-            $components = array_merge($components, $this->extractComponents($content));
+            try {
+                $content = @file_get_contents($file);
+
+                if ($content === false) {
+                    // Failed to read - fail safe
+                    $uncertain = true;
+                    continue;
+                }
+
+                // Check for uncertainty patterns first
+                if ($this->hasUncertainty($content)) {
+                    $uncertain = true;
+                    continue;
+                }
+
+                // Extract component names
+                $components = array_merge($components, $this->extractComponents($content));
+            } catch (\Throwable $e) {
+                // Any error during parsing - fail safe
+                $uncertain = true;
+            }
         }
 
         return [

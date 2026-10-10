@@ -93,6 +93,7 @@ class NativeUIServiceProvider extends ServiceProvider
                 CopyFontsCommand::class,
                 FontCommand::class,
                 Console\CopyRenderersCommand::class,
+                Console\CopyAssetsCombinedCommand::class,
             ]);
         }
     }
