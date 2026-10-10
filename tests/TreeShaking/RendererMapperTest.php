@@ -77,7 +77,7 @@ it('handles missing component gracefully', function () {
 
 it('throws exception for missing manifest', function () {
     expect(fn () => new RendererMapper('/nonexistent/path/manifest.json'))
-        ->toThrow(\RuntimeException::class, 'Manifest not found');
+        ->toThrow(RuntimeException::class, 'Manifest not found');
 });
 
 it('throws exception for invalid JSON manifest', function () {
@@ -85,7 +85,7 @@ it('throws exception for invalid JSON manifest', function () {
     file_put_contents($invalidManifest, '{ invalid json');
 
     expect(fn () => new RendererMapper($invalidManifest))
-        ->toThrow(\RuntimeException::class, 'Invalid JSON');
+        ->toThrow(RuntimeException::class, 'Invalid JSON');
 
     @unlink($invalidManifest);
 });

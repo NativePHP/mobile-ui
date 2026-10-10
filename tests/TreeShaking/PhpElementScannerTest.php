@@ -3,7 +3,7 @@
 use Native\Mobile\UI\TreeShaking\PhpElementScanner;
 
 it('detects Element class use statements', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 use Native\Mobile\UI\Elements\Button;
@@ -26,7 +26,7 @@ PHP;
 });
 
 it('detects fully-qualified Element class calls', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 class MyComponent {
@@ -44,7 +44,7 @@ PHP;
 });
 
 it('detects NativeElementCollector leaf calls', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 use Native\Mobile\Edge\NativeElementCollector;
@@ -64,7 +64,7 @@ PHP;
 });
 
 it('converts PascalCase to snake_case', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 use Native\Mobile\UI\Elements\OutlinedTextInput;
@@ -84,7 +84,7 @@ PHP;
 });
 
 it('marks uncertainty for variable element types in collector', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 use Native\Mobile\Edge\NativeElementCollector;
@@ -99,7 +99,7 @@ PHP;
 });
 
 it('marks uncertainty for dynamic instantiation', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 $className = 'Native\Mobile\UI\Elements\Button';
@@ -112,7 +112,7 @@ PHP;
 });
 
 it('marks uncertainty for app()->make() with variables', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 $element = app()->make($elementClass);
@@ -124,7 +124,7 @@ PHP;
 });
 
 it('marks uncertainty for string concatenation in collector', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 NativeElementCollector::leaf('button' . $suffix, []);
@@ -137,7 +137,7 @@ PHP;
 });
 
 it('marks uncertainty for ternary expressions in collector', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 $type = $condition ? 'button' : 'text';
@@ -150,7 +150,7 @@ PHP;
 });
 
 it('marks uncertainty for variable class names', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 $className = 'Button';
@@ -163,16 +163,16 @@ PHP;
 });
 
 it('marks uncertainty for unreadable files', function () {
-    $scanner = new PhpElementScanner();
-    
+    $scanner = new PhpElementScanner;
+
     // Non-existent file
     $result = $scanner->scan(['/nonexistent/file.php']);
-    
+
     expect($result['uncertain'])->toBeTrue();
 });
 
 it('handles multiple PHP files', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
 
     $file1 = tempPhpFile('<?php use Native\Mobile\UI\Elements\Button;');
     $file2 = tempPhpFile('<?php use Native\Mobile\UI\Elements\Text;');
@@ -187,7 +187,7 @@ it('handles multiple PHP files', function () {
 });
 
 it('returns unique components', function () {
-    $scanner = new PhpElementScanner();
+    $scanner = new PhpElementScanner;
     $php = <<<'PHP'
 <?php
 use Native\Mobile\UI\Elements\Button;

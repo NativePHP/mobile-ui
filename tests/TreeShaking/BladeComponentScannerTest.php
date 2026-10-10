@@ -3,7 +3,7 @@
 use Native\Mobile\UI\TreeShaking\BladeComponentScanner;
 
 it('detects namespace syntax components', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = <<<'BLADE'
 <native:button label="Save" />
 <native:outlined-text-input label="Email" />
@@ -22,7 +22,7 @@ BLADE;
 });
 
 it('detects x-component syntax', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = '<x-native::button label="Click" />';
 
     $result = $scanner->scan([tempFile($blade)]);
@@ -32,7 +32,7 @@ it('detects x-component syntax', function () {
 });
 
 it('detects @component directive', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = "@component('native:button', ['label' => 'Submit'])";
 
     $result = $scanner->scan([tempFile($blade)]);
@@ -42,7 +42,7 @@ it('detects @component directive', function () {
 });
 
 it('normalizes kebab-case to snake_case', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = '<native:outlined-text-input /><native:bottom-sheet />';
 
     $result = $scanner->scan([tempFile($blade)]);
@@ -52,7 +52,7 @@ it('normalizes kebab-case to snake_case', function () {
 });
 
 it('marks uncertainty for dynamic component names', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = '<native:{{ $componentType }} />';
 
     $result = $scanner->scan([tempFile($blade)]);
@@ -61,7 +61,7 @@ it('marks uncertainty for dynamic component names', function () {
 });
 
 it('marks uncertainty for x-dynamic-component', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = '<x-dynamic-component :component="$type" />';
 
     $result = $scanner->scan([tempFile($blade)]);
@@ -70,7 +70,7 @@ it('marks uncertainty for x-dynamic-component', function () {
 });
 
 it('marks uncertainty for variable in @component', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = '@component($componentName)';
 
     $result = $scanner->scan([tempFile($blade)]);
@@ -79,8 +79,8 @@ it('marks uncertainty for variable in @component', function () {
 });
 
 it('marks uncertainty for partial dynamic component names', function () {
-    $scanner = new BladeComponentScanner();
-    
+    $scanner = new BladeComponentScanner;
+
     $cases = [
         '<native:button-{{ $suffix }}>',
         '<native:{{ $type }}-button>',
@@ -88,7 +88,7 @@ it('marks uncertainty for partial dynamic component names', function () {
         '<x-native::button-{{ $id }}>',
         '@component("native:button" . $suffix)',
     ];
-    
+
     foreach ($cases as $blade) {
         $result = $scanner->scan([tempFile($blade)]);
         expect($result['uncertain'])->toBeTrue("Failed to detect uncertainty in: {$blade}");
@@ -96,16 +96,16 @@ it('marks uncertainty for partial dynamic component names', function () {
 });
 
 it('marks uncertainty for unreadable files', function () {
-    $scanner = new BladeComponentScanner();
-    
+    $scanner = new BladeComponentScanner;
+
     // Non-existent file
     $result = $scanner->scan(['/nonexistent/file.blade.php']);
-    
+
     expect($result['uncertain'])->toBeTrue();
 });
 
 it('handles multiple files', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
 
     $file1 = tempFile('<native:button />');
     $file2 = tempFile('<native:text />');
@@ -120,7 +120,7 @@ it('handles multiple files', function () {
 });
 
 it('returns unique components', function () {
-    $scanner = new BladeComponentScanner();
+    $scanner = new BladeComponentScanner;
     $blade = <<<'BLADE'
 <native:button label="Save" />
 <native:button label="Cancel" />

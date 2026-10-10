@@ -19,6 +19,7 @@ use Native\Mobile\UI\Concerns\InteractsWithFloatingOverlay;
 use Native\Mobile\UI\Console\CopyFontsCommand;
 use Native\Mobile\UI\Console\FontCommand;
 use Native\Mobile\UI\Console\GenerateIconsCommand;
+use Native\Mobile\UI\Console\NativeSourcesCommand;
 use Native\Mobile\UI\Elements\FloatingOverlay as FloatingOverlayElement;
 use Native\Mobile\UI\Elements\NativeDrawer;
 use Native\Mobile\UI\Testing\DatePickerMacros;
@@ -92,8 +93,7 @@ class NativeUIServiceProvider extends ServiceProvider
                 GenerateIconsCommand::class,
                 CopyFontsCommand::class,
                 FontCommand::class,
-                Console\CopyRenderersCommand::class,
-                Console\CopyAssetsCombinedCommand::class,
+                NativeSourcesCommand::class,
             ]);
         }
     }

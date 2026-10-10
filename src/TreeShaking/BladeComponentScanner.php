@@ -15,7 +15,7 @@ class BladeComponentScanner
 {
     protected array $uncertaintyPatterns = [
         // Dynamic component names with expressions
-        '/<native:[^>\s]*\{\{/',  // <native:button-{{ or <native:{{ 
+        '/<native:[^>\s]*\{\{/',  // <native:button-{{ or <native:{{
         '/<native:[^>\s]*@/',     // <native:button@something (PHP expression)
         '/<native:[^>\s]*\$/',    // <native:button$var or variable interpolation
         '/<x-native::[^>\s]*\{\{/',
@@ -23,7 +23,7 @@ class BladeComponentScanner
 
         // Dynamic component directive
         '/<x-dynamic-component/',
-        
+
         // @component with variables or concatenation
         '/@component\s*\(\s*\$/',
         '/@component\s*\([^)]*\./',  // String concatenation
@@ -38,6 +38,7 @@ class BladeComponentScanner
             if (! is_readable($file)) {
                 // Unreadable file - fail safe
                 $uncertain = true;
+
                 continue;
             }
 
@@ -47,12 +48,14 @@ class BladeComponentScanner
                 if ($content === false) {
                     // Failed to read - fail safe
                     $uncertain = true;
+
                     continue;
                 }
 
                 // Check for uncertainty patterns first
                 if ($this->hasUncertainty($content)) {
                     $uncertain = true;
+
                     continue;
                 }
 

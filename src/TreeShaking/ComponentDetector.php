@@ -27,7 +27,7 @@ class ComponentDetector
         $hasUncertainty = false;
 
         // Scan Blade templates
-        $bladeDetector = new BladeComponentScanner();
+        $bladeDetector = new BladeComponentScanner;
         $bladeFiles = $this->getBladeFiles();
 
         // Check for unreadable marker
@@ -43,7 +43,7 @@ class ComponentDetector
         $components = array_merge($components, $result['components']);
 
         // Scan PHP files for Element class usage
-        $phpDetector = new PhpElementScanner();
+        $phpDetector = new PhpElementScanner;
         $phpFiles = $this->getPhpFiles();
 
         // Check for unreadable marker

@@ -23,11 +23,11 @@ class PhpElementScanner
         // Variable element types in collector
         '/NativeElementCollector::(leaf|open)\s*\(\s*\$/',
         '/ElementCollector::(leaf|open)\s*\(\s*\$/',
-        
+
         // String concatenation in collector (. operator)
         '/NativeElementCollector::(leaf|open)\s*\([^)]*\./',
         '/ElementCollector::(leaf|open)\s*\([^)]*\./',
-        
+
         // Ternary or conditional expressions
         '/NativeElementCollector::(leaf|open)\s*\([^)]*\?/',
         '/ElementCollector::(leaf|open)\s*\([^)]*\?/',
@@ -36,7 +36,7 @@ class PhpElementScanner
         '/app\(\)->make\s*\(\s*\$/',
         '/resolve\s*\(\s*\$.*Element/',
         '/new\s+\$/',
-        
+
         // Variable class names
         '/\$[a-zA-Z_]+\s*::\s*make/',
 
@@ -53,6 +53,7 @@ class PhpElementScanner
             if (! is_readable($file)) {
                 // Unreadable file - fail safe
                 $uncertain = true;
+
                 continue;
             }
 
@@ -62,12 +63,14 @@ class PhpElementScanner
                 if ($content === false) {
                     // Failed to read - fail safe
                     $uncertain = true;
+
                     continue;
                 }
 
                 // Check for uncertainty patterns first
                 if ($this->hasUncertainty($content)) {
                     $uncertain = true;
+
                     continue;
                 }
 
