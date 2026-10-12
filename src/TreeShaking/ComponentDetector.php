@@ -95,10 +95,17 @@ class ComponentDetector
             $files = array_merge($files, $this->globRecursive($appPath, '*.php'));
         }
 
-        // Vendor PHP files - scan ALL (packages may use Element API anywhere)
+        // Vendor PHP: only files that actually mention Native UI / Edge.
+        // Scanning every vendor file would treat `new $class` in Carbon etc.
+        // as tree-shaking uncertainty and fall back to bundling everything.
         $vendorPath = $this->basePath.'/vendor';
         if (is_dir($vendorPath)) {
-            $files = array_merge($files, $this->globRecursive($vendorPath, '*.php'));
+            foreach ($this->globRecursive($vendorPath, '*.php') as $file) {
+                $content = @file_get_contents($file);
+                if (is_string($content) && $this->looksLikeNativeUiPhp($content)) {
+                    $files[] = $file;
+                }
+            }
         }
 
         return $files;
@@ -113,6 +120,7 @@ class ComponentDetector
         try {
             $iterator = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::LEAVES_ONLY,
                 \RecursiveIteratorIterator::CATCH_GET_CHILD
             );
         } catch (\UnexpectedValueException $e) {
@@ -127,8 +135,14 @@ class ComponentDetector
                     continue;
                 }
 
-                if (fnmatch('*'.$pattern, basename($file->getFilename()))) {
-                    $files[] = $file->getPathname();
+                $path = $file->getPathname();
+
+                if ($this->shouldSkipPath($path)) {
+                    continue;
+                }
+
+                if (fnmatch($pattern, $file->getFilename())) {
+                    $files[] = $path;
                 }
             } catch (\UnexpectedValueException $e) {
                 // File not readable - fail safe and include everything
@@ -137,5 +151,39 @@ class ComponentDetector
         }
 
         return $files;
+    }
+
+    /**
+     * Skip test fixtures and VCS metadata. Scanning package test suites
+     * (e.g. vendor/nativephp/mobile/tests) would pick up example tags and
+     * `new $class` uncertainty patterns that are not part of the app.
+     */
+    protected function shouldSkipPath(string $path): bool
+    {
+        $normalized = str_replace('\\', '/', $path);
+
+        foreach ([
+            '/tests/',
+            '/Tests/',
+            '/test/',
+            '/phpunit/',
+            '/.git/',
+            '/node_modules/',
+            '/vendor/bin/',
+        ] as $skip) {
+            if (str_contains($normalized, $skip)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function looksLikeNativeUiPhp(string $content): bool
+    {
+        return str_contains($content, 'Native\\Mobile\\UI')
+            || str_contains($content, 'Native\\Mobile\\Edge')
+            || str_contains($content, 'NativeElementCollector')
+            || str_contains($content, '<native:');
     }
 }

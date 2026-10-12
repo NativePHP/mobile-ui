@@ -41,6 +41,7 @@ it('always includes shared Android files', function () {
     $files = $mapper->getFilesToCopy(['button'], 'android');
 
     expect($files)->toContain('NativeUITheme.kt')
+        ->and($files)->toContain('NativeUIThemeFunctions.kt')
         ->and($files)->toContain('NativeUIFontResolver.kt')
         ->and($files)->toContain('NativeUIChromeInit.kt')
         ->and($files)->toContain('TextInputShared.kt');
@@ -78,6 +79,30 @@ it('handles missing component gracefully', function () {
 it('throws exception for missing manifest', function () {
     expect(fn () => new RendererMapper('/nonexistent/path/manifest.json'))
         ->toThrow(RuntimeException::class, 'Manifest not found');
+});
+
+it('maps combined Android renderers to the file that defines them', function () {
+    $mapper = new RendererMapper(dirname(__DIR__, 2).'/nativephp.json');
+
+    $files = $mapper->getFilesToCopy(['column', 'spacer', 'top_bar'], 'android');
+
+    expect($files)->toContain('ContainerRenderers.kt')
+        ->and($files)->toContain('SimpleRenderers.kt')
+        ->and($files)->toContain('NavRenderers.kt')
+        ->and($files)->not->toContain('ColumnRenderer.kt')
+        ->and($files)->not->toContain('SpacerRenderer.kt')
+        ->and($files)->not->toContain('TopBarRenderer.kt');
+});
+
+it('maps combined iOS renderers to the file that defines them', function () {
+    $mapper = new RendererMapper(dirname(__DIR__, 2).'/nativephp.json');
+
+    $files = $mapper->getFilesToCopy(['image', 'pressable', 'top_bar'], 'ios');
+
+    expect($files)->toContain('NativeUISimpleRenderers.swift')
+        ->and($files)->toContain('NativeUINavRenderers.swift')
+        ->and($files)->not->toContain('NativeUIImageRenderer.swift')
+        ->and($files)->not->toContain('NativeUIPressableRenderer.swift');
 });
 
 it('throws exception for invalid JSON manifest', function () {

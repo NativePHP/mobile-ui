@@ -17,6 +17,9 @@ class RendererMapper
 
     protected array $rendererDependenciesCache = [];
 
+    /** @var array<string, array<string, string>> platform => rendererClass => filename */
+    protected array $rendererFileIndex = [];
+
     public function __construct(string $manifestPath)
     {
         $this->manifestPath = $manifestPath;
@@ -62,6 +65,7 @@ class RendererMapper
         if ($platform === 'ios') {
             return [
                 'NativeUITheme.swift',
+                'NativeUIThemeFunctions.swift',
                 'NativeUIFontResolver.swift',
                 'NativeUIDrawerHost.swift',
                 'NativeUIFloatingOverlayHost.swift',
@@ -69,12 +73,15 @@ class RendererMapper
                 'NativeUITransitionFunctions.swift',
                 'NativeUIFillWidthHelper.swift',
                 'NativeUINavRenderers.swift',
+                'NativeUITextInputCore.swift',
+                'NativeUIImageSource.swift',
             ];
         }
 
         // Android
         return [
             'NativeUITheme.kt',
+            'NativeUIThemeFunctions.kt',
             'NativeUIFontResolver.kt',
             'NativeUIChromeInit.kt',
             'NativeLayoutDrawerHost.kt',
@@ -102,16 +109,69 @@ class RendererMapper
     protected function rendererToFile(string $renderer, string $platform): ?string
     {
         if ($platform === 'ios') {
-            // iOS renderer: "NativeUIButtonRenderer" -> "NativeUIButtonRenderer.swift"
-            return "{$renderer}.swift";
+            return $this->resolveExistingFile("{$renderer}.swift", $platform);
         }
 
-        // Android renderer: "com.nativephp.plugins.native_ui.ui.ButtonRenderer"
-        // -> "ButtonRenderer.kt" (take last segment)
         $parts = explode('.', $renderer);
         $className = end($parts);
 
-        return "{$className}.kt";
+        return $this->resolveExistingFile("{$className}.kt", $platform);
+    }
+
+    /**
+     * Map a class-named renderer file to the source file that actually
+     * defines it (combined files like ContainerRenderers.kt / NativeUISimpleRenderers.swift).
+     */
+    protected function resolveExistingFile(string $filename, string $platform): ?string
+    {
+        $dir = dirname($this->manifestPath)."/resources/{$platform}";
+
+        if (is_dir($dir) && file_exists($dir.'/'.$filename)) {
+            return $filename;
+        }
+
+        $className = pathinfo($filename, PATHINFO_FILENAME);
+        $index = $this->buildRendererFileIndex($platform);
+
+        return $index[$className] ?? (is_dir($dir) ? null : $filename);
+    }
+
+    /**
+     * Scan platform sources for `struct FooRenderer` / `object FooRenderer`
+     * so combined files are found when the class-named file does not exist.
+     *
+     * @return array<string, string>
+     */
+    protected function buildRendererFileIndex(string $platform): array
+    {
+        if (isset($this->rendererFileIndex[$platform])) {
+            return $this->rendererFileIndex[$platform];
+        }
+
+        $index = [];
+        $dir = dirname($this->manifestPath)."/resources/{$platform}";
+        $ext = $platform === 'ios' ? 'swift' : 'kt';
+
+        if (is_dir($dir)) {
+            foreach (glob("{$dir}/*.{$ext}") ?: [] as $path) {
+                $content = (string) file_get_contents($path);
+                $basename = basename($path);
+
+                if (preg_match_all(
+                    '/\b(?:struct|enum|class|protocol|extension|object|fun)\s+([A-Z][a-zA-Z]+Renderer)\b/',
+                    $content,
+                    $matches
+                )) {
+                    foreach ($matches[1] as $className) {
+                        $index[$className] ??= $basename;
+                    }
+                }
+            }
+        }
+
+        $this->rendererFileIndex[$platform] = $index;
+
+        return $index;
     }
 
     protected function resolveTransitiveDependencies(array $files, string $platform): array
@@ -124,8 +184,12 @@ class RendererMapper
         $allFiles = $files;
 
         foreach ($files as $file) {
-            $deps = $resolver->getDependencies($file);
-            $allFiles = array_merge($allFiles, $deps);
+            foreach ($resolver->getDependencies($file) as $dep) {
+                $resolved = $this->resolveExistingFile($dep, $platform);
+                if ($resolved !== null) {
+                    $allFiles[] = $resolved;
+                }
+            }
         }
 
         return array_values(array_unique($allFiles));

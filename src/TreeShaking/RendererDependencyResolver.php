@@ -37,43 +37,36 @@ class RendererDependencyResolver
         }
 
         $content = file_get_contents($filePath);
-        $deps = $this->extractDependencies($content);
+        $deps = $this->extractDependencies($content, $file);
 
         $this->cache[$file] = $deps;
 
         return $deps;
     }
 
-    protected function extractDependencies(string $content): array
+    protected function extractDependencies(string $content, string $currentFile): array
     {
         $deps = [];
 
         if ($this->platform === 'ios') {
-            // Look for references to other NativeUI renderers in Swift
-            // Example: "NativeUIButtonRenderer", "NativeUIEmptyRenderer"
-            if (preg_match_all('/NativeUI([A-Z][a-zA-Z]+)Renderer/', $content, $matches)) {
-                foreach ($matches[0] as $renderer) {
+            // Instantiations / calls: NativeUIButtonRenderer(...)
+            // Ignore struct/enum/class/protocol/extension declarations.
+            if (preg_match_all('/\b(NativeUI[A-Z][a-zA-Z]+Renderer)\s*\(/', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                foreach ($matches[1] as [$renderer, $offset]) {
+                    if ($this->isTypeDeclaration($content, $offset)) {
+                        continue;
+                    }
                     $deps[] = "{$renderer}.swift";
                 }
             }
-
-            // Also check for struct/class usage patterns
-            if (preg_match_all('/:\s*NativeUI([A-Z][a-zA-Z]+)/', $content, $matches)) {
-                foreach ($matches[1] as $name) {
-                    // Check if it's a renderer (not just a helper like NativeUITheme)
-                    if (str_ends_with($name, 'Renderer') || $name === 'EmptyRenderer') {
-                        $deps[] = "NativeUI{$name}.swift";
-                    }
-                }
-            }
         } else {
-            // Android: Look for references to other renderers in Kotlin
-            // Pattern: "@Composable fun ButtonRenderer" or "ButtonRenderer("
-            if (preg_match_all('/([A-Z][a-zA-Z]+Renderer)\s*\(/', $content, $matches)) {
-                foreach ($matches[1] as $renderer) {
-                    if ($renderer !== 'Renderer') { // Skip generic "Renderer" word
-                        $deps[] = "{$renderer}.kt";
+            // Android calls: ButtonRenderer(...)
+            if (preg_match_all('/\b([A-Z][a-zA-Z]+Renderer)\s*\(/', $content, $matches, PREG_OFFSET_CAPTURE)) {
+                foreach ($matches[1] as [$renderer, $offset]) {
+                    if ($renderer === 'Renderer' || $this->isTypeDeclaration($content, $offset)) {
+                        continue;
                     }
+                    $deps[] = "{$renderer}.kt";
                 }
             }
 
@@ -89,10 +82,18 @@ class RendererDependencyResolver
             }
         }
 
-        // Remove the file itself if it appears in deps
-        $currentFile = basename($this->sourcePath);
         $deps = array_filter($deps, fn ($dep) => $dep !== $currentFile);
 
         return array_values(array_unique($deps));
+    }
+
+    /**
+     * True when the match at $offset is a type/function declaration, not a use.
+     */
+    protected function isTypeDeclaration(string $content, int $offset): bool
+    {
+        $before = substr($content, max(0, $offset - 24), min(24, $offset));
+
+        return (bool) preg_match('/\b(struct|enum|class|protocol|extension|object|fun)\s+$/', $before);
     }
 }

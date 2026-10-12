@@ -10,8 +10,9 @@ use Native\Mobile\UI\TreeShaking\RendererMapper;
  * Outputs a JSON list of native source files to copy for tree-shaking.
  *
  * Called by NativePHP core during the build process when `manages_native_sources`
- * is true in the plugin manifest. Receives `--platform=ios|android` and prints
- * a JSON array of file paths relative to the plugin's native source directory
+ * is true in the plugin manifest. Receives `--platform=ios|android` (plus the
+ * standard hook flags core always passes) and prints a JSON array of file
+ * paths relative to the plugin's native source directory
  * (resources/ios/ or resources/android/).
  *
  * Tree-shaking modes:
@@ -19,11 +20,19 @@ use Native\Mobile\UI\TreeShaking\RendererMapper;
  *   - all: Return every renderer file
  *   - manual: Use explicitly configured component list
  *
- * On any error, falls back to returning all files rather than failing the build.
+ * On any internal error, prints the full file list and exits 0 rather than
+ * failing the build. Output to stdout is JSON only — any diagnostics go to
+ * stderr so core can json_decode the buffer.
  */
 class NativeSourcesCommand extends Command
 {
-    protected $signature = 'nativephp:native-ui:native-sources {--platform=}';
+    protected $signature = 'nativephp:native-ui:native-sources
+        {--platform= : Target platform (ios or android)}
+        {--build-path= : Native project build path (passed by core, unused)}
+        {--plugin-path= : Plugin path (passed by core, unused)}
+        {--app-id= : Application ID (passed by core, unused)}
+        {--config= : Build config JSON (passed by core, unused)}
+        {--plugins= : Plugin list JSON (passed by core, unused)}';
 
     protected $description = 'Output JSON list of native source files for tree-shaking';
 
@@ -32,49 +41,53 @@ class NativeSourcesCommand extends Command
         $platform = $this->option('platform');
 
         if (! in_array($platform, ['ios', 'android'], true)) {
-            $this->error('Invalid platform. Must be ios or android.');
+            $this->emitJson($this->listAllSourceFiles('android'));
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
         try {
-            $files = $this->getFilesToCopy($platform);
-            $this->line(json_encode($files, JSON_UNESCAPED_SLASHES));
-
-            return self::SUCCESS;
+            $this->emitJson($this->getFilesToCopy($platform));
         } catch (\Throwable $e) {
-            // On error, output all files rather than failing the build
-            $this->error('Error during tree-shaking: '.$e->getMessage(), 'stderr');
-            $files = $this->getAllFiles($platform);
-            $this->line(json_encode($files, JSON_UNESCAPED_SLASHES));
-
-            return self::SUCCESS;
+            fwrite(STDERR, 'Error during tree-shaking: '.$e->getMessage().PHP_EOL);
+            $this->emitJson($this->listAllSourceFiles($platform));
         }
+
+        return self::SUCCESS;
     }
 
+    /**
+     * @return list<string>
+     */
     protected function getFilesToCopy(string $platform): array
     {
         if (! config('native-ui.tree_shaking.enabled', true)) {
-            return $this->getAllFiles($platform);
+            return $this->listAllSourceFiles($platform);
         }
 
         $mode = config('native-ui.tree_shaking.mode', 'auto');
 
         if ($mode === 'all') {
-            return $this->getAllFiles($platform);
+            return $this->listAllSourceFiles($platform);
         }
 
         $usedComponents = $this->detectUsedComponents($mode);
 
         if ($this->shouldFallbackToAll($usedComponents)) {
-            return $this->getAllFiles($platform);
+            return $this->listAllSourceFiles($platform);
         }
 
         $mapper = new RendererMapper($this->getManifestPath());
 
-        return $mapper->getFilesToCopy($usedComponents, $platform);
+        return array_values(array_filter(
+            $mapper->getFilesToCopy($usedComponents, $platform),
+            fn (string $file) => $this->sourceFileExists($platform, $file)
+        ));
     }
 
+    /**
+     * @return list<string>
+     */
     protected function detectUsedComponents(string $mode): array
     {
         if ($mode === 'manual') {
@@ -92,20 +105,43 @@ class NativeSourcesCommand extends Command
             return false;
         }
 
-        // Special marker returned by detector when uncertainty is found
         return in_array('*', $detectedComponents, true);
     }
 
-    protected function getAllFiles(string $platform): array
+    /**
+     * Every native source file for the platform (mode `all` / error fallback).
+     *
+     * @return list<string>
+     */
+    protected function listAllSourceFiles(string $platform): array
     {
-        $mapper = new RendererMapper($this->getManifestPath());
-        $allComponents = $mapper->getAllComponentTypes();
+        $dir = $this->sourceDir($platform);
+        $ext = $platform === 'ios' ? 'swift' : 'kt';
+        $files = is_dir($dir) ? (glob("{$dir}/*.{$ext}") ?: []) : [];
 
-        return $mapper->getFilesToCopy($allComponents, $platform);
+        return array_values(array_map('basename', $files));
+    }
+
+    protected function sourceFileExists(string $platform, string $file): bool
+    {
+        return is_file($this->sourceDir($platform).'/'.$file);
+    }
+
+    protected function sourceDir(string $platform): string
+    {
+        return dirname(__DIR__, 2)."/resources/{$platform}";
     }
 
     protected function getManifestPath(): string
     {
         return dirname(__DIR__, 2).'/nativephp.json';
+    }
+
+    /**
+     * @param  list<string>  $files
+     */
+    protected function emitJson(array $files): void
+    {
+        $this->output->writeln(json_encode(array_values($files), JSON_UNESCAPED_SLASHES));
     }
 }

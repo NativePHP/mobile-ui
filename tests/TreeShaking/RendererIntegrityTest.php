@@ -1,50 +1,46 @@
 <?php
 
 use Native\Mobile\UI\TreeShaking\RendererDependencyResolver;
+use Native\Mobile\UI\TreeShaking\RendererMapper;
 
-it('verifies all iOS renderer references are declared in manifest or shared files', function () {
-    $manifestPath = dirname(__DIR__, 2).'/nativephp.json';
-    $manifest = json_decode(file_get_contents($manifestPath), true);
+function treeShakingManifest(): array
+{
+    return json_decode(file_get_contents(dirname(__DIR__, 2).'/nativephp.json'), true);
+}
 
-    // Build list of all valid iOS renderer names
-    $validRenderers = [];
+function rendererClassIndex(string $platform): array
+{
+    $ext = $platform === 'ios' ? 'swift' : 'kt';
+    $dir = dirname(__DIR__, 2)."/resources/{$platform}";
+    $index = [];
 
-    // From manifest
-    foreach ($manifest['components'] ?? [] as $component) {
-        if (isset($component['ios_renderer'])) {
-            $validRenderers[] = $component['ios_renderer'].'.swift';
+    foreach (glob("{$dir}/*.{$ext}") ?: [] as $path) {
+        $content = (string) file_get_contents($path);
+        if (preg_match_all(
+            '/\b(?:struct|enum|class|protocol|extension|object|fun)\s+([A-Z][a-zA-Z]+Renderer)\b/',
+            $content,
+            $matches
+        )) {
+            foreach ($matches[1] as $className) {
+                $index[$className] ??= basename($path);
+            }
         }
     }
 
-    // Shared files (always included)
-    $sharedFiles = [
-        'NativeUITheme.swift',
-        'NativeUIFontResolver.swift',
-        'NativeUIDrawerHost.swift',
-        'NativeUIFloatingOverlayHost.swift',
-        'NativeUIBackgroundLayerHost.swift',
-        'NativeUITransitionFunctions.swift',
-        'NativeUIFillWidthHelper.swift',
-        'NativeUINavRenderers.swift',
-        'NativeUITextInputCore.swift',
-        'NativeUIButtonPreviews.swift',
-    ];
+    return $index;
+}
 
-    $validRenderers = array_merge($validRenderers, $sharedFiles);
-
-    // Scan all iOS renderer files
+it('verifies all iOS renderer references are defined in a source file', function () {
     $iosPath = dirname(__DIR__, 2).'/resources/ios';
+    $index = rendererClassIndex('ios');
     $resolver = new RendererDependencyResolver($iosPath, 'ios');
-
-    $allFiles = glob("{$iosPath}/*.swift");
     $undeclaredRefs = [];
 
-    foreach ($allFiles as $file) {
+    foreach (glob("{$iosPath}/*.swift") ?: [] as $file) {
         $filename = basename($file);
-        $deps = $resolver->getDependencies($filename);
-
-        foreach ($deps as $dep) {
-            if (! in_array($dep, $validRenderers, true)) {
+        foreach ($resolver->getDependencies($filename) as $dep) {
+            $className = pathinfo($dep, PATHINFO_FILENAME);
+            if (! isset($index[$className]) && ! is_file("{$iosPath}/{$dep}")) {
                 $undeclaredRefs[] = "{$filename} references {$dep}";
             }
         }
@@ -55,54 +51,17 @@ it('verifies all iOS renderer references are declared in manifest or shared file
     );
 });
 
-it('verifies all Android renderer references are declared in manifest or shared files', function () {
-    $manifestPath = dirname(__DIR__, 2).'/nativephp.json';
-    $manifest = json_decode(file_get_contents($manifestPath), true);
-
-    // Build list of all valid Android renderer names
-    $validRenderers = [];
-
-    // From manifest
-    foreach ($manifest['components'] ?? [] as $component) {
-        if (isset($component['android_renderer'])) {
-            $parts = explode('.', $component['android_renderer']);
-            $className = end($parts);
-            $validRenderers[] = $className.'.kt';
-        }
-    }
-
-    // Shared files (always included)
-    $sharedFiles = [
-        'NativeUITheme.kt',
-        'NativeUIFontResolver.kt',
-        'NativeUIChromeInit.kt',
-        'NativeLayoutDrawerHost.kt',
-        'NativeFloatingOverlayHost.kt',
-        'NativeUIBackgroundLayerHost.kt',
-        'NativeUITransitionFunctions.kt',
-        'TextInputShared.kt',
-        'NativeUIImageSource.kt',
-        'ContainerRenderers.kt',
-        'SimpleRenderers.kt',
-        'ImageRenderer.kt',
-        'ButtonPreviews.kt',
-    ];
-
-    $validRenderers = array_merge($validRenderers, $sharedFiles);
-
-    // Scan all Android renderer files
+it('verifies all Android renderer references are defined in a source file', function () {
     $androidPath = dirname(__DIR__, 2).'/resources/android';
+    $index = rendererClassIndex('android');
     $resolver = new RendererDependencyResolver($androidPath, 'android');
-
-    $allFiles = glob("{$androidPath}/*.kt");
     $undeclaredRefs = [];
 
-    foreach ($allFiles as $file) {
+    foreach (glob("{$androidPath}/*.kt") ?: [] as $file) {
         $filename = basename($file);
-        $deps = $resolver->getDependencies($filename);
-
-        foreach ($deps as $dep) {
-            if (! in_array($dep, $validRenderers, true)) {
+        foreach ($resolver->getDependencies($filename) as $dep) {
+            $className = pathinfo($dep, PATHINFO_FILENAME);
+            if (! isset($index[$className]) && ! is_file("{$androidPath}/{$dep}")) {
                 $undeclaredRefs[] = "{$filename} references {$dep}";
             }
         }
@@ -113,33 +72,71 @@ it('verifies all Android renderer references are declared in manifest or shared 
     );
 });
 
-it('verifies all manifest components have corresponding renderer files', function () {
-    $manifestPath = dirname(__DIR__, 2).'/nativephp.json';
-    $manifest = json_decode(file_get_contents($manifestPath), true);
-
+it('verifies all manifest components resolve to an existing renderer file', function () {
+    $mapper = new RendererMapper(dirname(__DIR__, 2).'/nativephp.json');
     $missingFiles = [];
 
-    foreach ($manifest['components'] ?? [] as $component) {
-        // Check iOS
-        if (isset($component['ios_renderer'])) {
-            $file = dirname(__DIR__, 2)."/resources/ios/{$component['ios_renderer']}.swift";
-            if (! file_exists($file)) {
-                $missingFiles[] = "iOS: {$component['type']} -> {$component['ios_renderer']}.swift";
-            }
-        }
+    foreach (treeShakingManifest()['components'] ?? [] as $component) {
+        $type = $component['type'];
+        foreach (['ios', 'android'] as $platform) {
+            $files = $mapper->getFilesToCopy([$type], $platform);
+            $ext = $platform === 'ios' ? 'swift' : 'kt';
+            $dir = dirname(__DIR__, 2)."/resources/{$platform}";
+            $existing = array_filter($files, fn ($file) => is_file("{$dir}/{$file}"));
 
-        // Check Android
-        if (isset($component['android_renderer'])) {
-            $parts = explode('.', $component['android_renderer']);
-            $className = end($parts);
-            $file = dirname(__DIR__, 2)."/resources/android/{$className}.kt";
-            if (! file_exists($file)) {
-                $missingFiles[] = "Android: {$component['type']} -> {$className}.kt";
+            expect($existing)->not->toBeEmpty("No existing {$platform} files for component {$type}");
+
+            foreach ($existing as $file) {
+                if (! str_ends_with($file, ".{$ext}")) {
+                    $missingFiles[] = "{$platform}: {$type} -> {$file}";
+                }
             }
         }
     }
 
     expect($missingFiles)->toBeEmpty(
-        'Manifest references missing renderer files: '.implode(', ', $missingFiles)
+        'Manifest resolved to unexpected renderer files: '.implode(', ', $missingFiles)
     );
+});
+
+it('fails when a renderer references another renderer that is not defined anywhere', function () {
+    $dir = sys_get_temp_dir().'/integrity_break_'.uniqid();
+    mkdir($dir, 0755, true);
+    file_put_contents("{$dir}/NativeUIRadioGroupRenderer.swift", <<<'SWIFT'
+struct NativeUIRadioGroupRenderer: View {
+    var body: some View {
+        NativeUIRadioRenderer(node: child)
+    }
+}
+SWIFT);
+
+    $resolver = new RendererDependencyResolver($dir, 'ios');
+    $deps = $resolver->getDependencies('NativeUIRadioGroupRenderer.swift');
+
+    expect($deps)->toContain('NativeUIRadioRenderer.swift');
+
+    $defined = [];
+    foreach (glob("{$dir}/*.swift") ?: [] as $path) {
+        $content = (string) file_get_contents($path);
+        if (preg_match_all('/\b(?:struct|enum|class)\s+(NativeUI[A-Z][a-zA-Z]+Renderer)\b/', $content, $matches)) {
+            foreach ($matches[1] as $className) {
+                $defined[$className] = true;
+            }
+        }
+    }
+
+    $undeclared = [];
+    foreach ($deps as $dep) {
+        $className = pathinfo($dep, PATHINFO_FILENAME);
+        if (! isset($defined[$className])) {
+            $undeclared[] = "NativeUIRadioGroupRenderer.swift references {$dep}";
+        }
+    }
+
+    expect($undeclared)->not->toBeEmpty();
+
+    foreach (glob("{$dir}/*") ?: [] as $file) {
+        @unlink($file);
+    }
+    @rmdir($dir);
 });
