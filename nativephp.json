@@ -520,7 +520,9 @@
             "pods": []
         }
     },
+    "manages_native_sources": true,
     "hooks": {
-        "copy_assets": "nativephp:native-ui:copy-fonts"
+        "copy_assets": "nativephp:native-ui:copy-fonts",
+        "native_sources": "nativephp:native-ui:native-sources"
     }
 }
