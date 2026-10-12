@@ -170,6 +170,10 @@ class ComponentDetector
             '/.git/',
             '/node_modules/',
             '/vendor/bin/',
+            // Core and this plugin's own sources use dynamic PHP (`new $class`)
+            // that is not app component usage. Scanning them forces mode=all.
+            '/vendor/nativephp/mobile/',
+            '/vendor/nativephp/mobile-ui/',
         ] as $skip) {
             if (str_contains($normalized, $skip)) {
                 return true;

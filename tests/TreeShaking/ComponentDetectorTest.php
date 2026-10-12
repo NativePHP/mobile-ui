@@ -88,6 +88,25 @@ PHP,
         ->and($components)->not->toBe(['*']);
 });
 
+it('does not treat nativephp/mobile framework sources as uncertainty', function () {
+    $tempDir = createTempAppStructure([
+        'resources/views/welcome.blade.php' => '<native:button /><native:text />',
+        'vendor/nativephp/mobile/src/Edge/NativeComponent.php' => <<<'PHP'
+<?php
+namespace Native\Mobile\Edge;
+use Native\Mobile\Edge\Element;
+new $class;
+PHP,
+    ]);
+
+    $detector = new ComponentDetector($tempDir);
+    $components = $detector->detect();
+
+    expect($components)->toContain('button')
+        ->and($components)->toContain('text')
+        ->and($components)->not->toBe(['*']);
+});
+
 it('still detects Element usage in vendor package source', function () {
     $tempDir = createTempAppStructure([
         'vendor/acme/widgets/src/Card.php' => <<<'PHP'
