@@ -119,18 +119,27 @@ private struct PagerBody: View {
             }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $position)
+            // On a non-lazy stack SwiftUI ignores the initial value of
+            // `position` (seen on iOS 18.6 and 26.2), so the pager opened
+            // at page 0. The initial anchor puts the start page in place in
+            // the first layout: page 0 never shows and is never reported.
+            .defaultScrollAnchor(startAnchor, for: .initialOffset)
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
             .contentMargins(0)
             // `visibleRect` is inset-adjusted: its origin is 0 on page 0
             // and its length is the viewport, whatever the bar insets are.
-            .onScrollGeometryChange(for: Int.self) { geometry in
+            // Before the first layout the pager has no size. That is no
+            // page yet, not page 0: reported as page 0, PHP would think the
+            // user had left the start page.
+            .onScrollGeometryChange(for: Int?.self) { geometry in
                 let visible = geometry.visibleRect
                 let length = horizontal ? visible.width : visible.height
-                guard length > 0, count > 0 else { return 0 }
+                guard length > 0, count > 0 else { return nil }
                 let offset = horizontal ? visible.minX : visible.minY
                 return min(count - 1, max(0, Int((offset / length).rounded())))
             } action: { _, page in
+                guard let page else { return }
                 leading = page
                 // Report the moment a page becomes the nearest one, mid-swipe,
                 // so PHP's round-trip overlaps the animation instead of
@@ -152,6 +161,13 @@ private struct PagerBody: View {
                 position = page
             }
         }
+    }
+
+    /// The start page as a point of the scroll range. Every page is one
+    /// viewport long, so page `n` of `count` sits at `n / (count - 1)`.
+    private var startAnchor: UnitPoint {
+        let fraction = count > 1 ? CGFloat(requestedPage) / CGFloat(count - 1) : 0
+        return horizontal ? UnitPoint(x: fraction, y: 0) : UnitPoint(x: 0, y: fraction)
     }
 
     /// Deliberately NOT a lazy stack. Only the shipped window (a handful
