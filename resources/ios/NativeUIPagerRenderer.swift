@@ -113,10 +113,18 @@ private struct PagerBody: View {
         // both size pages against the extended container and drift by
         // the inset on every swipe.)
         GeometryReader { geo in
+            // A horizontal pager runs under a bar at the bottom of the
+            // screen (a tab bar), as a screen's own list does. Its pages
+            // take the full height and hand the bar's inset back to their
+            // content as safe area, so a list in a page draws under the
+            // bar and still scrolls its last row clear of it. Paging is
+            // sideways, so the extra height can't make the pages drift.
+            let bottomInset = horizontal ? geo.safeAreaInsets.bottom : 0
             ScrollView(axis) {
-                pages(size: geo.size)
+                pages(size: CGSize(width: geo.size.width, height: geo.size.height + bottomInset), bottomInset: bottomInset)
                     .scrollTargetLayout()
             }
+            .ignoresSafeArea(.container, edges: horizontal ? .bottom : [])
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $position)
             .scrollIndicators(.hidden)
@@ -166,15 +174,15 @@ private struct PagerBody: View {
     /// stack expensive, so they only exist within `placeholderRadius` of
     /// the current page; further slots are clear until scrolled towards.
     @ViewBuilder
-    private func pages(size: CGSize) -> some View {
+    private func pages(size: CGSize, bottomInset: CGFloat) -> some View {
         if horizontal {
-            HStack(spacing: 0) { pageViews(size: size) }
+            HStack(spacing: 0) { pageViews(size: size, bottomInset: bottomInset) }
         } else {
-            VStack(spacing: 0) { pageViews(size: size) }
+            VStack(spacing: 0) { pageViews(size: size, bottomInset: bottomInset) }
         }
     }
 
-    private func pageViews(size: CGSize) -> some View {
+    private func pageViews(size: CGSize, bottomInset: CGFloat) -> some View {
         ForEach(0..<count, id: \.self) { index in
             Group {
                 if let child = pageByIndex[index] {
@@ -191,6 +199,7 @@ private struct PagerBody: View {
                         .accessibilityHidden(true)
                 }
             }
+            .safeAreaPadding(.bottom, bottomInset)
             .frame(width: size.width, height: size.height)
             .clipped()
             .id(index)
