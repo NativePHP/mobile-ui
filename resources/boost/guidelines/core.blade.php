@@ -59,13 +59,18 @@ paths serialize to the same wire tree.
   `pickDateTime()` / `clearPicker()` macros and assert with
   `assertPicker()` / `assertPickerValue()` / `assertPickerEmpty()`.
 - For Sign in with Apple, use `<native:sign-in-with-apple-button
-  @tap="signInWithApple" />`, never a `<native:button>` with an Apple logo:
-  iOS draws Apple's own button, which is what App Review expects. `label` is
-  `sign-in` (default) / `continue` / `sign-up` (NOT free text), and
+  :nonce="$nonce" />`, never a `<native:button>` with an Apple logo: iOS draws
+  SwiftUI's `SignInWithAppleButton`, which is what App Review expects. Tapping
+  it runs the Apple ID request itself, so don't also start one from a plugin.
+  Listen for the result with `#[On(SignInWithAppleCompleted::class)]` and
+  `#[On(SignInWithAppleFailed::class)]` (`Native\Mobile\UI\Events`). Pass a
+  fresh RAW `nonce` per attempt: Apple gets its SHA-256 hex and the completed
+  event echoes the raw value. `scopes` is any of `email` / `full-name`. `label`
+  is `sign-in` (default) / `continue` / `sign-up` (NOT free text), and
   `button-style` is `auto` (default, black in light mode and white in dark) /
-  `black` / `white` / `white-outline`. The tap only calls the handler; start
-  the sign-in there with your auth plugin. Apple has no button on Android, so
-  nothing renders there unless you give the tag children as a fallback.
+  `black` / `white` / `white-outline`. The app still needs the Sign in with
+  Apple entitlement from a plugin. Apple has no button on Android, so nothing
+  renders there unless you give the tag children as a fallback.
 
 @verbatim
 <code-snippet name="Declaring native elements in Blade" lang="blade">

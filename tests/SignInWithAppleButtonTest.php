@@ -7,11 +7,14 @@ use Native\Mobile\Edge\NativeTagPrecompiler;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\UI\Elements\Button;
 use Native\Mobile\UI\Elements\SignInWithAppleButton;
+use Native\Mobile\UI\Events\SignInWithAppleCompleted;
+use Native\Mobile\UI\Events\SignInWithAppleFailed;
 
 /**
- * Apple's Sign in with Apple button. The renderers draw the system button
- * from `label` / `button_style` / `corner_radius` and only fire `on_press`;
- * the app runs the sign-in itself.
+ * Apple's Sign in with Apple button. iOS draws SwiftUI's button from `label`,
+ * `button_style` and `corner_radius`, runs the Apple ID request with `scopes`,
+ * `nonce` and `state`, fires `on_press` as it starts, and sends the answer
+ * back as a SignInWithAppleCompleted or SignInWithAppleFailed native event.
  */
 beforeEach(function () {
     NativeElementCollector::reset();
@@ -93,6 +96,58 @@ it('accepts each style', function (string $style, string $wire) {
     ['white-outline', 'white_outline'],
     ['whiteOutline', 'white_outline'],
 ]);
+
+it('sends the scopes, nonce and state for the request', function () {
+    $tree = appleButtonTree(
+        '<native:sign-in-with-apple-button :scopes="[\'email\', \'full-name\']" nonce="raw-nonce" state="link" />',
+        new CallbackRegistry,
+    );
+
+    expect($tree['props'])->toMatchArray([
+        'scopes' => ['email', 'full_name'],
+        'nonce' => 'raw-nonce',
+        'state' => 'link',
+    ]);
+});
+
+it('takes scopes as a comma list in any spelling, once each', function () {
+    $tree = appleButtonTree('<native:sign-in-with-apple-button scopes="fullName, email, full_name" />', new CallbackRegistry);
+
+    expect($tree['props']['scopes'])->toBe(['full_name', 'email']);
+});
+
+it('rejects a scope Apple has no data for', function () {
+    SignInWithAppleButton::make()->scopes(['phone']);
+})->throws(InvalidArgumentException::class, 'SignInWithAppleButton `scopes` must be one of [email, full-name], got [phone].');
+
+it('sends results with the names the event constructors take', function (string $event, string $class) {
+    // The renderer builds each payload by hand, and core binds payload keys to
+    // constructor parameters by name, so a renamed key would silently be lost.
+    $swift = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUISignInWithAppleButtonRenderer.swift');
+    preg_match_all('/send\?\('.$event.', \[(.*?)\]\)/s', $swift, $payloads);
+    $parameters = array_map(fn (ReflectionParameter $parameter): string => $parameter->getName(), (new ReflectionMethod($class, '__construct'))->getParameters());
+
+    expect($payloads[1])->not->toBeEmpty()
+        ->and(str_contains($swift, '"'.str_replace('\\', '\\\\', $class).'"'))->toBeTrue();
+
+    foreach ($payloads[1] as $payload) {
+        preg_match_all('/"(\w+)":/', $payload, $keys);
+
+        expect(array_diff($keys[1], $parameters))->toBe([]);
+    }
+})->with([
+    'completed' => ['completedEvent', SignInWithAppleCompleted::class],
+    'failed' => ['failedEvent', SignInWithAppleFailed::class],
+]);
+
+it('builds the events from a native payload', function () {
+    $completed = new SignInWithAppleCompleted(userId: '001234.abcd', identityToken: 'eyJ...', nonce: 'raw-nonce', state: 'link', realUserStatus: 'likely_real');
+    $failed = new SignInWithAppleFailed(code: SignInWithAppleFailed::Canceled, message: 'The user canceled the authorization attempt.');
+
+    expect([$completed->userId, $completed->identityToken, $completed->email, $completed->nonce, $completed->state, $completed->realUserStatus])
+        ->toBe(['001234.abcd', 'eyJ...', null, 'raw-nonce', 'link', 'likely_real'])
+        ->and([$failed->code, $failed->state])->toBe(['canceled', null]);
+});
 
 it('rejects a label Apple has no title for', function () {
     SignInWithAppleButton::make()->label('Sign in with Apple');

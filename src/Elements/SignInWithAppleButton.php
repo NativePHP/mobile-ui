@@ -7,22 +7,27 @@ use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
 
 /**
- * Apple's own Sign in with Apple button.
+ * Apple's own Sign in with Apple button: SwiftUI's `SignInWithAppleButton`
+ * on iOS, so the logo, title, font and proportions are always the ones App
+ * Review expects.
  *
- * Draws the system button on iOS (`ASAuthorizationAppleIDButton`), so the
- * logo, title, font and proportions are always the ones App Review expects.
- * A tap only fires `@press`. The element never talks to Apple itself: the
- * press handler starts the sign-in, usually through a social auth plugin.
+ * Tapping it runs the Apple ID request, as the system button always does.
+ * The answer arrives as a native event, `SignInWithAppleCompleted` or
+ * `SignInWithAppleFailed`, which a component listens for with `#[On(...)]`.
+ * `@press` is called as the request starts.
  *
  * Apple has no button on Android, so nothing is drawn there unless the tag
  * has children, which then render as an Android-only fallback.
  *
  *   - `label`: sign-in (default) | continue | sign-up
  *   - `button-style`: auto (default; black in light mode, white in dark) | black | white | white-outline
- *   - `corner-radius`: points, or a `rounded-*` class. The system default when unset.
+ *   - `scopes`: any of email, full-name. None by default.
+ *   - `nonce`: a raw nonce. Apple gets its SHA-256 hex; the completed event echoes the raw value.
+ *   - `state`: echoed on both events.
+ *   - `corner-radius`: points, or a `rounded-*` class. Rounder than the system's corners, up to a capsule.
  *   - `height`: points, or an `h-*` class. 44 when unset.
  *   - `disabled`
- *   - `@press`: tap callback
+ *   - `@press`: called as the request starts
  */
 class SignInWithAppleButton extends Element
 {
@@ -31,6 +36,9 @@ class SignInWithAppleButton extends Element
 
     /** Colours. `auto` (the default) is black in light mode and white in dark mode. */
     public const BUTTON_STYLES = ['auto', 'black', 'white', 'white-outline'];
+
+    /** What to ask Apple for besides the user id. Apple only sends them on the first sign-in. */
+    public const SCOPES = ['email', 'full-name'];
 
     protected string $type = 'sign_in_with_apple_button';
 
@@ -52,6 +60,15 @@ class SignInWithAppleButton extends Element
         $buttonStyle = $attrs['button-style'] ?? $attrs['buttonStyle'] ?? null;
         if ($buttonStyle !== null) {
             $this->buttonStyle((string) $buttonStyle);
+        }
+        if (isset($attrs['scopes'])) {
+            $this->scopes(is_array($attrs['scopes']) ? $attrs['scopes'] : explode(',', (string) $attrs['scopes']));
+        }
+        if (isset($attrs['nonce'])) {
+            $this->nonce((string) $attrs['nonce']);
+        }
+        if (isset($attrs['state'])) {
+            $this->state((string) $attrs['state']);
         }
 
         // `rounded-*` classes arrive as `borderRadius`; the attribute wins.
@@ -82,7 +99,46 @@ class SignInWithAppleButton extends Element
         return $this;
     }
 
-    /** Corner radius in points. A radius of half the height or more draws a capsule. */
+    /**
+     * Ask for the user's email and/or name: any of email, full-name.
+     *
+     * @param  list<string>  $scopes
+     */
+    public function scopes(array $scopes): static
+    {
+        $this->buttonProps['scopes'] = array_values(array_unique(array_map(
+            fn (string $scope): string => $this->oneOf($scope, self::SCOPES, 'scopes'),
+            array_filter(array_map('trim', $scopes), fn (string $scope): bool => $scope !== ''),
+        )));
+
+        return $this;
+    }
+
+    /**
+     * The raw nonce for this attempt. Apple gets its SHA-256 hex, so the
+     * identity token carries the hash, and the completed event echoes the raw
+     * value for your server to check against the token.
+     */
+    public function nonce(string $nonce): static
+    {
+        $this->buttonProps['nonce'] = $nonce;
+
+        return $this;
+    }
+
+    /** An opaque value echoed back on both events. */
+    public function state(string $state): static
+    {
+        $this->buttonProps['state'] = $state;
+
+        return $this;
+    }
+
+    /**
+     * Corner radius in points. SwiftUI's button can only be clipped, so this
+     * rounds the corners more than the system does, up to a capsule at half
+     * the height or more. It can't make them squarer.
+     */
     public function cornerRadius(float $radius): static
     {
         $this->buttonProps['corner_radius'] = max(0.0, $radius);
@@ -98,8 +154,9 @@ class SignInWithAppleButton extends Element
     }
 
     /**
-     * Rides the props as `on_press` rather than the node's press field, so
-     * core doesn't wrap the button in a second tap gesture.
+     * Called as the Apple ID request starts. Rides the props as `on_press`
+     * rather than the node's press field, so core doesn't wrap the button in
+     * a second tap gesture.
      */
     public function onPress(string $method): static
     {
