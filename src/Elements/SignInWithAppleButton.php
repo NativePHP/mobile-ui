@@ -22,7 +22,7 @@ use Native\Mobile\Edge\Element;
  *   - `label`: sign-in (default) | continue | sign-up
  *   - `button-style`: auto (default; black in light mode, white in dark) | black | white | white-outline
  *   - `scopes`: any of email, full-name. None by default.
- *   - `nonce`: a raw nonce. Apple gets its SHA-256 hex; the completed event echoes the raw value.
+ *   - `nonce`: sent to Apple as given (usually the SHA-256 of a raw nonce you keep) and echoed on the completed event.
  *   - `state`: echoed on both events.
  *   - `corner-radius`: points, or a `rounded-*` class. Rounder than the system's corners, up to a capsule.
  *   - `height`: points, or an `h-*` class. 44 when unset.
@@ -115,9 +115,10 @@ class SignInWithAppleButton extends Element
     }
 
     /**
-     * The raw nonce for this attempt. Apple gets its SHA-256 hex, so the
-     * identity token carries the hash, and the completed event echoes the raw
-     * value for your server to check against the token.
+     * The nonce for this attempt, sent to Apple as given and echoed on the
+     * completed event. Pass the SHA-256 hex of a raw nonce you keep in memory:
+     * Apple's identity token carries the hash, your server checks it against
+     * the raw value, and the raw value never sits in the rendered tree.
      */
     public function nonce(string $nonce): static
     {

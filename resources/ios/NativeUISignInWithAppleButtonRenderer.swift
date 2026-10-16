@@ -1,5 +1,4 @@
 import AuthenticationServices
-import CryptoKit
 import SwiftUI
 
 /// SwiftUI's own `SignInWithAppleButton`. Tapping it runs the Apple ID
@@ -14,8 +13,9 @@ import SwiftUI
 ///   - `corner_radius`: points, clamped to half the height (a capsule).
 ///     The system default when absent.
 ///   - `scopes`: any of `email`, `full_name`. None by default.
-///   - `nonce`: the raw nonce. Apple gets its SHA-256 hex, and the raw value
-///     comes back on the completed event, for the server to check.
+///   - `nonce`: sent to Apple as given, and echoed on the completed event.
+///     Apps pass the SHA-256 of a raw nonce they keep, so the raw value
+///     never sits in the UI tree; Apple's identity token carries the hash.
 ///   - `state`: echoed back on both events.
 ///   - `disabled`
 ///   - `a11y_label`, `a11y_hint`: override the system's VoiceOver text.
@@ -48,7 +48,7 @@ struct NativeUISignInWithAppleButtonRenderer: View {
         SignInWithAppleButton(Self.label(p.getString("label", default: "sign_in"))) { request in
             request.requestedScopes = scopes.compactMap(Self.scope)
             if !nonce.isEmpty {
-                request.nonce = Self.sha256Hex(nonce)
+                request.nonce = nonce
             }
             if !state.isEmpty {
                 request.state = state
@@ -107,10 +107,6 @@ struct NativeUISignInWithAppleButtonRenderer: View {
         case "full_name": return .fullName
         default: return nil
         }
-    }
-
-    static func sha256Hex(_ input: String) -> String {
-        SHA256.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Sends the result to PHP as a native event. Optional values go as null.

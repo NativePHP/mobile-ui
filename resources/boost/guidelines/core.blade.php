@@ -64,8 +64,9 @@ paths serialize to the same wire tree.
   it runs the Apple ID request itself, so don't also start one from a plugin.
   Listen for the result with `#[On(SignInWithAppleCompleted::class)]` and
   `#[On(SignInWithAppleFailed::class)]` (`Native\Mobile\UI\Events`). Pass a
-  fresh RAW `nonce` per attempt: Apple gets its SHA-256 hex and the completed
-  event echoes the raw value. `scopes` is any of `email` / `full-name`. `label`
+  fresh `nonce` per attempt, the SHA-256 hex of a raw nonce you keep in memory
+  (never the raw value): it goes to Apple as given and the completed event
+  echoes it back. `scopes` is any of `email` / `full-name`. `label`
   is `sign-in` (default) / `continue` / `sign-up` (NOT free text), and
   `button-style` is `auto` (default, black in light mode and white in dark) /
   `black` / `white` / `white-outline`. The app still needs the Sign in with

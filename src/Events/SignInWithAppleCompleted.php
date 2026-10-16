@@ -23,7 +23,7 @@ class SignInWithAppleCompleted
         public ?string $email = null,
         public ?string $givenName = null,
         public ?string $familyName = null,
-        /** The raw nonce the button was given. Apple's token carries its SHA-256 hex. */
+        /** The nonce the button was given, which Apple's identity token also carries. */
         #[SensitiveParameter] public ?string $nonce = null,
         public ?string $state = null,
         /** likely_real, unknown or unsupported. */

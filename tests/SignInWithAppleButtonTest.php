@@ -99,13 +99,13 @@ it('accepts each style', function (string $style, string $wire) {
 
 it('sends the scopes, nonce and state for the request', function () {
     $tree = appleButtonTree(
-        '<native:sign-in-with-apple-button :scopes="[\'email\', \'full-name\']" nonce="raw-nonce" state="link" />',
+        '<native:sign-in-with-apple-button :scopes="[\'email\', \'full-name\']" nonce="hashed-nonce" state="link" />',
         new CallbackRegistry,
     );
 
     expect($tree['props'])->toMatchArray([
         'scopes' => ['email', 'full_name'],
-        'nonce' => 'raw-nonce',
+        'nonce' => 'hashed-nonce',
         'state' => 'link',
     ]);
 });
@@ -141,11 +141,11 @@ it('sends results with the names the event constructors take', function (string 
 ]);
 
 it('builds the events from a native payload', function () {
-    $completed = new SignInWithAppleCompleted(userId: '001234.abcd', identityToken: 'eyJ...', nonce: 'raw-nonce', state: 'link', realUserStatus: 'likely_real');
+    $completed = new SignInWithAppleCompleted(userId: '001234.abcd', identityToken: 'eyJ...', nonce: 'hashed-nonce', state: 'link', realUserStatus: 'likely_real');
     $failed = new SignInWithAppleFailed(code: SignInWithAppleFailed::Canceled, message: 'The user canceled the authorization attempt.');
 
     expect([$completed->userId, $completed->identityToken, $completed->email, $completed->nonce, $completed->state, $completed->realUserStatus])
-        ->toBe(['001234.abcd', 'eyJ...', null, 'raw-nonce', 'link', 'likely_real'])
+        ->toBe(['001234.abcd', 'eyJ...', null, 'hashed-nonce', 'link', 'likely_real'])
         ->and([$failed->code, $failed->state])->toBe(['canceled', null]);
 });
 
