@@ -58,6 +58,14 @@ paths serialize to the same wire tree.
 - In tests, drive pickers with the `pickDate()` / `pickTime()` /
   `pickDateTime()` / `clearPicker()` macros and assert with
   `assertPicker()` / `assertPickerValue()` / `assertPickerEmpty()`.
+- For Sign in with Apple, use `<native:sign-in-with-apple-button
+  @tap="signInWithApple" />`, never a `<native:button>` with an Apple logo:
+  iOS draws Apple's own button, which is what App Review expects. `label` is
+  `sign-in` (default) / `continue` / `sign-up` (NOT free text), and
+  `button-style` is `auto` (default, black in light mode and white in dark) /
+  `black` / `white` / `white-outline`. The tap only calls the handler; start
+  the sign-in there with your auth plugin. Apple has no button on Android, so
+  nothing renders there unless you give the tag children as a fallback.
 
 @verbatim
 <code-snippet name="Declaring native elements in Blade" lang="blade">
