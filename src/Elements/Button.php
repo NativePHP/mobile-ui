@@ -144,13 +144,15 @@ class Button extends Element
     {
         $this->buttonProps['variant'] = $value;
 
-        foreach (['tint', 'on_tint'] as $prop) {
+        foreach (['tint_color', 'label_color'] as $prop) {
             unset($this->buttonProps[$prop], $this->buttonProps['dark_'.$prop]);
         }
 
+        // The label's colour can't be `on_tint`: the bridge sends any prop
+        // starting with `on_` as a callback.
         if (! in_array($value, self::Variants, true) && is_string(Theme::get("light.{$value}"))) {
-            $this->tokenColor('tint', $value);
-            $this->tokenColor('on_tint', is_string(Theme::get("light.on-{$value}")) ? "on-{$value}" : 'on-primary');
+            $this->tokenColor('tint_color', $value);
+            $this->tokenColor('label_color', is_string(Theme::get("light.on-{$value}")) ? "on-{$value}" : 'on-primary');
         }
 
         return $this;
