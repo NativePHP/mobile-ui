@@ -422,6 +422,22 @@
             "self_closing": false
         },
         {
+            "type": "pager_header",
+            "element": "Native\\Mobile\\UI\\Elements\\PagerHeader",
+            "blade": "Native\\Mobile\\UI\\Components\\PagerHeader",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
+        },
+        {
+            "type": "pager_overlay",
+            "element": "Native\\Mobile\\UI\\Elements\\PagerOverlay",
+            "blade": "Native\\Mobile\\UI\\Components\\PagerOverlay",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
+        },
+        {
             "type": "carousel",
             "element": "Native\\Mobile\\UI\\Elements\\Carousel",
             "blade": "Native\\Mobile\\UI\\Components\\Carousel",

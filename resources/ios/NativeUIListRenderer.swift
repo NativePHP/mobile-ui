@@ -28,6 +28,10 @@ private func colorFromHex(_ hex: String) -> Color? {
 struct NativeUIListRenderer: View {
     let node: NativeUINode
 
+    /// Set when this list is a page of a pager with a header, which the list
+    /// draws above its rows (see NativeUIPagerHeader).
+    @Environment(\.nativeUIPagerHeader) private var pagerHeader
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
@@ -42,7 +46,7 @@ struct NativeUIListRenderer: View {
         // Sectioned lists adopt the inset-grouped look by default (matching
         // SwiftUI's grouped style); `->plain()` opts back to plain rows.
         let hasSections = children.contains { $0.type == "list_section" }
-        let grouped = hasSections && !node.props.getBool("plain")
+        let grouped = hasSections && !node.props.getBool("plain") && pagerHeader == nil
 
         // A `sticky_header` pins once it reaches the top. Only a plain List's
         // section headers pin, so each sticky header heads a section of the
@@ -65,7 +69,31 @@ struct NativeUIListRenderer: View {
             }
         } else {
             List {
-                if hasStickyHeaders {
+                if let pagerHeader {
+                    // The header, then every row in one section under the
+                    // pager's tabs, which pin once the header has gone. The
+                    // rows of any list sections go in it too: a section in a
+                    // section isn't a thing.
+                    NativeUIPagerHeaderRow(header: pagerHeader)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    Section {
+                        ForEach(Self.leafRows(children)) { row in
+                            rowView(row, separator: separator)
+                                .onAppear {
+                                    fireEndReached(rowId: row.id, leafIndex: leafIndex,
+                                                   leafCount: leafCount, buffer: endReachedBuffer,
+                                                   cb: onEndReachedCb, nodeId: nodeId)
+                                }
+                        }
+                    } header: {
+                        if pagerHeader.hasTabs {
+                            NativeUIPagerHeaderStrip(header: pagerHeader)
+                                .listRowInsets(EdgeInsets())
+                        }
+                    }
+                } else if hasStickyHeaders {
                     let (leading, groups) = Self.stickyGroups(children)
                     ForEach(leading) { child in
                         rowView(child, separator: separator)
@@ -135,7 +163,15 @@ struct NativeUIListRenderer: View {
             // static settings/forms where it does nothing. Android's renderer
             // already gates its PullToRefreshBox the same way.
             .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId))
+            .modifier(NativeUIPagerHeaderListModifier(header: pagerHeader))
+            // Only this list draws the header, not one in its rows.
+            .environment(\.nativeUIPagerHeader, nil)
         }
+    }
+
+    /// The rows of a list, with each list section's rows in its place.
+    private static func leafRows(_ children: [NativeUINode]) -> [NativeUINode] {
+        children.flatMap { $0.type == "list_section" ? $0.children : [$0] }
     }
 
     /// One list row: the node plus its leading/trailing swipe actions and

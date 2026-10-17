@@ -67,6 +67,11 @@ use Native\Mobile\UI\Theme;
  * attributes override them per pager, since the row sits on whatever the
  * pages are (light labels over a video feed, say).
  *
+ * A horizontal pager can have a header above its tabs, a profile's say,
+ * that scrolls up with the page showing while the tabs pin under the nav
+ * bar: see {@see PagerHeader}. A {@see PagerOverlay} hangs under the tabs
+ * over the pages. Neither counts as a page, and neither is windowed.
+ *
  * The page index rides the tab-change transport, so a single feed is
  * capped at 32,767 pages per screen.
  */
@@ -415,7 +420,7 @@ class Pager extends Element
         $props = $this->pagerProps;
 
         if (! isset($props['count'])) {
-            $props['count'] = count($this->children);
+            $props['count'] = count(array_filter($this->children, fn (Element $child): bool => ! $child instanceof PagerHeader && ! $child instanceof PagerOverlay));
         }
 
         if ($this->pageCallback !== null) {

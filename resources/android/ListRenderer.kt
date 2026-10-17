@@ -10,6 +10,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +64,9 @@ object ListRenderer {
         val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
 
         val scrollState = rememberLazyListState()
+        // Set when this list is a page of a pager with a header, which the
+        // list draws above its rows (see PagerHeader).
+        val pagerHeader = if (horizontal) null else LocalPagerHeader.current
         val isRefreshing = remember { mutableStateOf(false) }
         val endReachedFired = remember { mutableStateOf(false) }
 
@@ -71,7 +76,8 @@ object ListRenderer {
                 snapshotFlow {
                     val info = scrollState.layoutInfo
                     val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                    val total = info.totalItemsCount
+                    // Under a pager header, the room after the rows isn't one.
+                    val total = info.totalItemsCount - if (pagerHeader != null) 1 else 0
                     total > 0 && lastVisible >= total - endReachedBuffer
                 }.collect { nearEnd ->
                     if (nearEnd && !endReachedFired.value) {
@@ -81,6 +87,17 @@ object ListRenderer {
                         endReachedFired.value = false
                     }
                 }
+            }
+        }
+
+        if (pagerHeader != null) {
+            DisposableEffect(pagerHeader, scrollState) {
+                pagerHeader.scroll.attach(pagerHeader.page, scrollState)
+                onDispose { pagerHeader.scroll.detach(pagerHeader.page, scrollState) }
+            }
+            LaunchedEffect(pagerHeader, scrollState) {
+                snapshotFlow { scrollState.firstVisibleItemIndex to scrollState.firstVisibleItemScrollOffset }
+                    .collect { pagerHeader.scroll.scrolled(pagerHeader.page, scrollState) }
             }
         }
 
@@ -97,6 +114,26 @@ object ListRenderer {
                             NodeView(node = child)
                         }
                     }
+                }
+            } else if (pagerHeader != null) {
+                LazyColumn(modifier = (if (onRefreshCb != 0) Modifier else modifier).then(dismissKeyboardModifier), state = scrollState) {
+                    // The header, then the pager's tabs pinned over every row,
+                    // the rows of any list sections among them.
+                    item(key = PAGER_HEADER_KEY) { PagerHeaderRow(pagerHeader) }
+                    if (pagerHeader.hasTabs) {
+                        stickyHeader(key = PAGER_TABS_KEY) { PagerHeaderStrip(pagerHeader) }
+                    }
+                    val rows = node.children.flatMap { if (it.type == "list_section") it.children else listOf(it) }
+                    rows.forEachIndexed { index, row ->
+                        item(key = row.id) {
+                            // Only this list draws the header, not one in its rows.
+                            CompositionLocalProvider(LocalPagerHeader provides null) { ListRow(row) }
+                            if (separator && index < rows.size - 1) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
+                    item(key = PAGER_ROOM_KEY) { PagerHeaderRoom(pagerHeader, scrollState, PAGER_ROOM_KEY) }
                 }
             } else {
                 // A list is "sectioned" when any direct child is a
@@ -219,6 +256,11 @@ private fun ListRow(child: NativeUINode) {
         NodeView(node = child)
     }
 }
+
+/** Keys of the items a list adds under a pager header. Row keys are node ids, so these can't clash. */
+private const val PAGER_HEADER_KEY = "nui_pager_header"
+private const val PAGER_TABS_KEY = "nui_pager_tabs"
+private const val PAGER_ROOM_KEY = "nui_pager_room"
 
 /** Space above a section: a header's top padding, or a bare gap without one. */
 private val SECTION_TOP_GAP = 20.dp
