@@ -145,6 +145,11 @@ object ListRenderer {
                             if (footer.isNotEmpty()) {
                                 item(key = "f_${child.id}") { SectionFooter(footer, grouped) }
                             }
+                        } else if (child.type == "sticky_header" && !hasSections) {
+                            // Pins once it reaches the top, until the next
+                            // sticky header pushes it off, as on iOS. It
+                            // paints its own background, if any.
+                            stickyHeader(key = child.id) { NodeView(node = child) }
                         } else {
                             item(key = child.id) {
                                 ListRow(child)
