@@ -92,6 +92,34 @@ NativeList::make()
     ->onEndReached('loadMore');
 ```
 
+### Sticky headers
+
+A `native:sticky-header` in a list is a row that pins to the top of the list once you scroll it there, while the rows after it scroll underneath, like CSS `position: sticky`. The next sticky header pushes it off. It lays its children out like a column, so give it a background or the rows will show through.
+
+```blade
+<native:list>
+    @include('partials.composer')
+
+    <native:sticky-header class="w-full items-center py-3 bg-theme-surface {{ $newPosts ? '' : 'hidden' }}">
+        @if ($newPosts)
+            <native:button @press="showNewPosts">{{ count($newPosts) }} new posts</native:button>
+        @endif
+    </native:sticky-header>
+
+    @foreach ($posts as $post)
+        @include('partials.post')
+    @endforeach
+</native:list>
+```
+
+A hidden sticky header takes no space, so it can wait in its place until it has something to show. On iOS it's the header of a plain list section, and on Android a sticky `LazyColumn` item. It only pins as a direct child of a list with no `native:list-section`s.
+
+```php
+use Native\Mobile\UI\Elements\StickyHeader;
+
+StickyHeader::make($newPostsButton);
+```
+
 ## Accessibility
 
 Every element accepts a screen-reader label and an optional hint, via Blade
