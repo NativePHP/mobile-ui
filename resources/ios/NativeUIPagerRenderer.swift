@@ -28,7 +28,10 @@ struct NativeUIPagerRenderer: View {
 
     var body: some View {
         let p = node.props
-        let count = max(0, p.getInt("count", default: node.children.count))
+        let horizontal = p.getBool("horizontal")
+        // The header and the overlay ride beside the pages; neither is one.
+        let pages = node.children.filter { $0.type != "pager_header" && $0.type != "pager_overlay" }
+        let count = max(0, p.getInt("count", default: pages.count))
         let windowFrom = p.getInt("window_from")
         // `has_more` appends one loading page after the last loaded item —
         // a feed has no total, so the user can pull into the tail while
@@ -39,8 +42,8 @@ struct NativeUIPagerRenderer: View {
 
         let pageByIndex: [Int: NativeUINode] = {
             var map: [Int: NativeUINode] = [:]
-            map.reserveCapacity(node.children.count)
-            for (offset, child) in node.children.enumerated() {
+            map.reserveCapacity(pages.count)
+            for (offset, child) in pages.enumerated() {
                 map[windowFrom + offset] = child
             }
             return map
@@ -51,12 +54,16 @@ struct NativeUIPagerRenderer: View {
             count: pageCount,
             loaded: count,
             requestedPage: requestedPage,
-            horizontal: p.getBool("horizontal"),
+            horizontal: horizontal,
             reportOnSettle: p.getBool("report_on_settle"),
             cbId: p.getCallbackId("on_page_change"),
             pageByIndex: pageByIndex,
             placeholders: p.getStringList("placeholders"),
             tabs: PagerTabs(props: p),
+            // Only a horizontal pager's pages scroll up and down under a header.
+            header: horizontal ? node.children.first { $0.type == "pager_header" } : nil,
+            overlay: node.children.first { $0.type == "pager_overlay" },
+            background: PagerColor(light: node.style?.bgColor, dark: p.has("dark_bg_color") ? p.getColor("dark_bg_color", default: 0) : nil),
             a11yLabel: p.getString("a11y_label")
         )
     }
@@ -80,6 +87,12 @@ private struct PagerBody: View {
     let placeholders: [String]
     /// The tab row above the pages, if the pager has one.
     let tabs: PagerTabs?
+    /// The `pager_header`, which each page's list draws above the tabs.
+    let header: NativeUINode?
+    /// The `pager_overlay`, laid over the pages under the tabs.
+    let overlay: NativeUINode?
+    /// The pager's own background, behind the tabs a header pins.
+    let background: PagerColor
     let a11yLabel: String
 
     /// Programmatic-jump binding only. Reading it back is useless here:
@@ -99,6 +112,8 @@ private struct PagerBody: View {
     /// Where the pager is, in pages, for the tab row. Held but never read
     /// here, so a swipe redraws the row and not the pages.
     @State private var progress: PagerProgress
+    /// Where the header is, and each page's list, when there's a header.
+    @State private var headerScroll = PagerHeaderScroll()
 
     /// Loaded-but-unshipped pages this far from the current one get their
     /// placeholder image; the rest stay empty. Wide enough that a fast
@@ -106,7 +121,7 @@ private struct PagerBody: View {
     /// long feed never fetches stills it may never reach.
     static let placeholderRadius = 4
 
-    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String], tabs: PagerTabs?, a11yLabel: String) {
+    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String], tabs: PagerTabs?, header: NativeUINode?, overlay: NativeUINode?, background: PagerColor, a11yLabel: String) {
         self.nodeId = nodeId
         self.count = count
         self.loaded = loaded
@@ -117,6 +132,9 @@ private struct PagerBody: View {
         self.pageByIndex = pageByIndex
         self.placeholders = placeholders
         self.tabs = tabs
+        self.header = header
+        self.overlay = overlay
+        self.background = background
         self.a11yLabel = a11yLabel
         _position = State(initialValue: requestedPage)
         _leading = State(initialValue: requestedPage)
@@ -126,12 +144,32 @@ private struct PagerBody: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let tabs {
-                PagerTabStrip(tabs: tabs, progress: progress, select: selectTab)
-            }
+        if header != nil {
+            // The pages' lists draw the header and the tabs themselves, so
+            // they scroll with the page (see NativeUIPagerHeader).
             pager
+                .overlay(alignment: .top) { overlayView }
                 .modifier(PagerA11yLabelModifier(label: a11yLabel))
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    headerScroll.pageWidth = frame.width
+                    headerScroll.pagerMinY = frame.minY
+                }
+        } else {
+            VStack(spacing: 0) {
+                if let tabs {
+                    PagerTabStrip(tabs: tabs, progress: progress, select: selectTab)
+                }
+                pager
+                    .overlay(alignment: .top) { overlayView }
+                    .modifier(PagerA11yLabelModifier(label: a11yLabel))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var overlayView: some View {
+        if let overlay {
+            PagerOverlayView(node: overlay, scroll: header == nil ? nil : headerScroll)
         }
     }
 
@@ -174,6 +212,8 @@ private struct PagerBody: View {
                 if !reportOnSettle {
                     report(page)
                 }
+                // A header follows the page nearest the leading edge.
+                headerScroll.lead(page)
             }
             // The same position, unrounded, for the tab row. Nil until the
             // pager has a size, so the row doesn't flash the first tab.
@@ -234,6 +274,7 @@ private struct PagerBody: View {
             Group {
                 if let child = pageByIndex[index] {
                     NodeView(node: child).equatable()
+                        .environment(\.nativeUIPagerHeader, header.map { pagerHeader(page: index, node: $0) })
                 } else if index >= loaded {
                     ProgressView()
                         .controlSize(.large)
@@ -250,6 +291,12 @@ private struct PagerBody: View {
             .clipped()
             .id(index)
         }
+    }
+
+    /// What page `index` gets of the header: the same object for the life
+    /// of the pager, so a render only redraws the parts of it that changed.
+    private func pagerHeader(page index: Int, node: NativeUINode) -> NativeUIPagerHeader {
+        headerScroll.header(page: index, node: node, tabs: tabs, background: background, progress: progress, select: selectTab)
     }
 
     /// A tap on a tab: scroll there, and the page is reported when the
@@ -315,7 +362,7 @@ private final class PagerProgress {
 
 /// The `tabs` row and its look, read from the pager's props. Colours are
 /// ARGB and nil where PHP sent none, so the row falls back to the theme.
-private struct PagerTabs {
+private struct PagerTabs: Equatable {
     let labels: [String]
     let a11yLabels: [String]
     let scrollable: Bool
@@ -360,6 +407,14 @@ private struct PagerTabs {
         self.paddingTop = points("tab_padding_top", 14)
         self.paddingBottom = points("tab_padding_bottom", 11)
         self.edgePadding = points("tab_edge_padding", 4)
+    }
+
+    static func == (lhs: PagerTabs, rhs: PagerTabs) -> Bool {
+        lhs.labels == rhs.labels && lhs.a11yLabels == rhs.a11yLabels && lhs.scrollable == rhs.scrollable
+            && lhs.reselectCbId == rhs.reselectCbId && lhs.color == rhs.color && lhs.activeColor == rhs.activeColor
+            && lhs.indicatorColor == rhs.indicatorColor && lhs.dividerColor == rhs.dividerColor && lhs.font == rhs.font
+            && lhs.fontSize == rhs.fontSize && lhs.indicatorHeight == rhs.indicatorHeight && lhs.paddingX == rhs.paddingX
+            && lhs.paddingTop == rhs.paddingTop && lhs.paddingBottom == rhs.paddingBottom && lhs.edgePadding == rhs.edgePadding
     }
 }
 
@@ -497,5 +552,365 @@ private struct PagerTabStrip: View {
         let argb = colorScheme == .dark ? (color.dark ?? color.light) : color.light
 
         return argb.map { Color(argb: $0) } ?? fallback
+    }
+}
+
+// MARK: - Header
+
+/// A colour as PHP sent it, light and dark, nil where it sent none.
+struct PagerColor: Equatable {
+    let light: Int?
+    let dark: Int?
+
+    init(light: Int?, dark: Int?) {
+        self.light = light == 0 ? nil : light
+        self.dark = dark == 0 ? nil : dark
+    }
+
+    func resolve(_ colorScheme: ColorScheme, fallback: Color) -> Color {
+        let argb = colorScheme == .dark ? (dark ?? light) : light
+
+        return argb.map { Color(argb: $0) } ?? fallback
+    }
+}
+
+/// A pager's `pager_header`, as one of its pages gets it through the
+/// environment. The page's list draws it (NativeUIListRenderer): the header
+/// as its first row, then the pager's tabs as the header of a section
+/// holding every other row, so the tabs pin once the header has scrolled
+/// away. Both are held still while the pager swipes, so the pages seem to
+/// slide under them.
+///
+/// One per page for the life of the pager. A render changes its properties
+/// in place, which redraws only the views that read them.
+@Observable
+final class NativeUIPagerHeader {
+    let page: Int
+    var node: NativeUINode
+    fileprivate var tabs: PagerTabs?
+    var background: PagerColor
+    fileprivate let progress: PagerProgress
+    @ObservationIgnored fileprivate var select: (Int) -> Void
+    let scroll: PagerHeaderScroll
+
+    fileprivate init(page: Int, node: NativeUINode, tabs: PagerTabs?, background: PagerColor, progress: PagerProgress, select: @escaping (Int) -> Void, scroll: PagerHeaderScroll) {
+        self.page = page
+        self.node = node
+        self.tabs = tabs
+        self.background = background
+        self.progress = progress
+        self.select = select
+        self.scroll = scroll
+    }
+
+    /// The tabs, drawn as the pager would draw them above its pages.
+    var hasTabs: Bool { tabs != nil }
+
+    fileprivate var strip: some View {
+        Group {
+            if let tabs {
+                PagerTabStrip(tabs: tabs, progress: progress, select: select)
+            }
+        }
+    }
+
+    /// How far to move this page's header so it stays where the pager is:
+    /// the page is `progress - page` pages off to the left.
+    fileprivate var stationaryOffset: CGFloat {
+        (progress.value - CGFloat(page)) * scroll.pageWidth
+    }
+}
+
+private struct NativeUIPagerHeaderKey: EnvironmentKey {
+    static let defaultValue: NativeUIPagerHeader? = nil
+}
+
+extension EnvironmentValues {
+    /// The header the page's list draws, if the page is in a pager with one.
+    /// A list clears it for its rows, so only the page's own list draws it.
+    var nativeUIPagerHeader: NativeUIPagerHeader? {
+        get { self[NativeUIPagerHeaderKey.self] }
+        set { self[NativeUIPagerHeaderKey.self] = newValue }
+    }
+}
+
+/// How far the header has scrolled, from the page showing, and each page's
+/// list, so the pages beside it can be kept level with it.
+///
+/// While any of the header shows, every list scrolls with it: a swipe finds
+/// the next page's header at the same height, so the two meet seamlessly.
+/// Once it has gone, each list keeps its own place, and only a list higher
+/// than the header has gone is brought down to where it pins the tabs.
+///
+/// The lists are moved through their UIKit scroll views, found from inside
+/// the header row (PagerHeaderScrollViewFinder). SwiftUI gives no way to
+/// set a List's offset.
+@Observable
+final class PagerHeaderScroll {
+    /// The header's height, without the tabs.
+    var headerHeight: CGFloat = 0
+    /// How much of the header has scrolled away, 0 to `headerHeight`. Below
+    /// 0 the page showing is being pulled down, and the header with it.
+    var collapse: CGFloat = 0
+    var pageWidth: CGFloat = 0
+    /// The page the header follows.
+    private(set) var shownPage = 0
+    /// Where each page's tabs end on screen, and where the pager starts.
+    var stripMaxY: [Int: CGFloat] = [:]
+    var pagerMinY: CGFloat = 0
+
+    @ObservationIgnored private var leading = 0 {
+        didSet { shownPage = leading }
+    }
+    @ObservationIgnored private var offsets: [Int: CGFloat] = [:]
+    @ObservationIgnored private var scrollViews: [Int: WeakScrollView] = [:]
+    @ObservationIgnored private var headers: [Int: NativeUIPagerHeader] = [:]
+
+    private struct WeakScrollView {
+        weak var view: UIScrollView?
+    }
+
+    fileprivate func header(page: Int, node: NativeUINode, tabs: PagerTabs?, background: PagerColor, progress: PagerProgress, select: @escaping (Int) -> Void) -> NativeUIPagerHeader {
+        guard let header = headers[page] else {
+            let header = NativeUIPagerHeader(page: page, node: node, tabs: tabs, background: background, progress: progress, select: select, scroll: self)
+            headers[page] = header
+            return header
+        }
+
+        // Only what changed, so an unchanged header doesn't redraw.
+        if header.node !== node { header.node = node }
+        if header.tabs != tabs { header.tabs = tabs }
+        if header.background != background { header.background = background }
+        header.select = select
+
+        return header
+    }
+
+    /// Where the bottom of the tabs is, below the pager's top edge, as the
+    /// page showing has them on screen.
+    var stripBottom: CGFloat {
+        max(0, (stripMaxY[shownPage] ?? pagerMinY) - pagerMinY)
+    }
+
+    /// The page nearest the pager's leading edge, which the header follows.
+    func lead(_ page: Int) {
+        guard page != leading else { return }
+
+        leading = page
+        follow(offsets[page] ?? 0)
+    }
+
+    /// A page's list, found or found again in a fresh list. A page that isn't
+    /// showing is brought level with the header before it can be seen.
+    func attach(_ scrollView: UIScrollView, page: Int) {
+        guard scrollViews[page]?.view !== scrollView else { return }
+
+        scrollViews[page] = WeakScrollView(view: scrollView)
+        offsets[page] = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+
+        if page != leading {
+            align(page)
+        }
+    }
+
+    /// A page's list scrolled to `y`, its distance from its own top.
+    func scrolled(page: Int, y: CGFloat) {
+        offsets[page] = y
+
+        if page == leading {
+            follow(y)
+        }
+    }
+
+    private func follow(_ y: CGFloat) {
+        let collapse = min(y, headerHeight)
+
+        guard collapse != self.collapse else { return }
+
+        self.collapse = collapse
+
+        for page in scrollViews.keys where page != leading {
+            align(page)
+        }
+    }
+
+    private func align(_ page: Int) {
+        guard headerHeight > 0, let scrollView = scrollViews[page]?.view else { return }
+
+        let own = offsets[page] ?? 0
+        let shown = max(0, collapse)
+        let target = shown < headerHeight ? shown : max(own, headerHeight)
+
+        guard abs(target - own) > 0.5 else { return }
+
+        offsets[page] = target
+        scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: target - scrollView.adjustedContentInset.top), animated: false)
+    }
+}
+
+/// The header as a page's list draws it: its first row.
+struct NativeUIPagerHeaderRow: View {
+    let header: NativeUIPagerHeader
+
+    var body: some View {
+        PagerChildren(node: header.node)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                if header.scroll.headerHeight != height { header.scroll.headerHeight = height }
+            }
+            .background(PagerHeaderScrollViewFinder { header.scroll.attach($0, page: header.page) })
+            .modifier(PagerStationary(header: header))
+    }
+}
+
+/// The pager's tabs as a page's list draws them: the header of the section
+/// below the header row, which pins under the nav bar.
+struct NativeUIPagerHeaderStrip: View {
+    let header: NativeUIPagerHeader
+
+    @ObservedObject private var themeStore = NativeUITheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        header.strip
+            .frame(maxWidth: .infinity)
+            .background(header.background.resolve(colorScheme, fallback: themeStore.resolve(for: colorScheme).surface))
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { maxY in
+                if header.scroll.stripMaxY[header.page] != maxY { header.scroll.stripMaxY[header.page] = maxY }
+            }
+            .modifier(PagerStationary(header: header))
+    }
+}
+
+/// Holds a page's header still while the pager swipes, by moving it against
+/// the page. The pages beside each other are level, so the halves of the two
+/// headers on screen meet as one.
+private struct PagerStationary: ViewModifier {
+    let header: NativeUIPagerHeader
+
+    func body(content: Content) -> some View {
+        content.offset(x: header.stationaryOffset)
+    }
+}
+
+/// What a page's list does under a pager header: it tells the header where
+/// it is, and makes room at its end for the header to scroll away.
+struct NativeUIPagerHeaderListModifier: ViewModifier {
+    let header: NativeUIPagerHeader?
+
+    /// Space after the last row, so a short list can still scroll the
+    /// header away and keep level with the others.
+    @State private var room: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        if let header {
+            content
+                // Section headers get a minimum height and space above.
+                .environment(\.defaultMinListHeaderHeight, 0)
+                .listSectionSpacing(0)
+                .contentMargins(.bottom, room, for: .scrollContent)
+                .onScrollGeometryChange(for: PagerListGeometry.self) { geometry in
+                    PagerListGeometry(
+                        y: geometry.contentOffset.y + geometry.contentInsets.top,
+                        top: geometry.contentInsets.top,
+                        bottom: geometry.contentInsets.bottom,
+                        content: geometry.contentSize.height,
+                        container: geometry.containerSize.height
+                    )
+                } action: { _, geometry in
+                    header.scroll.scrolled(page: header.page, y: geometry.y)
+
+                    // The room this list needs to scroll the header away, past
+                    // the room it already has.
+                    let needed = max(0, header.scroll.headerHeight + geometry.container - geometry.content - geometry.top - (geometry.bottom - room))
+                    if abs(needed - room) > 0.5 {
+                        room = needed
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+private struct PagerListGeometry: Equatable {
+    let y: CGFloat
+    let top: CGFloat
+    let bottom: CGFloat
+    let content: CGFloat
+    let container: CGFloat
+}
+
+/// The pager's `pager_overlay`, hung under the tabs. Under a header it
+/// follows the tabs as the header scrolls.
+private struct PagerOverlayView: View {
+    let node: NativeUINode
+    let scroll: PagerHeaderScroll?
+
+    var body: some View {
+        PagerChildren(node: node)
+            .frame(maxWidth: .infinity)
+            .offset(y: scroll?.stripBottom ?? 0)
+    }
+}
+
+/// What a `pager_header` or `pager_overlay` holds, stacked. Their own
+/// renderer draws nothing: the pager places them.
+private struct PagerChildren: View {
+    let node: NativeUINode
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(node.children) { child in
+                NodeView(node: child).equatable()
+            }
+        }
+    }
+}
+
+/// Finds the UIKit scroll view a view is drawn in, here the List's, so the
+/// pager can scroll it.
+private struct PagerHeaderScrollViewFinder: UIViewRepresentable {
+    let found: (UIScrollView) -> Void
+
+    func makeUIView(context: Context) -> FinderView {
+        let view = FinderView()
+        view.found = found
+        return view
+    }
+
+    func updateUIView(_ view: FinderView, context: Context) {
+        view.found = found
+        view.find()
+    }
+
+    final class FinderView: UIView {
+        var found: ((UIScrollView) -> Void)?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            isHidden = true
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            find()
+        }
+
+        func find() {
+            guard window != nil else { return }
+
+            var view = superview
+            while let current = view {
+                if let scrollView = current as? UIScrollView {
+                    found?(scrollView)
+                    return
+                }
+                view = current.superview
+            }
+        }
     }
 }
