@@ -12,8 +12,11 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,8 +39,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * (media-player's `video_player` does), so this renderer knows nothing
  * about playback and nothing in core mediates.
  *
- * Page-change protocol: `settledPage` → `on_page_change` over the
- * TAB_CHANGE transport (one int). The pager position survives re-renders;
+ * Page-change protocol: `currentPage` → `on_page_change` over the
+ * TAB_CHANGE transport (one int), or `settledPage` with
+ * `report_on_settle`. The pager position survives re-renders;
  * the `page` prop only moves it when PHP sends an index that differs from
  * the one native last reported (a programmatic jump).
  *
@@ -59,6 +63,7 @@ object PagerRenderer {
         val requestedPage = p.getInt("page", 0).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
         val horizontal = p.getBool("horizontal", false)
         val cbId = p.getCallbackId("on_page_change")
+        val reportOnSettle = p.getBool("report_on_settle", false)
 
         val pageByIndex: Map<Int, NativeUINode> = remember(node, windowFrom) {
             val out = HashMap<Int, NativeUINode>(node.children.size)
@@ -73,6 +78,13 @@ object PagerRenderer {
         // report, not a programmatic jump.
         val reported = remember { mutableStateListOf(requestedPage) }
 
+        // The page PHP last knew about: the one most recently sent to it, or
+        // the one it asked for. Kept apart from `reported`, which an echo
+        // empties: the start page used to be reported straight after the
+        // pager appeared, and a swipe back to a page PHP had jumped from
+        // could go unreported.
+        var lastReported by remember { mutableIntStateOf(requestedPage) }
+
         LaunchedEffect(requestedPage) {
             val at = reported.indexOf(requestedPage)
             if (at >= 0) {
@@ -80,6 +92,7 @@ object PagerRenderer {
             } else {
                 reported.clear()
                 reported.add(requestedPage)
+                lastReported = requestedPage
                 pagerState.scrollToPage(requestedPage)
             }
         }
@@ -87,12 +100,15 @@ object PagerRenderer {
         if (cbId != 0) {
             // `currentPage` flips as soon as a page becomes the nearest one
             // mid-swipe (settledPage waits for rest), so PHP's round-trip
-            // overlaps the animation instead of starting after it.
-            LaunchedEffect(pagerState, cbId) {
-                snapshotFlow { pagerState.currentPage }
+            // overlaps the animation instead of starting after it. With
+            // `report_on_settle` the frame the report causes never lands
+            // during the animation.
+            LaunchedEffect(pagerState, cbId, reportOnSettle) {
+                snapshotFlow { if (reportOnSettle) pagerState.settledPage else pagerState.currentPage }
                     .distinctUntilChanged()
                     .collect { index ->
-                        if (reported.lastOrNull() != index) {
+                        if (lastReported != index) {
+                            lastReported = index
                             reported.add(index)
                             NativeElementBridge.sendTabChangeEvent(cbId, node.id, index)
                         }
