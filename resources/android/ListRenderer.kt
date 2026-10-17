@@ -224,6 +224,11 @@ object ListRenderer {
                             if (footer.isNotEmpty()) {
                                 item(key = "f_${child.id}") { SectionFooter(footer, grouped) }
                             }
+                        } else if (child.type == "sticky_header" && !hasSections) {
+                            // Pins once it reaches the top, until the next
+                            // sticky header pushes it off, as on iOS. It
+                            // paints its own background, if any.
+                            stickyHeader(key = child.id) { NodeView(node = child) }
                         } else {
                             item(key = child.id) {
                                 ListRow(child, heights, rowBackground)
@@ -295,7 +300,8 @@ private fun leafRowIndex(children: List<NativeUINode>): Map<Any, Int> {
     for (child in children) {
         if (child.type == "list_section") {
             for (row in child.children) map[row.id] = counter++
-        } else {
+        } else if (child.type != "sticky_header") {
+            // A sticky header isn't a row, as on iOS.
             map[child.id] = counter++
         }
     }

@@ -58,6 +58,11 @@ struct NativeUIListRenderer: View {
         let hasSections = children.contains { $0.type == "list_section" }
         let grouped = hasSections && !node.props.getBool("plain") && pagerHeader == nil
 
+        // A `sticky_header` pins once it reaches the top. Only a plain List's
+        // section headers pin, so each sticky header heads a section of the
+        // rows after it, up to the next one, which pushes it off.
+        let hasStickyHeaders = !hasSections && children.contains { $0.type == "sticky_header" }
+
         // Map each leaf row id → its global index across all sections, so
         // end-reached fires near the true bottom rather than when a section
         // container first appears. Computed once per render.
@@ -106,6 +111,29 @@ struct NativeUIListRenderer: View {
                                 .listRowInsets(EdgeInsets())
                         }
                     }
+                } else if hasStickyHeaders {
+                    let (leading, groups) = Self.stickyGroups(children)
+                    ForEach(leading) { child in
+                        Self.row(child, style: rowStyle,
+                            endReachedCb: Self.endReachedCallback(at: leafIndex[child.id], leafCount: leafCount,
+                                buffer: endReachedBuffer, cb: onEndReachedCb),
+                            listId: nodeId)
+                    }
+                    ForEach(groups) { group in
+                        Section {
+                            ForEach(group.rows) { row in
+                                Self.row(row, style: rowStyle,
+                                    endReachedCb: Self.endReachedCallback(at: leafIndex[row.id], leafCount: leafCount,
+                                        buffer: endReachedBuffer, cb: onEndReachedCb),
+                                    listId: nodeId)
+                            }
+                        } header: {
+                            Self.stickyHeaderView(group.header)
+                        }
+                        // Lines above and below a section are a section's,
+                        // not a row's. Rows draw their own.
+                        .listSectionSeparator(.hidden)
+                    }
                 } else if hasSections {
                     ForEach(children) { child in
                         if child.type == "list_section" {
@@ -142,6 +170,7 @@ struct NativeUIListRenderer: View {
                 }
             }
             .modifier(GroupedOrPlainListStyle(grouped: grouped))
+            .modifier(StickyHeaderSpacingModifier(enabled: hasStickyHeaders))
             .environment(\.nativeUIListRowMargin, NativeUIListRowMargin.system)
             .modifier(ListBackgroundModifier(node: node))
             // `List` has no showsIndicators initializer — the modifier is
@@ -229,12 +258,72 @@ struct NativeUIListRenderer: View {
                     map[row.id] = counter
                     counter += 1
                 }
+            } else if child.type == "sticky_header" {
+                continue
             } else {
                 map[child.id] = counter
                 counter += 1
             }
         }
         return (map, counter)
+    }
+
+    /// A sticky header, edge to edge with no minimum height, so it draws
+    /// only what the node does. A hidden one draws nothing and takes no space.
+    @ViewBuilder
+    private static func stickyHeaderView(_ header: NativeUINode) -> some View {
+        if header.layout?.display != Display.none {
+            NodeView(node: header)
+                .equatable()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets())
+        }
+    }
+
+    /// Split a list's direct children at its sticky headers: the rows before
+    /// the first one, then each header with the rows after it.
+    private static func stickyGroups(_ children: [NativeUINode]) -> ([NativeUINode], [StickyGroup]) {
+        var leading: [NativeUINode] = []
+        var groups: [StickyGroup] = []
+        for child in children {
+            if child.type == "sticky_header" {
+                groups.append(StickyGroup(header: child, rows: []))
+            } else if groups.isEmpty {
+                leading.append(child)
+            } else {
+                groups[groups.count - 1].rows.append(child)
+            }
+        }
+        return (leading, groups)
+    }
+}
+
+/// A sticky header and the rows it pins over.
+private struct StickyGroup: Identifiable {
+    let header: NativeUINode
+    var rows: [NativeUINode]
+
+    var id: Int { header.id }
+}
+
+/// A plain List gives every section header a minimum height and about 22pt
+/// of room above it, which shows until the header pins. A sticky header is a
+/// row like any other, so it gets neither: one hidden takes no space, and one
+/// showing sits flush against the row above.
+private struct StickyHeaderSpacingModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled, #available(iOS 17.0, *) {
+            content
+                .environment(\.defaultMinListHeaderHeight, 0)
+                .listSectionSpacing(0)
+        } else if enabled {
+            content
+                .environment(\.defaultMinListHeaderHeight, 0)
+        } else {
+            content
+        }
     }
 }
 
