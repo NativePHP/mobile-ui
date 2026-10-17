@@ -11,7 +11,7 @@ import SwiftUI
 ///   - success     → `.buttonStyle(.borderedProminent)` + `.tint(theme.success)`
 ///   - accent      → `.buttonStyle(.borderedProminent)` + `.tint(theme.accent)`
 ///   - ghost       → `.buttonStyle(.plain)` + `.foregroundStyle(theme.primary)`
-///   - any other   → like primary, in the `tint` / `on_tint` colours PHP sends
+///   - any other   → like primary, in the `tint_color` / `label_color` PHP sends
 ///     for a variant that names a theme token (`variant="brand"`), or in
 ///     primary when it sent none
 ///
@@ -167,17 +167,17 @@ struct NativeUIButtonRenderer: View {
     private typealias TokenColors = (tint: Color, onTint: Color)
 
     /// A token variant's colours, which PHP resolves from the theme and sends
-    /// as `tint` and `on_tint`, each with its `dark_` shade when that differs.
-    /// Nil for the built-in variants.
+    /// as `tint_color` and `label_color`, each with its `dark_` shade when that
+    /// differs. Nil for the built-in variants.
     private func tokenColors(_ p: GenericProps, theme: NativeUITokens) -> TokenColors? {
-        guard p.has("tint") else { return nil }
+        guard p.has("tint_color") else { return nil }
 
         func color(_ key: String) -> Color {
             let shade = colorScheme == .dark && p.has("dark_" + key) ? "dark_" + key : key
             return Color(argb: p.getColor(shade))
         }
 
-        return (color("tint"), p.has("on_tint") ? color("on_tint") : theme.onPrimary)
+        return (color("tint_color"), p.has("label_color") ? color("label_color") : theme.onPrimary)
     }
 
     // MARK: - Glass path (iOS 26 first-class, older iOS bordered fallback)

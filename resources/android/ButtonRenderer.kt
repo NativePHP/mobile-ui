@@ -44,7 +44,7 @@ import com.nativephp.plugins.native_ui.NativeUITokens
  *   - secondary   → [FilledTonalButton] with theme.secondary / onSecondary
  *   - destructive → [Button] with theme.error / onError
  *   - ghost       → [TextButton] with theme.primary as content color
- *   - any other   → like primary, in the `tint` / `on_tint` colours PHP sends
+ *   - any other   → like primary, in the `tint_color` / `label_color` PHP sends
  *     for a variant that names a theme token (`variant="brand"`), or in
  *     primary when it sent none
  *
@@ -80,15 +80,15 @@ object ButtonRenderer {
         val metrics = sizeMetrics(size, theme)
 
         // A variant that names a theme token arrives with that token's colours,
-        // which PHP resolves and sends as `tint` and `on_tint`, each with its
-        // `dark_` shade when that differs. The built-in variants send neither.
+        // which PHP resolves and sends as `tint_color` and `label_color`, each
+        // with its `dark_` shade when that differs. The built-ins send neither.
         fun tokenColor(key: String, fallback: Color): Color {
             val shade = if (isDark && p.has("dark_$key")) "dark_$key" else key
 
             return if (p.has(shade)) Color(p.getColor(shade, 0)) else fallback
         }
-        val tint = tokenColor("tint", theme.primary)
-        val onTint = if (p.has("tint")) tokenColor("on_tint", theme.onPrimary) else theme.onPrimary
+        val tint = tokenColor("tint_color", theme.primary)
+        val onTint = if (p.has("tint_color")) tokenColor("label_color", theme.onPrimary) else theme.onPrimary
         // Leading — button labels are single-line, so this is usually a no-op.
         val lineHeight = nuiLineHeightUnit(p.getFloat("line_height_px", 0f), p.getFloat("line_height", 0f), metrics.textSize.value)
 
