@@ -11,6 +11,9 @@ import SwiftUI
 ///   - success     → `.buttonStyle(.borderedProminent)` + `.tint(theme.success)`
 ///   - accent      → `.buttonStyle(.borderedProminent)` + `.tint(theme.accent)`
 ///   - ghost       → `.buttonStyle(.plain)` + `.foregroundStyle(theme.primary)`
+///   - any other   → like primary, in the `tint` / `on_tint` colours PHP sends
+///     for a variant that names a theme token (`variant="brand"`), or in
+///     primary when it sent none
 ///
 /// Tailwind `glass` family promotes the button to iOS 26's first-class
 /// glass styles when available, falling back to bordered styles on older iOS.
@@ -36,9 +39,10 @@ import SwiftUI
 /// `<button class="glass:prominent" variant="destructive">` reads as a
 /// destructive-tinted prominent glass button on iOS 26+.
 ///
-/// All colors come from the `\.nativeUITheme` environment. No per-instance
-/// color/radius/shadow overrides are honored — that's intentional (plan doc
-/// Model 3). For full visual control, use `<pressable>`.
+/// All colors come from the theme: the `\.nativeUITheme` environment, or the
+/// theme token a variant names. No per-instance color/radius/shadow overrides
+/// are honored — that's intentional (plan doc Model 3). For full visual
+/// control, use `<pressable>`.
 struct NativeUIButtonRenderer: View {
     let node: NativeUINode
     @ObservedObject private var themeStore = NativeUITheme.shared
@@ -80,6 +84,7 @@ struct NativeUIButtonRenderer: View {
 
         let metrics = sizeMetrics(for: size, theme: theme)
         let enabled = !disabled && !loading
+        let token = tokenColors(p, theme: theme)
 
         // Class-level text-size override. `text-xl` / `text-[28]` / etc.
         // arrive as a `font_size` prop. When set (>0), it wins over the
@@ -136,6 +141,7 @@ struct NativeUIButtonRenderer: View {
                 action: action,
                 content: content,
                 variant: variant,
+                token: token,
                 theme: theme,
                 metrics: metrics,
                 enabled: enabled,
@@ -147,6 +153,7 @@ struct NativeUIButtonRenderer: View {
                 action: action,
                 content: content,
                 variant: variant,
+                token: token,
                 theme: theme,
                 metrics: metrics,
                 enabled: enabled,
@@ -154,6 +161,23 @@ struct NativeUIButtonRenderer: View {
                 a11yHint: a11yHint
             )
         }
+    }
+
+    /// The fill and label of a variant that names a theme token.
+    private typealias TokenColors = (tint: Color, onTint: Color)
+
+    /// A token variant's colours, which PHP resolves from the theme and sends
+    /// as `tint` and `on_tint`, each with its `dark_` shade when that differs.
+    /// Nil for the built-in variants.
+    private func tokenColors(_ p: GenericProps, theme: NativeUITokens) -> TokenColors? {
+        guard p.has("tint") else { return nil }
+
+        func color(_ key: String) -> Color {
+            let shade = colorScheme == .dark && p.has("dark_" + key) ? "dark_" + key : key
+            return Color(argb: p.getColor(shade))
+        }
+
+        return (color("tint"), p.has("on_tint") ? color("on_tint") : theme.onPrimary)
     }
 
     // MARK: - Glass path (iOS 26 first-class, older iOS bordered fallback)
@@ -166,14 +190,15 @@ struct NativeUIButtonRenderer: View {
         action: @escaping () -> Void,
         content: ButtonContent,
         variant: String,
+        token: TokenColors?,
         theme: NativeUITokens,
         metrics: SizeMetrics,
         enabled: Bool,
         a11yLabel: String,
         a11yHint: String
     ) -> some View {
-        let tint = tintForVariant(variant, theme: theme)
-        let onTint = onTintForVariant(variant, theme: theme)
+        let tint = tintForVariant(variant, token: token, theme: theme)
+        let onTint = onTintForVariant(variant, token: token, theme: theme)
 
         // Note: `interactive` on a button is mostly redundant — the button
         // already has built-in press feedback through SwiftUI's button styles.
@@ -244,6 +269,7 @@ struct NativeUIButtonRenderer: View {
         action: @escaping () -> Void,
         content: ButtonContent,
         variant: String,
+        token: TokenColors?,
         theme: NativeUITokens,
         metrics: SizeMetrics,
         enabled: Bool,
@@ -312,11 +338,11 @@ struct NativeUIButtonRenderer: View {
                 .modifier(A11yLabelModifier(label: a11yLabel))
                 .modifier(A11yHintModifier(hint: a11yHint))
 
-        default: // "primary" and any unknown value
+        default: // "primary", a theme token, and any unknown value
             Button(action: action) { content.fillWidthIfRequested(node) }
                 .buttonStyle(.borderedProminent)
-                .tint(enabled ? theme.primary : theme.surfaceVariant)
-                .foregroundStyle(enabled ? theme.onPrimary : theme.onSurfaceVariant)
+                .tint(enabled ? (token?.tint ?? theme.primary) : theme.surfaceVariant)
+                .foregroundStyle(enabled ? (token?.onTint ?? theme.onPrimary) : theme.onSurfaceVariant)
                 .controlSize(metrics.controlSize)
                 .disabled(!enabled)
                 .modifier(A11yLabelModifier(label: a11yLabel))
@@ -326,25 +352,25 @@ struct NativeUIButtonRenderer: View {
 
     // MARK: - Tint helpers (glass path only — variant path uses tints inline)
 
-    private func tintForVariant(_ variant: String, theme: NativeUITokens) -> Color {
+    private func tintForVariant(_ variant: String, token: TokenColors?, theme: NativeUITokens) -> Color {
         switch variant {
         case "secondary":   return theme.secondary
         case "destructive": return theme.destructive
         case "success":     return theme.success
         case "accent":      return theme.accent
         case "ghost":       return theme.primary
-        default:            return theme.primary
+        default:            return token?.tint ?? theme.primary
         }
     }
 
-    private func onTintForVariant(_ variant: String, theme: NativeUITokens) -> Color {
+    private func onTintForVariant(_ variant: String, token: TokenColors?, theme: NativeUITokens) -> Color {
         switch variant {
         case "secondary":   return theme.onSecondary
         case "destructive": return theme.onDestructive
         case "success":     return theme.onSuccess
         case "accent":      return theme.onAccent
         case "ghost":       return theme.primary
-        default:            return theme.onPrimary
+        default:            return token?.onTint ?? theme.onPrimary
         }
     }
 
