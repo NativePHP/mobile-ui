@@ -36,9 +36,12 @@ use Native\Mobile\Edge\Element;
  *
  * Native reports the page as soon as it becomes the nearest one during a
  * swipe (not once the scroll rests), so PHP's round-trip overlaps the
- * animation. Native keeps the pager position across re-renders; `page`
- * only moves the pager when PHP sends an index native never reported (a
- * programmatic jump) — echoes of earlier reports are ignored.
+ * animation. That suits a media feed, where the next page's video should
+ * start loading early. A screen whose frame is heavy can stutter when that
+ * frame lands mid-swipe; `report-on-settle` waits until the scroll rests.
+ * Native keeps the pager position across re-renders; `page` only moves the
+ * pager when PHP sends an index native never reported (a programmatic
+ * jump) — echoes of earlier reports are ignored.
  *
  * `placeholders` gives every loaded page an image to show before it is
  * shipped (see placeholders()).
@@ -88,6 +91,10 @@ class Pager extends Element
         }
         if (isset($attrs['placeholders']) && is_array($attrs['placeholders'])) {
             $this->placeholders($attrs['placeholders']);
+        }
+        $settle = $attrs['report_on_settle'] ?? $attrs['reportOnSettle'] ?? $attrs['report-on-settle'] ?? null;
+        if ($settle !== null) {
+            $this->reportOnSettle(filter_var($settle, FILTER_VALIDATE_BOOLEAN));
         }
         $cb = $attrs['on_page_change'] ?? $attrs['onPageChange'] ?? $attrs['on-page-change'] ?? null;
         if ($cb !== null) {
@@ -144,6 +151,19 @@ class Pager extends Element
     public function placeholders(array $urls): static
     {
         $this->pagerProps['placeholders'] = array_map(fn ($u) => (string) ($u ?? ''), array_values($urls));
+
+        return $this;
+    }
+
+    /**
+     * Report the page once the scroll comes to rest, instead of as soon as
+     * it becomes the nearest one mid-swipe. Use it when the render a page
+     * change causes is big enough to drop frames if it lands during the
+     * swipe animation.
+     */
+    public function reportOnSettle(bool $value = true): static
+    {
+        $this->pagerProps['report_on_settle'] = $value;
 
         return $this;
     }

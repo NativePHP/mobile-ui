@@ -9,11 +9,12 @@ import SwiftUI
 /// (media-player's `video_player` does), so this renderer knows nothing
 /// about playback and nothing in core mediates.
 ///
-/// Page-change protocol: once the scroll phase goes idle, the page nearest
-/// the leading edge → `on_page_change` over the TAB_CHANGE transport (one
-/// int). The pager position survives re-renders; the `page` prop
-/// only moves it when PHP sends an index that differs from the one native
-/// last reported (a programmatic jump).
+/// Page-change protocol: the page nearest the leading edge → `on_page_change`
+/// over the TAB_CHANGE transport (one int), as soon as it becomes the
+/// nearest one mid-swipe, or only once the scroll phase goes idle with
+/// `report_on_settle`. The pager position survives re-renders; the `page`
+/// prop only moves it when PHP sends an index that differs from the one
+/// native last reported (a programmatic jump).
 ///
 /// See `src/Elements/Pager.php` for the matching element class.
 struct NativeUIPagerRenderer: View {
@@ -45,6 +46,7 @@ struct NativeUIPagerRenderer: View {
             loaded: count,
             requestedPage: requestedPage,
             horizontal: p.getBool("horizontal"),
+            reportOnSettle: p.getBool("report_on_settle"),
             cbId: p.getCallbackId("on_page_change"),
             pageByIndex: pageByIndex,
             placeholders: p.getStringList("placeholders")
@@ -62,6 +64,9 @@ private struct PagerBody: View {
     let loaded: Int
     let requestedPage: Int
     let horizontal: Bool
+    /// Report only once the scroll rests, not as soon as a page becomes the
+    /// nearest one mid-swipe.
+    let reportOnSettle: Bool
     let cbId: Int
     let pageByIndex: [Int: NativeUINode]
     /// Image per page index for pages PHP hasn't shipped; "" for none.
@@ -75,10 +80,11 @@ private struct PagerBody: View {
     /// Pages reported to PHP that it has not echoed back yet, oldest first.
     /// A `page` prop matching one of these is an echo, not a jump.
     @State private var reported: [Int]
-    /// The page most recently sent to PHP. Kept apart from the pending
-    /// acknowledgements: an echo clears those, and without this the idle
-    /// callback would report the same page a second time, repeating any
-    /// pagination the handler does.
+    /// The page PHP last knew about: the one most recently sent to it, or
+    /// the one it jumped to. Kept apart from the pending acknowledgements:
+    /// an echo clears those, and without this the idle callback would
+    /// report the same page a second time, repeating any pagination the
+    /// handler does.
     @State private var lastReported: Int
 
     /// Loaded-but-unshipped pages this far from the current one get their
@@ -87,12 +93,13 @@ private struct PagerBody: View {
     /// long feed never fetches stills it may never reach.
     static let placeholderRadius = 4
 
-    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String]) {
+    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String]) {
         self.nodeId = nodeId
         self.count = count
         self.loaded = loaded
         self.requestedPage = requestedPage
         self.horizontal = horizontal
+        self.reportOnSettle = reportOnSettle
         self.cbId = cbId
         self.pageByIndex = pageByIndex
         self.placeholders = placeholders
@@ -135,7 +142,11 @@ private struct PagerBody: View {
                 // Report the moment a page becomes the nearest one, mid-swipe,
                 // so PHP's round-trip overlaps the animation instead of
                 // starting after it. Idle re-reports the same page (no-op).
-                report(page)
+                // With `report_on_settle` only idle reports, so the frame
+                // the report causes never lands during the animation.
+                if !reportOnSettle {
+                    report(page)
+                }
             }
             .onScrollPhaseChange { _, phase in
                 guard phase == .idle else { return }
@@ -144,11 +155,16 @@ private struct PagerBody: View {
             .onChange(of: requestedPage) { _, page in
                 // An echo of something we reported: drop it and everything
                 // reported before it. Anything else is a programmatic jump.
+                // PHP asked for that page, so it already knows it. Without
+                // this, on settle, a jump that never reaches the idle report
+                // leaves `lastReported` on the old page, and a swipe back to
+                // that page would go unreported.
                 if let at = reported.firstIndex(of: page) {
                     reported.removeFirst(at + 1)
                     return
                 }
                 reported = [page]
+                lastReported = page
                 position = page
             }
         }
