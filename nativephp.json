@@ -374,6 +374,14 @@
             "self_closing": false
         },
         {
+            "type": "sticky_header",
+            "element": "Native\\Mobile\\UI\\Elements\\StickyHeader",
+            "blade": "Native\\Mobile\\UI\\Components\\StickyHeader",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.ColumnRenderer",
+            "ios_renderer": "NativeUIColumnRenderer",
+            "self_closing": false
+        },
+        {
             "type": "tab_row",
             "element": "Native\\Mobile\\UI\\Elements\\TabRow",
             "blade": "Native\\Mobile\\UI\\Components\\TabRow",
