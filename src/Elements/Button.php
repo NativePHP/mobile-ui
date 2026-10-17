@@ -8,6 +8,7 @@ use Native\Mobile\Edge\Layouts\Builders\NavAction;
 use Native\Mobile\Icon\AndroidSymbol;
 use Native\Mobile\Icon\IconResolver;
 use Native\Mobile\Icon\IosSymbol;
+use Native\Mobile\UI\Theme;
 
 /**
  * Native button.
@@ -16,7 +17,8 @@ use Native\Mobile\Icon\IosSymbol;
  * family on Android, SwiftUI `Button` with `buttonStyle(...)` on iOS.
  *
  * API shape (locked in plan doc, sections A/C/E):
- *   - `variant`: semantic vocabulary (primary | secondary | destructive | success | ghost)
+ *   - `variant`: semantic vocabulary (primary | secondary | destructive | success | accent | ghost),
+ *     or the name of any colour token in the theme
  *   - `size`: sm | md | lg
  *   - `disabled`, `loading`: state
  *   - `icon`, `icon-trailing`: optional icon names (leading/trailing)
@@ -33,6 +35,12 @@ use Native\Mobile\Icon\IosSymbol;
  */
 class Button extends Element
 {
+    /**
+     * The variants each renderer draws from its own theme tokens. Any other
+     * variant that names a theme colour is sent with that colour.
+     */
+    public const array Variants = ['primary', 'secondary', 'destructive', 'success', 'accent', 'ghost'];
+
     protected string $type = 'button';
 
     /** @var array<string, mixed> */
@@ -121,12 +129,50 @@ class Button extends Element
         }
     }
 
-    /** primary | secondary | destructive | success | ghost. Default: primary. */
+    /**
+     * primary | secondary | destructive | success | accent | ghost, or the
+     * name of a colour token in the theme. Default: primary.
+     *
+     * A token variant fills the button like primary does, in that token's
+     * colour, with the label in its `on-` token (`variant="brand"` draws in
+     * `brand` and `on-brand`), or in `on-primary` when the theme has none.
+     * Both are sent in their light and dark shades. That lets an app pick a
+     * button's colour at runtime, say one per user, while the colours still
+     * live in the theme. A name the theme doesn't have draws as primary.
+     */
     public function variant(string $value): static
     {
         $this->buttonProps['variant'] = $value;
 
+        foreach (['tint_color', 'label_color'] as $prop) {
+            unset($this->buttonProps[$prop], $this->buttonProps['dark_'.$prop]);
+        }
+
+        // The label's colour can't be `on_tint`: the bridge sends any prop
+        // starting with `on_` as a callback.
+        if (! in_array($value, self::Variants, true) && is_string(Theme::get("light.{$value}"))) {
+            $this->tokenColor('tint_color', $value);
+            $this->tokenColor('label_color', is_string(Theme::get("light.on-{$value}")) ? "on-{$value}" : 'on-primary');
+        }
+
         return $this;
+    }
+
+    /**
+     * Sends a theme token's light shade as `$prop`, and its dark shade as
+     * `dark_$prop` when that differs.
+     */
+    protected function tokenColor(string $prop, string $token): void
+    {
+        $light = Theme::get("light.{$token}");
+        $dark = Theme::get("dark.{$token}");
+
+        if (is_string($light)) {
+            $this->buttonProps[$prop] = $light;
+        }
+        if (is_string($dark) && $dark !== $light) {
+            $this->buttonProps['dark_'.$prop] = $dark;
+        }
     }
 
     /** sm | md | lg. Default: md. */
