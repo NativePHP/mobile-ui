@@ -195,7 +195,12 @@ struct NativeUIScrollViewRenderer: View {
                 }
             }
             .onChange(of: messageSignal) { _ in
-                guard stickBottom else { return }
+                // Follow new content only while the reader is at the bottom.
+                // Someone scrolled back into history stays where they are:
+                // a message arriving, a reaction landing on an old message,
+                // or a page of older messages loading above must not yank
+                // them down to the latest one.
+                guard stickBottom, atBottom else { return }
                 withAnimation(.easeOut(duration: 0.25)) {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
