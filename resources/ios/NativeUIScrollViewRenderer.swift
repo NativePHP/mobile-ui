@@ -173,6 +173,17 @@ struct NativeUIScrollViewRenderer: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .modifier(ScrollViewBackgroundModifier(node: node))
+            // Whether the reader is at the bottom, from where the scroll view
+            // actually is. The anchor's onAppear / onDisappear can't tell on
+            // their own: a lazy stack keeps the anchor alive a little past the
+            // viewport, so someone a few messages up still read as "at the
+            // bottom" and got pulled down by the next message.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.visibleRect.maxY >= geometry.contentSize.height - 24
+            } action: { _, isAtBottom in
+                guard stickBottom else { return }
+                atBottom = isAtBottom
+            }
             // Hand this scroll view's proxy to its subtree, so a text input
             // anywhere inside can bring ITSELF above the keyboard when it
             // takes focus (`NativeUITextInputCore`). `ScrollViewReader`
@@ -195,8 +206,9 @@ struct NativeUIScrollViewRenderer: View {
                 }
             }
             .onChange(of: messageSignal) { _ in
-                // Follow new content only while the reader is at the bottom.
-                // Someone scrolled back into history stays where they are:
+                // Follow new content only while the reader is at the bottom
+                // (see the scroll geometry check above). Someone scrolled back
+                // into history stays where they are:
                 // a message arriving, a reaction landing on an old message,
                 // or a page of older messages loading above must not yank
                 // them down to the latest one.
