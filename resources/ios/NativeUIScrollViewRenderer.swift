@@ -15,6 +15,11 @@ struct NativeUIScrollViewRenderer: View {
     /// later re-materialization only re-pins a reader who is still there.
     @State private var hasPinned: Bool = false
 
+    /// Whether the keyboard is up, from the same show / hide notifications
+    /// that re-pin a bottom-anchored view. While it's down, that view ends
+    /// clear of the home indicator (see `homeIndicatorClearance`).
+    @State private var keyboardShown: Bool = false
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
@@ -150,6 +155,15 @@ struct NativeUIScrollViewRenderer: View {
                             ))
                     }
                     if stickBottom {
+                        // The view runs under the home indicator, as the
+                        // screen does, while a bottom bar sits above it. With
+                        // the keyboard down, end the content clear of the
+                        // indicator. The keyboard shrinks the view to its own
+                        // top edge, which is clear already, so then this
+                        // collapses, and a page that pads its end for a bottom
+                        // bar pads the same amount either way.
+                        Color.clear
+                            .frame(height: keyboardShown ? 0 : Self.homeIndicatorClearance)
                         Color.clear
                             .frame(height: 1)
                             .id(Self.bottomAnchorID)
@@ -256,6 +270,7 @@ struct NativeUIScrollViewRenderer: View {
             .onReceive(NotificationCenter.default.publisher(
                 for: UIResponder.keyboardWillShowNotification)
             ) { note in
+                setKeyboardShown(true, stickBottom: stickBottom, note: note)
                 repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
             }
             .onReceive(NotificationCenter.default.publisher(
@@ -266,6 +281,7 @@ struct NativeUIScrollViewRenderer: View {
                 // list toward older messages is itself how you dismiss the
                 // keyboard — re-pinning unconditionally would yank the reader
                 // straight back down and undo the scroll that dismissed it.
+                setKeyboardShown(false, stickBottom: stickBottom, note: note)
                 guard atBottom else { return }
                 repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
             }
@@ -287,6 +303,26 @@ struct NativeUIScrollViewRenderer: View {
                 proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
         }
+    }
+
+    /// Grows or collapses the home indicator clearance with the keyboard's own
+    /// animation, so the end of the view moves with it.
+    private func setKeyboardShown(_ shown: Bool, stickBottom: Bool, note: Notification) {
+        guard stickBottom, keyboardShown != shown else { return }
+
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+
+        withAnimation(.easeOut(duration: duration)) {
+            keyboardShown = shown
+        }
+    }
+
+    /// The window's bottom safe-area inset: the home indicator, or nothing on
+    /// a device with a home button.
+    private static var homeIndicatorClearance: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first?.safeAreaInsets.bottom ?? 0
     }
 
     private static let bottomAnchorID = "nphp.scroll.bottom.anchor"
