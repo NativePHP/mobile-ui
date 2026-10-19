@@ -11,6 +11,10 @@ struct NativeUIScrollViewRenderer: View {
     /// bottom-anchored list opens at the bottom.
     @State private var atBottom: Bool = true
 
+    /// Whether the anchor has pinned the view to the bottom once already, so a
+    /// later re-materialization only re-pins a reader who is still there.
+    @State private var hasPinned: Bool = false
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
@@ -157,10 +161,13 @@ struct NativeUIScrollViewRenderer: View {
                             // reader) — this fires after the anchor has
                             // real geometry, so the pin always lands.
                             .onAppear {
-                                // The anchor being on screen IS the definition
-                                // of "still stuck to the bottom" — the keyboard
-                                // dismiss handler reads this to avoid dragging
-                                // a reader out of history.
+                                // A lazy stack also re-creates the anchor when
+                                // content changes near it, a few rows past the
+                                // viewport. After the first pin, that must not
+                                // pull a reader out of history: only re-pin
+                                // while they're at the bottom.
+                                guard !hasPinned || atBottom else { return }
+                                hasPinned = true
                                 atBottom = true
                                 DispatchQueue.main.async {
                                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
@@ -213,8 +220,17 @@ struct NativeUIScrollViewRenderer: View {
                 // or a page of older messages loading above must not yank
                 // them down to the latest one.
                 guard stickBottom, atBottom else { return }
-                withAnimation(.easeOut(duration: 0.25)) {
-                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                // Lazy rows below the viewport only have estimated heights
+                // until they're on screen, so the animated scroll can stop
+                // short of the real end. Once it has brought them in and they
+                // are measured, a second scroll without animation lands on it.
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
                 }
             }
             // The keyboard resizes the scroll viewport in BOTH directions —
