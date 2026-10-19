@@ -185,11 +185,19 @@ struct NativeUIScrollViewRenderer: View {
             // their own: a lazy stack keeps the anchor alive a little past the
             // viewport, so someone a few messages up still read as "at the
             // bottom" and got pulled down by the next message.
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.visibleRect.maxY >= geometry.contentSize.height - 24
-            } action: { _, isAtBottom in
-                guard stickBottom else { return }
-                atBottom = isAtBottom
+            //
+            // Only a scroll changes it. New content grows the content first,
+            // which would read as "no longer at the bottom" just before the
+            // follow below asks, and the reader at the bottom would be left
+            // behind.
+            .onScrollGeometryChange(for: BottomProbe.self) { geometry in
+                BottomProbe(
+                    offset: geometry.contentOffset.y,
+                    atBottom: geometry.visibleRect.maxY >= geometry.contentSize.height - 24
+                )
+            } action: { old, new in
+                guard stickBottom, old.offset != new.offset else { return }
+                atBottom = new.atBottom
             }
             // Hand this scroll view's proxy to its subtree, so a text input
             // anywhere inside can bring ITSELF above the keyboard when it
@@ -293,6 +301,13 @@ struct NativeUIScrollViewRenderer: View {
         }
         return count
     }
+}
+
+/// Where a bottom-anchored scroll view is: its offset, and whether that's at
+/// the bottom of its content.
+private struct BottomProbe: Equatable {
+    let offset: CGFloat
+    let atBottom: Bool
 }
 
 /// Applies a minimum height only when there is one, so children that didn't
