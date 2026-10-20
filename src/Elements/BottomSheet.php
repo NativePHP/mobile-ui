@@ -43,6 +43,11 @@ class BottomSheet extends Element
                 $this->backgroundInteraction(filter_var($attrs[$key], FILTER_VALIDATE_BOOLEAN));
             }
         }
+        foreach (['handle-over-content', 'handleOverContent'] as $key) {
+            if (isset($attrs[$key])) {
+                $this->handleOverContent(filter_var($attrs[$key], FILTER_VALIDATE_BOOLEAN));
+            }
+        }
 
         $this->applyA11yAttributes($attrs);
     }
@@ -92,6 +97,20 @@ class BottomSheet extends Element
     public function backgroundInteraction(bool $value = true): static
     {
         $this->sheetProps['background_interaction'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Draw the drag handle over the top of the content, as iOS always
+     * does, rather than in a strip of its own above it. Android's Material
+     * sheet otherwise starts its content 48dp down, under the handle, so a
+     * bar laid out against the sheet's top edge sits lower there than on
+     * iOS. iOS ignores it.
+     */
+    public function handleOverContent(bool $value = true): static
+    {
+        $this->sheetProps['handle_over_content'] = $value;
 
         return $this;
     }

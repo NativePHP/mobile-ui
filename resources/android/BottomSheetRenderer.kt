@@ -1,8 +1,13 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
@@ -10,9 +15,12 @@ import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.RenderNode
@@ -48,6 +56,11 @@ object BottomSheetRenderer {
         // touches; a Maps-style pane over a live background is what
         // `sheet_pane` is for.
         val permanent = p.getBool("permanent")
+        // iOS draws its grabber over the content, so the content starts at the
+        // sheet's top edge. With `handle_over_content` Android does the same,
+        // instead of starting the content under Material's 48dp handle strip.
+        val handleOverContent = p.getBool("handle_over_content")
+        val materialHandle: @Composable () -> Unit = { BottomSheetDefaults.DragHandle() }
 
         if (!visible) return
 
@@ -73,6 +86,7 @@ object BottomSheetRenderer {
             containerColor = theme.surface,
             contentColor = theme.onSurface,
             scrimColor = BottomSheetDefaults.ScrimColor,
+            dragHandle = if (handleOverContent) null else materialHandle,
         ) {
             // M3 ModalBottomSheet sizes itself to content by default — for
             // multi-detent sheets that means short content collapses the
@@ -82,8 +96,25 @@ object BottomSheetRenderer {
             // room and content sits inside. `fillMaxHeight()` reproduces
             // that semantic on Android: content area always fills the
             // current detent's height, leaving drag-room to the next one.
-            Column(modifier = sheetModifier.fillMaxHeight()) {
-                node.children.forEach { RenderNode(it) }
+            if (handleOverContent) {
+                Box(modifier = sheetModifier.fillMaxHeight()) {
+                    Column(modifier = Modifier.fillMaxHeight()) {
+                        node.children.forEach { RenderNode(it) }
+                    }
+                    // iOS's grabber: 36 by 5, 5 from the top.
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 5.dp)
+                            .size(width = 36.dp, height = 5.dp)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(theme.onSurfaceVariant.copy(alpha = 0.4f)),
+                    )
+                }
+            } else {
+                Column(modifier = sheetModifier.fillMaxHeight()) {
+                    node.children.forEach { RenderNode(it) }
+                }
             }
         }
     }
