@@ -40,6 +40,7 @@ struct NativeUITextRenderer: View {
         let isUnderline = p.getInt("underline") == 1
         let isStrikethrough = p.getInt("line_through") == 1
         let letterSpacingEm = p.getFloat("letter_spacing", default: 0)
+        let outlineWidth = CGFloat(p.getFloat("text_outline", default: 0))
         let lineSpacingValue = NativeUIFontResolver.lineSpacing(
             px: p.getFloat("line_height_px", default: 0),
             mult: p.getFloat("line_height", default: 0),
@@ -62,6 +63,9 @@ struct NativeUITextRenderer: View {
                 if letterSpacingEm != 0, #available(iOS 16.0, *) {
                     t = t.kerning(CGFloat(letterSpacingEm) * CGFloat(fontSize))
                 }
+                if outlineWidth > 0, #available(iOS 18.0, *) {
+                    t = t.customAttribute(NUITextOutline(width: outlineWidth))
+                }
                 return t
             }()
 
@@ -69,6 +73,7 @@ struct NativeUITextRenderer: View {
                 .nuiScaledFont(size: CGFloat(fontSize), weight: fontWeight, design: fontDesign, fontName: fontName.isEmpty ? nil : fontName, italic: isItalic)
                 .lineSpacing(lineSpacingValue)
                 .foregroundColor(Color(argb: color))
+                .modifier(NUIOutlinedText(width: outlineWidth))
                 .multilineTextAlignment(textAlign)
                 .lineLimit(maxLines > 0 ? maxLines : nil)
                 // `truncationMode` only applies when there IS a lineLimit; we
@@ -105,23 +110,32 @@ struct NativeUITextRenderer: View {
         var italic: Bool
         var letterSpacingEm: Float
         var textTransform: Int
+        var outlineWidth: Float
         var pressCallbackId: Int
         var pressNodeId: Int
 
         /// Root defaults — mirror the leaf path (16pt, regular, black, no dark
-        /// override, no custom font, no decoration/kerning/transform).
+        /// override, no custom font, no decoration/kerning/transform/outline).
         static let root = RunContext(
             fontSize: 16, fontWeightInt: 0, fontFamilyInt: 0, fontName: "",
             colorArgb: 0xFF000000, darkColorArgb: 0, italic: false,
-            letterSpacingEm: 0, textTransform: 0, pressCallbackId: 0, pressNodeId: 0
+            letterSpacingEm: 0, textTransform: 0, outlineWidth: 0, pressCallbackId: 0, pressNodeId: 0
         )
+    }
+
+    /// A stretch of the composed string whose runs share an outline width
+    /// (0 = drawn filled, as usual).
+    private struct ComposedStretch {
+        var text = AttributedString()
+        var outlineWidth: CGFloat = 0
     }
 
     @ViewBuilder
     private var composedBody: some View {
         let p = node.props
         let maxLines = p.getInt("max_lines")
-        let composed = buildComposed()
+        let stretches = buildComposed()
+        let outlineWidth = stretches.map(\.outlineWidth).max() ?? 0
         // Leading applies uniformly to the whole composed string; base it on
         // the node's own font size (the root run's size).
         let lineSpacingValue = NativeUIFontResolver.lineSpacing(
@@ -131,7 +145,8 @@ struct NativeUITextRenderer: View {
             fontName: p.getString("font_name")
         )
 
-        Text(composed)
+        composedText(stretches)
+            .modifier(NUIOutlinedText(width: outlineWidth))
             .lineSpacing(lineSpacingValue)
             .multilineTextAlignment(resolveTextAlign(p.getInt("text_align")))
             .lineLimit(maxLines > 0 ? maxLines : nil)
@@ -159,15 +174,33 @@ struct NativeUITextRenderer: View {
     /// Build the composed attributed string outside the `@ViewBuilder` — the
     /// in-out mutation of `appendRuns` is a `Void` statement and can't live in
     /// a builder body (it would be read as a view: "() cannot conform to View").
-    private func buildComposed() -> AttributedString {
-        var composed = AttributedString()
-        appendRuns(into: &composed, node: node, inherited: .root)
-        return composed
+    private func buildComposed() -> [ComposedStretch] {
+        var stretches: [ComposedStretch] = []
+        appendRuns(into: &stretches, node: node, inherited: .root)
+        return stretches
+    }
+
+    /// One `Text` for the whole string. Without outlined runs that's a single
+    /// attributed string, as it always was. Outlined stretches are marked for
+    /// NUIOutlineTextRenderer, which only reads a Text attribute, so then the
+    /// stretches join as Texts instead.
+    private func composedText(_ stretches: [ComposedStretch]) -> Text {
+        guard #available(iOS 18.0, *), stretches.contains(where: { $0.outlineWidth > 0 }) else {
+            return Text(stretches.reduce(into: AttributedString()) { $0 += $1.text })
+        }
+
+        return stretches.reduce(Text(verbatim: "")) { composed, stretch in
+            let piece = stretch.outlineWidth > 0
+                ? Text(stretch.text).customAttribute(NUITextOutline(width: stretch.outlineWidth))
+                : Text(stretch.text)
+
+            return Text("\(composed)\(piece)")
+        }
     }
 
     /// Walk a node, emitting one styled run for its own text (leaf, or the
     /// leading text before nested runs) then recursing into text children.
-    private func appendRuns(into result: inout AttributedString, node: NativeUINode, inherited: RunContext) {
+    private func appendRuns(into result: inout [ComposedStretch], node: NativeUINode, inherited: RunContext) {
         let p = node.props
 
         // Resolve this level's effective context: own props over inherited.
@@ -181,6 +214,7 @@ struct NativeUITextRenderer: View {
         ctx.italic = p.getInt("font_style", default: inherited.italic ? 1 : 0) == 1
         ctx.letterSpacingEm = p.getFloat("letter_spacing", default: inherited.letterSpacingEm)
         ctx.textTransform = p.getInt("text_transform", default: inherited.textTransform)
+        ctx.outlineWidth = p.getFloat("text_outline", default: inherited.outlineWidth)
 
         // The innermost @press wins for this run and its whole subtree,
         // matching the flat per-span links the Android renderer emits.
@@ -191,7 +225,14 @@ struct NativeUITextRenderer: View {
 
         let ownText = p.getString("text")
         if !ownText.isEmpty {
-            result += makeRun(ownText, node: node, ctx: ctx)
+            let run = makeRun(ownText, node: node, ctx: ctx)
+            let outlineWidth = CGFloat(max(ctx.outlineWidth, 0))
+
+            if result.last?.outlineWidth == outlineWidth {
+                result[result.count - 1].text += run
+            } else {
+                result.append(ComposedStretch(text: run, outlineWidth: outlineWidth))
+            }
         }
         for child in node.children where child.type == "text" {
             appendRuns(into: &result, node: child, inherited: ctx)
@@ -320,6 +361,90 @@ private struct TruncateIfLimited: ViewModifier {
     func body(content: Content) -> some View {
         if maxLines > 0 {
             content.truncationMode(.tail)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Outlined text (`text-outline`)
+
+/// Marks text to draw hollow: the outline of its glyphs, `width` points wide
+/// and centred on their edges like a CSS text stroke, in the text's colour.
+@available(iOS 18.0, *)
+struct NUITextOutline: TextAttribute {
+    var width: CGFloat
+}
+
+/// Draws text marked with NUITextOutline as outlines, and everything else as
+/// usual. SwiftUI can't stroke glyphs, so the outline is made of the glyphs
+/// themselves: copies nudged half the width out in every direction make its
+/// outer edge, and the part every copy nudged half the width in still covers,
+/// cut out of that, makes its inner edge.
+@available(iOS 18.0, *)
+struct NUIOutlineTextRenderer: TextRenderer {
+    var width: CGFloat
+
+    /// The outline reaches half its width past the glyphs.
+    var displayPadding: EdgeInsets {
+        EdgeInsets(top: width / 2, leading: width / 2, bottom: width / 2, trailing: width / 2)
+    }
+
+    private static let directions: [CGVector] = (0..<16).map { step in
+        let angle = Double(step) / 16 * 2 * .pi
+
+        return CGVector(dx: cos(angle), dy: sin(angle))
+    }
+
+    func draw(layout: Text.Layout, in ctx: inout GraphicsContext) {
+        for line in layout {
+            for run in line {
+                if let outline = run[NUITextOutline.self], outline.width > 0 {
+                    drawOutline(of: run, width: outline.width, in: &ctx)
+                } else {
+                    ctx.draw(run)
+                }
+            }
+        }
+    }
+
+    private func drawOutline(of run: Text.Layout.Run, width: CGFloat, in ctx: inout GraphicsContext) {
+        let radius = width / 2
+
+        ctx.drawLayer { outline in
+            outline.draw(run)
+
+            for direction in Self.directions {
+                for distance in [radius / 2, radius] {
+                    var nudged = outline
+                    nudged.translateBy(x: direction.dx * distance, y: direction.dy * distance)
+                    nudged.draw(run)
+                }
+            }
+
+            outline.blendMode = .destinationOut
+            outline.drawLayer { inside in
+                inside.draw(run)
+                inside.blendMode = .destinationIn
+
+                for direction in Self.directions {
+                    var nudged = inside
+                    nudged.translateBy(x: direction.dx * radius, y: direction.dy * radius)
+                    nudged.draw(run)
+                }
+            }
+        }
+    }
+}
+
+/// Draws a Text's outlined runs (`text-outline`) through
+/// NUIOutlineTextRenderer when it has any. Before iOS 18 they draw filled.
+struct NUIOutlinedText: ViewModifier {
+    let width: CGFloat
+
+    func body(content: Content) -> some View {
+        if width > 0, #available(iOS 18.0, *) {
+            content.textRenderer(NUIOutlineTextRenderer(width: width))
         } else {
             content
         }

@@ -6,7 +6,9 @@ import androidx.compose.runtime.Composable
 import android.content.Context
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
@@ -58,6 +60,8 @@ object TextRenderer {
             ?: nuiThemeDefaultFontFamily(LocalContext.current)
         val textDecoration = resolveDecoration(p.getInt("underline"), p.getInt("line_through"))
         val letterSpacingEm = p.getFloat("letter_spacing", 0f)
+        val outlineWidth = p.getFloat("text_outline", 0f)
+        val density = LocalDensity.current.density
         val lineHeight = nuiLineHeightUnit(p.getFloat("line_height_px", 0f), p.getFloat("line_height", 0f), fontSize)
         val maxLines = p.getInt("max_lines")
         val textAlign = resolveTextAlign(p.getInt("text_align"))
@@ -87,6 +91,8 @@ object TextRenderer {
             style = TextStyle(
                 fontFamily = fontFamily,
                 lineHeight = lineHeight,
+                // `text-outline`: the glyphs' outline alone, in the text colour.
+                drawStyle = if (outlineWidth > 0f) Stroke(width = outlineWidth * density) else null,
                 platformStyle = PlatformTextStyle(includeFontPadding = false),
                 lineHeightStyle = LineHeightStyle(
                     alignment = LineHeightStyle.Alignment.Center,
@@ -106,8 +112,9 @@ object TextRenderer {
         val lineHeight = nuiLineHeightUnit(p.getFloat("line_height_px", 0f), p.getFloat("line_height", 0f), p.getFloat("font_size", 16f))
 
         val ctx = LocalContext.current
+        val density = LocalDensity.current.density
         val annotated = buildAnnotatedString {
-            appendTextRuns(node, RunCtx.Root, isDark, ctx)
+            appendTextRuns(node, RunCtx.Root, isDark, ctx, density)
         }
 
         Text(
@@ -147,13 +154,14 @@ private data class RunCtx(
     val italic: Boolean,
     val letterSpacingEm: Float,
     val textTransform: Int,
+    val outlineWidth: Float,
     val pressCallbackId: Int,
     val pressNodeId: Int,
 ) {
     companion object {
         // Root defaults — mirror the leaf path (16sp, normal, black, no dark
-        // override, no custom font, no decoration/letter-spacing/transform).
-        val Root = RunCtx(16f, 0, 0, "", 0xFF000000.toInt(), 0, false, 0f, 0, 0, 0)
+        // override, no custom font, no decoration/letter-spacing/transform/outline).
+        val Root = RunCtx(16f, 0, 0, "", 0xFF000000.toInt(), 0, false, 0f, 0, 0f, 0, 0)
     }
 }
 
@@ -161,7 +169,7 @@ private data class RunCtx(
  * Walk a node, emitting one styled span for its own text (leaf, or the leading
  * text before nested runs) then recursing into text children.
  */
-private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited: RunCtx, isDark: Boolean, context: Context) {
+private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited: RunCtx, isDark: Boolean, context: Context, density: Float) {
     val p = node.props
 
     // Resolve this level's effective context: own props over inherited.
@@ -175,6 +183,7 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
         italic = p.getInt("font_style", if (inherited.italic) 1 else 0) == 1,
         letterSpacingEm = p.getFloat("letter_spacing", inherited.letterSpacingEm),
         textTransform = p.getInt("text_transform", inherited.textTransform),
+        outlineWidth = p.getFloat("text_outline", inherited.outlineWidth),
         pressCallbackId = if (node.onPress != 0) node.onPress else inherited.pressCallbackId,
         pressNodeId = if (node.onPress != 0) node.id else inherited.pressNodeId,
     )
@@ -199,6 +208,8 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
             letterSpacing = if (ctx.letterSpacingEm != 0f) ctx.letterSpacingEm.em else TextUnit.Unspecified,
             textDecoration = resolveDecoration(p.getInt("underline"), p.getInt("line_through")),
             background = if (effectiveBg != 0) argbToComposeColor(effectiveBg) else Color.Unspecified,
+            // `text-outline`: the glyphs' outline alone, in the run's colour.
+            drawStyle = if (ctx.outlineWidth > 0f) Stroke(width = ctx.outlineWidth * density) else null,
         )
         if (ctx.pressCallbackId != 0) {
             // One Clickable per emitted span keeps annotation ranges flat
@@ -226,7 +237,7 @@ private fun AnnotatedString.Builder.appendTextRuns(node: NativeUINode, inherited
     }
 
     node.children.filter { it.type == "text" }.forEach { child ->
-        appendTextRuns(child, ctx, isDark, context)
+        appendTextRuns(child, ctx, isDark, context, density)
     }
 }
 
