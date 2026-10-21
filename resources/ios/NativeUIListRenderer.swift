@@ -340,7 +340,10 @@ private final class ListVisibleRange {
     private var step = 10
     private var leafIndex: [Int: Int] = [:]
 
-    private var onScreen: Set<Int> = []
+    /// How many of each row's views are on screen: a row and its placeholder
+    /// are different views, and the new one can come on screen before the old
+    /// one goes.
+    private var onScreen: [Int: Int] = [:]
     /// The range last reported. The list starts at the top, so a range near
     /// it isn't reported until it moves a step.
     private var reported = (first: 0, last: 0)
@@ -358,12 +361,13 @@ private final class ListVisibleRange {
     }
 
     func appeared(_ rowId: Int) {
-        onScreen.insert(rowId)
+        onScreen[rowId, default: 0] += 1
         changed()
     }
 
     func disappeared(_ rowId: Int) {
-        onScreen.remove(rowId)
+        let views = (onScreen[rowId] ?? 0) - 1
+        onScreen[rowId] = views > 0 ? views : nil
         changed()
     }
 
@@ -388,7 +392,7 @@ private final class ListVisibleRange {
     }
 
     private func currentRange() -> (first: Int, last: Int)? {
-        let indexes = onScreen.compactMap { leafIndex[$0] }
+        let indexes = onScreen.keys.compactMap { leafIndex[$0] }
         guard let first = indexes.min(), let last = indexes.max() else { return nil }
         return (first, last)
     }
