@@ -299,13 +299,16 @@ private struct RowHeightModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if let heights {
-            // Captures the cache and the id only (see endReachedAction).
-            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                heights.set(height, for: rowId)
-            }
+            content.onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: Self.record(rowId, in: heights))
         } else {
             content
         }
+    }
+
+    /// Built from the row's id and the list's cache alone, like
+    /// endReachedAction: SwiftUI keeps a row's closures until it draws again.
+    private static func record(_ rowId: Int, in heights: ListRowHeights) -> (CGFloat) -> Void {
+        { height in heights.set(height, for: rowId) }
     }
 }
 
@@ -317,11 +320,21 @@ private struct VisibleRowModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let visibleRange {
             content
-                .onAppear { visibleRange.appeared(rowId) }
-                .onDisappear { visibleRange.disappeared(rowId) }
+                .onAppear(perform: Self.appeared(rowId, in: visibleRange))
+                .onDisappear(perform: Self.disappeared(rowId, in: visibleRange))
         } else {
             content
         }
+    }
+
+    /// Built from the row's id and the list's tracker alone, like
+    /// endReachedAction: SwiftUI keeps a row's closures until it draws again.
+    private static func appeared(_ rowId: Int, in tracker: ListVisibleRange) -> () -> Void {
+        { tracker.appeared(rowId) }
+    }
+
+    private static func disappeared(_ rowId: Int, in tracker: ListVisibleRange) -> () -> Void {
+        { tracker.disappeared(rowId) }
     }
 }
 
