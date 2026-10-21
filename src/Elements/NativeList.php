@@ -15,6 +15,8 @@ class NativeList extends Element
 
     protected ?string $endReachedCallback = null;
 
+    protected ?string $visibleRangeCallback = null;
+
     public static function make(Element ...$children): static
     {
         $el = new static;
@@ -48,6 +50,12 @@ class NativeList extends Element
         }
         if (isset($attrs['end-reached-buffer']) || isset($attrs['endReachedBuffer'])) {
             $this->endReachedBuffer((int) ($attrs['end-reached-buffer'] ?? $attrs['endReachedBuffer']));
+        }
+        if (isset($attrs['on-visible-range']) || isset($attrs['onVisibleRange'])) {
+            $this->onVisibleRange($attrs['on-visible-range'] ?? $attrs['onVisibleRange']);
+        }
+        if (isset($attrs['visible-range-step']) || isset($attrs['visibleRangeStep'])) {
+            $this->visibleRangeStep((int) ($attrs['visible-range-step'] ?? $attrs['visibleRangeStep']));
         }
 
         $this->applyA11yAttributes($attrs);
@@ -124,6 +132,32 @@ class NativeList extends Element
         return $this;
     }
 
+    /**
+     * Calls $method(int $first, int $last) with the positions of the first and
+     * last rows on screen, counting rows as end-reached does (a section's rows
+     * in its place), each time either end has moved by the step since the last
+     * call. The list doesn't call it before it has moved a step from the top.
+     * Rows are measured while it's set, so a {@see ListPlaceholder} put in a
+     * row's place takes the row's height.
+     */
+    public function onVisibleRange(string $method): static
+    {
+        $this->visibleRangeCallback = $method;
+
+        return $this;
+    }
+
+    /**
+     * How many rows either end of the visible range moves before
+     * {@see onVisibleRange()} is called again. Defaults to 10.
+     */
+    public function visibleRangeStep(int $rows): static
+    {
+        $this->listProps['visible_range_step'] = max(1, $rows);
+
+        return $this;
+    }
+
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->listProps;
@@ -134,6 +168,11 @@ class NativeList extends Element
 
         if ($this->endReachedCallback !== null) {
             $props['on_end_reached'] = $registry->register($this->endReachedCallback);
+        }
+
+        if ($this->visibleRangeCallback !== null) {
+            // The virtual list's "from,to" payload, which dispatch hands the method as two ints.
+            $props['on_visible_range'] = $registry->register($this->visibleRangeCallback, 'virtual_window');
         }
 
         return $props;

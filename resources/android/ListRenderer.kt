@@ -15,6 +15,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,11 +65,17 @@ object ListRenderer {
         val onRefreshCb = node.props.getCallbackId("on_refresh")
         val onEndReachedCb = node.props.getCallbackId("on_end_reached")
         val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
+        val onVisibleRangeCb = node.props.getCallbackId("on_visible_range")
+        val visibleRangeStep = node.props.getInt("visible_range_step", 10).coerceAtLeast(1)
 
         val scrollState = rememberLazyListState()
         // Set when this list is a page of a pager with a header, which the
         // list draws above its rows (see PagerHeader).
         val pagerHeader = if (horizontal) null else LocalPagerHeader.current
+        // Rows are measured while the list reports its visible range: that's
+        // what a list putting placeholders in rows' places goes by.
+        val rowHeights = remember { ListRowHeights() }
+        val heights = if (onVisibleRangeCb != 0) rowHeights else null
         val isRefreshing = remember { mutableStateOf(false) }
         val endReachedFired = remember { mutableStateOf(false) }
 
@@ -101,6 +110,36 @@ object ListRenderer {
             }
         }
 
+        if (onVisibleRangeCb != 0) {
+            // Positions count rows as iOS does: a section's rows in its place,
+            // headers and footers not at all. Read from the frame showing when
+            // it reports, so a row inserted above the screen doesn't leave them stale.
+            val leafIndex = rememberUpdatedState(remember(node) { leafRowIndex(node.children) })
+            LaunchedEffect(scrollState, onVisibleRangeCb, visibleRangeStep) {
+                fun currentRange(): Pair<Int, Int>? {
+                    val indexes = scrollState.layoutInfo.visibleItemsInfo.mapNotNull { leafIndex.value[it.key] }
+                    val first = indexes.minOrNull() ?: return null
+                    return first to (indexes.maxOrNull() ?: first)
+                }
+                // The list starts at the top, so a range near it isn't reported until it moves a step.
+                var reported = 0 to 0
+                var reportedAt = 0L
+                snapshotFlow { currentRange() }.collect { range ->
+                    if (range == null) return@collect
+                    val moved = kotlin.math.abs(range.first - reported.first) >= visibleRangeStep ||
+                        kotlin.math.abs(range.second - reported.second) >= visibleRangeStep
+                    if (!moved) return@collect
+                    // No more than every 150ms while scrolling, with the latest range at the end of it.
+                    val wait = reportedAt + VISIBLE_RANGE_INTERVAL_MS - System.currentTimeMillis()
+                    if (wait > 0) delay(wait)
+                    val latest = currentRange() ?: return@collect
+                    reported = latest
+                    reportedAt = System.currentTimeMillis()
+                    NativeElementBridge.sendTextChangeEvent(onVisibleRangeCb, node.id, "${latest.first},${latest.second}")
+                }
+            }
+        }
+
         val keyboardController = LocalSoftwareKeyboardController.current
         val dismissKeyboardModifier = Modifier.pointerInput(Unit) {
             detectVerticalDragGestures(onDragStart = { keyboardController?.hide() }) { _, _ -> }
@@ -127,7 +166,7 @@ object ListRenderer {
                     rows.forEachIndexed { index, row ->
                         item(key = row.id) {
                             // Only this list draws the header, not one in its rows.
-                            CompositionLocalProvider(LocalPagerHeader provides null) { ListRow(row) }
+                            CompositionLocalProvider(LocalPagerHeader provides null) { ListRow(row, heights) }
                             if (separator && index < rows.size - 1) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
@@ -170,9 +209,9 @@ object ListRenderer {
                                         SectionRow(
                                             isFirst = i == 0,
                                             isLast = i == child.children.size - 1,
-                                        ) { ListRow(row) }
+                                        ) { ListRow(row, heights) }
                                     } else {
-                                        ListRow(row)
+                                        ListRow(row, heights)
                                         if (separator && i < child.children.size - 1) {
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         }
@@ -189,7 +228,7 @@ object ListRenderer {
                             stickyHeader(key = child.id) { NodeView(node = child) }
                         } else {
                             item(key = child.id) {
-                                ListRow(child)
+                                ListRow(child, heights)
                                 if (separator && index < node.children.size - 1) {
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 }
@@ -227,6 +266,65 @@ object ListRenderer {
     }
 }
 
+/** How long a list waits between reports of its visible range while scrolling. */
+private const val VISIBLE_RANGE_INTERVAL_MS = 150L
+
+/**
+ * The height each row of a list last drew at, in pixels, by node id. A
+ * node's id comes from its key, so a placeholder with a row's key finds the
+ * row's height. Not snapshot state: a row measuring itself doesn't recompose
+ * the list.
+ */
+private class ListRowHeights {
+    private val heights = HashMap<Int, Int>()
+    private var total = 0L
+
+    fun height(rowId: Int): Int? = heights[rowId]
+
+    /** The average row, for a placeholder whose row was never drawn. */
+    val typical: Int? get() = if (heights.isEmpty()) null else (total / heights.size).toInt()
+
+    fun set(rowId: Int, height: Int) {
+        total += height - (heights[rowId] ?: 0)
+        heights[rowId] = height
+    }
+}
+
+/** Each leaf row's position: a section's rows in its place, counted as on iOS. */
+private fun leafRowIndex(children: List<NativeUINode>): Map<Any, Int> {
+    val map = HashMap<Any, Int>()
+    var counter = 0
+    for (child in children) {
+        if (child.type == "list_section") {
+            for (row in child.children) map[row.id] = counter++
+        } else if (child.type == "sticky_header") {
+            continue
+        } else {
+            map[child.id] = counter++
+        }
+    }
+    return map
+}
+
+/**
+ * One list row, measured into [heights] when the list keeps them, or an
+ * empty box at the height its row last drew at when it's a placeholder.
+ */
+@Composable
+private fun ListRow(child: NativeUINode, heights: ListRowHeights?) {
+    if (child.type == "list_placeholder") {
+        val estimated = child.props.getFloat("estimated_height", 0f)
+        val density = LocalDensity.current
+        val height = heights?.height(child.id)?.let { with(density) { it.toDp() } }
+            ?: if (estimated > 0f) estimated.dp else heights?.typical?.let { with(density) { it.toDp() } } ?: 44.dp
+        Spacer(Modifier.fillMaxWidth().height(height))
+    } else if (heights != null) {
+        Box(Modifier.onSizeChanged { heights.set(child.id, it.height) }) { NodeRow(child) }
+    } else {
+        NodeRow(child)
+    }
+}
+
 /**
  * One list row: the node plus its leading/trailing swipe actions. Shared
  * by flat rows and section children so the swipe behaviour is identical
@@ -234,7 +332,7 @@ object ListRenderer {
  * destructive trailing action when no structured actions are present.
  */
 @Composable
-private fun ListRow(child: NativeUINode) {
+private fun NodeRow(child: NativeUINode) {
     val legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
     val leading = decodeSwipeActions(child.props.getString("leading_actions_json", ""))
     val trailing = decodeSwipeActions(child.props.getString("trailing_actions_json", ""))
