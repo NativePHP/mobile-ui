@@ -6,6 +6,7 @@ use Native\Mobile\Edge\Elements\Text;
 use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\UI\Elements\ListItem;
+use Native\Mobile\UI\Elements\ListPlaceholder;
 use Native\Mobile\UI\Elements\ListSection;
 use Native\Mobile\UI\Elements\NativeList;
 
@@ -21,6 +22,7 @@ beforeEach(function () {
     ElementRegistry::register('list', NativeList::class);
     ElementRegistry::register('list_section', ListSection::class);
     ElementRegistry::register('list_item', ListItem::class);
+    ElementRegistry::register('list_placeholder', ListPlaceholder::class);
 });
 
 afterEach(function () {
@@ -88,4 +90,51 @@ it('clamps a negative end reached buffer to one', function () {
     $list = NativeList::make()->endReachedBuffer(-1);
 
     expect($list->toArray(new CallbackRegistry)['props']['end_reached_buffer'])->toBe(1);
+});
+
+it('reports the visible range as two positions, the way the virtual list reports its window', function () {
+    $registry = new CallbackRegistry;
+    NativeElementCollector::open('list', ['on-visible-range' => 'showRows', 'visible-range-step' => 20]);
+    NativeElementCollector::close();
+
+    $props = NativeElementCollector::collect()->toArray($registry)['props'];
+
+    expect($registry->resolve($props['on_visible_range'])['method'])->toBe('showRows')
+        ->and($registry->kind($props['on_visible_range']))->toBe('virtual_window')
+        ->and($props['visible_range_step'])->toBe(20);
+});
+
+it('leaves the visible range out of a list that does not ask for it', function () {
+    $props = NativeList::make()->toArray(new CallbackRegistry)['props'] ?? [];
+
+    expect($props)->not->toHaveKey('on_visible_range')
+        ->and($props)->not->toHaveKey('visible_range_step');
+});
+
+it('clamps the visible range step to one row', function () {
+    $list = NativeList::make()->onVisibleRange('showRows')->visibleRangeStep(0);
+
+    expect($list->toArray(new CallbackRegistry)['props']['visible_range_step'])->toBe(1);
+});
+
+it('gives a placeholder the node id of the row whose key it carries', function () {
+    $row = fn () => NativeList::make(Text::make('Hello')->key('commit-1'))->key('log');
+    $placeholder = fn () => NativeList::make(ListPlaceholder::make()->key('commit-1'))->key('log');
+
+    $rowNode = $row()->toArray(new CallbackRegistry)['children'][0];
+    $placeholderNode = $placeholder()->toArray(new CallbackRegistry)['children'][0];
+
+    expect($placeholderNode['type'])->toBe('list_placeholder')
+        ->and($placeholderNode['id'])->toBe($rowNode['id'])
+        ->and($placeholderNode)->not->toHaveKey('children');
+});
+
+it('serializes a placeholder estimated height from attributes', function () {
+    NativeElementCollector::open('list', []);
+    NativeElementCollector::leaf('list_placeholder', ['estimated-height' => 120]);
+    NativeElementCollector::close();
+
+    $placeholder = NativeElementCollector::collect()->toArray(new CallbackRegistry)['children'][0];
+
+    expect($placeholder['props']['estimated_height'])->toBe(120.0);
 });

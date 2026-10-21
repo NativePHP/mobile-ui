@@ -28,6 +28,12 @@ private func colorFromHex(_ hex: String) -> Color? {
 struct NativeUIListRenderer: View {
     let node: NativeUINode
 
+    /// The height of each row this list has drawn, for a placeholder drawn in its place.
+    @State private var rowHeights = ListRowHeights()
+
+    /// The rows on screen, for `on_visible_range`.
+    @State private var visibleRange = ListVisibleRange()
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
@@ -35,6 +41,7 @@ struct NativeUIListRenderer: View {
         let onRefreshCb = node.props.getCallbackId("on_refresh")
         let onEndReachedCb = node.props.getCallbackId("on_end_reached")
         let endReachedBuffer = max(1, node.props.getInt("end_reached_buffer", default: 3))
+        let onVisibleRangeCb = node.props.getCallbackId("on_visible_range")
         let nodeId = node.id
         let children = node.children
 
@@ -48,6 +55,19 @@ struct NativeUIListRenderer: View {
         // end-reached fires near the true bottom rather than when a section
         // container first appears. Computed once per render.
         let (leafIndex, leafCount) = Self.leafRowIndex(children)
+
+        // Rows are measured while the list reports its visible range: that's
+        // what a list putting placeholders in rows' places goes by.
+        let rows = ListRowContext(
+            separator: separator,
+            heights: onVisibleRangeCb != 0 ? rowHeights : nil,
+            visibleRange: onVisibleRangeCb != 0 ? visibleRange : nil
+        )
+        // The tracker reads positions from the frame showing now. It isn't
+        // observed, so this doesn't draw the list again.
+        let _ = visibleRange.update(callbackId: onVisibleRangeCb, nodeId: nodeId,
+                                    step: max(1, node.props.getInt("visible_range_step", default: 10)),
+                                    leafIndex: leafIndex)
 
         if horizontal {
             ScrollView(.horizontal, showsIndicators: showsIndicators) {
@@ -66,7 +86,7 @@ struct NativeUIListRenderer: View {
                         let footer = child.props.getString("footer", default: "")
                         Section {
                             ForEach(Array(child.children.enumerated()), id: \.element.id) { index, row in
-                                rowView(row, separator: separator, isLastInSection: index == child.children.count - 1)
+                                rowView(row, rows, isLastInSection: index == child.children.count - 1)
                                     .onAppear(perform: Self.endReachedAction(at: leafIndex[row.id], leafCount: leafCount,
                                         buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
                             }
@@ -76,7 +96,7 @@ struct NativeUIListRenderer: View {
                             if !footer.isEmpty { Text(footer).nuiScaledFont(size: 13) }
                         }
                     } else {
-                        rowView(child, separator: separator)
+                        rowView(child, rows)
                             .onAppear(perform: Self.endReachedAction(at: leafIndex[child.id], leafCount: leafCount,
                                 buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
                     }
@@ -98,9 +118,20 @@ struct NativeUIListRenderer: View {
     }
 
     /// One list row: the node plus its leading/trailing swipe actions and
-    /// row-level styling. Shared by both flat rows and section children.
+    /// row-level styling, or a placeholder at the row's height. Shared by
+    /// both flat rows and section children.
     @ViewBuilder
-    private func rowView(_ child: NativeUINode, separator: Bool, isLastInSection: Bool = false) -> some View {
+    private func rowView(_ child: NativeUINode, _ rows: ListRowContext, isLastInSection: Bool = false) -> some View {
+        if child.type == "list_placeholder" {
+            placeholderView(child, rows, isLastInSection: isLastInSection)
+        } else {
+            nodeRowView(child, rows, isLastInSection: isLastInSection)
+        }
+    }
+
+    @ViewBuilder
+    private func nodeRowView(_ child: NativeUINode, _ rows: ListRowContext, isLastInSection: Bool) -> some View {
+        let separator = rows.separator
         // Legacy single-action API.
         let legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
         // New multi-action API.
@@ -112,6 +143,8 @@ struct NativeUIListRenderer: View {
         NodeView(node: child)
             .equatable()
             .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(RowHeightModifier(rowId: rowId, heights: rows.heights))
+            .modifier(VisibleRowModifier(rowId: rowId, visibleRange: rows.visibleRange))
             .listRowInsets(EdgeInsets())
             // Rows carry SwiftUI's opaque system fill, which paints over the
             // list's own background — so hiding the scroll background via
@@ -146,6 +179,25 @@ struct NativeUIListRenderer: View {
                     }
                 }
             }
+    }
+
+    /// An empty row at the height the list last drew the row it stands in for,
+    /// with the row's separators, so swapping one for the other moves nothing.
+    @ViewBuilder
+    private func placeholderView(_ child: NativeUINode, _ rows: ListRowContext, isLastInSection: Bool) -> some View {
+        let estimated = CGFloat(child.props.getFloat("estimated_height", default: 0))
+        let height = rows.heights?.height(of: child.id)
+            ?? (estimated > 0 ? estimated : rows.heights?.typical ?? 44)
+
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .accessibilityHidden(true)
+            .modifier(VisibleRowModifier(rowId: child.id, visibleRange: rows.visibleRange))
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(rows.separator && !isLastInSection ? .visible : .hidden, edges: .bottom)
+            .listRowSeparator(.hidden, edges: .top)
     }
 
     /// What a row does when it appears: fire the end-reached callback if it's
@@ -206,6 +258,139 @@ struct NativeUIListRenderer: View {
         } else {
             button
         }
+    }
+}
+
+/// What every row of a list needs from it besides its node.
+private struct ListRowContext {
+    let separator: Bool
+    /// Set when the list measures its rows.
+    let heights: ListRowHeights?
+    /// Set when the list reports its visible range.
+    let visibleRange: ListVisibleRange?
+}
+
+/// The height each row of a list last drew at, by node id. A node's id comes
+/// from its key, so a placeholder with a row's key finds the row's height.
+/// Not observed: a row measuring itself doesn't draw the list again.
+private final class ListRowHeights {
+    private var heights: [Int: CGFloat] = [:]
+    private var total: CGFloat = 0
+
+    func height(of rowId: Int) -> CGFloat? {
+        heights[rowId]
+    }
+
+    /// The average row, for a placeholder whose row was never drawn.
+    var typical: CGFloat? {
+        heights.isEmpty ? nil : total / CGFloat(heights.count)
+    }
+
+    func set(_ height: CGFloat, for rowId: Int) {
+        total += height - (heights[rowId] ?? 0)
+        heights[rowId] = height
+    }
+}
+
+/// Keeps a row's height in the list's cache whenever it lays out.
+private struct RowHeightModifier: ViewModifier {
+    let rowId: Int
+    let heights: ListRowHeights?
+
+    func body(content: Content) -> some View {
+        if let heights {
+            // Captures the cache and the id only (see endReachedAction).
+            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                heights.set(height, for: rowId)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Tells the list's tracker when a row comes on screen and goes off it.
+private struct VisibleRowModifier: ViewModifier {
+    let rowId: Int
+    let visibleRange: ListVisibleRange?
+
+    func body(content: Content) -> some View {
+        if let visibleRange {
+            content
+                .onAppear { visibleRange.appeared(rowId) }
+                .onDisappear { visibleRange.disappeared(rowId) }
+        } else {
+            content
+        }
+    }
+}
+
+/// The rows of a list on screen. Sends `on_visible_range` the positions of
+/// the first and last, as "first,last", once either has moved by the step
+/// since the last report. Positions count rows as end-reached does, and come
+/// from the frame showing when it reports, so a row inserted above the screen
+/// doesn't leave them stale.
+///
+/// A new frame takes every row on screen off it and puts it back, so the
+/// range is read a moment after it moves, when that has settled, and no more
+/// than every 150ms while scrolling.
+private final class ListVisibleRange {
+    private var callbackId = 0
+    private var nodeId = 0
+    private var step = 10
+    private var leafIndex: [Int: Int] = [:]
+
+    private var onScreen: Set<Int> = []
+    /// The range last reported. The list starts at the top, so a range near
+    /// it isn't reported until it moves a step.
+    private var reported = (first: 0, last: 0)
+    private var reportedAt: CFAbsoluteTime = 0
+    private var pending: DispatchWorkItem?
+
+    private static let settle: CFAbsoluteTime = 0.05
+    private static let interval: CFAbsoluteTime = 0.15
+
+    func update(callbackId: Int, nodeId: Int, step: Int, leafIndex: [Int: Int]) {
+        self.callbackId = callbackId
+        self.nodeId = nodeId
+        self.step = step
+        self.leafIndex = leafIndex
+    }
+
+    func appeared(_ rowId: Int) {
+        onScreen.insert(rowId)
+        changed()
+    }
+
+    func disappeared(_ rowId: Int) {
+        onScreen.remove(rowId)
+        changed()
+    }
+
+    private func changed() {
+        guard callbackId != 0, pending == nil, let range = currentRange(),
+              abs(range.first - reported.first) >= step || abs(range.last - reported.last) >= step else { return }
+
+        let wait = max(Self.settle, reportedAt + Self.interval - CFAbsoluteTimeGetCurrent())
+        let task = DispatchWorkItem { [weak self] in
+            self?.pending = nil
+            self?.report()
+        }
+        pending = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: task)
+    }
+
+    private func report() {
+        guard callbackId != 0, let range = currentRange() else { return }
+        reported = range
+        reportedAt = CFAbsoluteTimeGetCurrent()
+        NativeElementBridge.sendTextChangeEvent(callbackId, nodeId: nodeId, text: "\(range.first),\(range.last)")
+    }
+
+    private func currentRange() -> (first: Int, last: Int)? {
+        let indexes = onScreen.compactMap { leafIndex[$0] }
+        guard let first = indexes.min(), let last = indexes.max() else { return nil }
+        return (first, last)
     }
 }
 
