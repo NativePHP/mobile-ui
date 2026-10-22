@@ -68,7 +68,7 @@ struct NativeUIFilledTextInputRenderer: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     if !leadingIcon.isEmpty {
-                        Image(systemName: getIconForName(leadingIcon))
+                        NativeIconView(leadingIcon, pointSize: metrics.iconSize, relativeTo: .body)
                             .nuiScaledFont(size: metrics.iconSize)
                             .foregroundStyle(theme.onSurfaceVariant)
                     }
@@ -95,7 +95,7 @@ struct NativeUIFilledTextInputRenderer: View {
                     if loading {
                         ProgressView().controlSize(.small)
                     } else if !trailingIcon.isEmpty {
-                        Image(systemName: getIconForName(trailingIcon))
+                        NativeIconView(trailingIcon, pointSize: metrics.iconSize, relativeTo: .body)
                             .nuiScaledFont(size: metrics.iconSize)
                             .foregroundStyle(theme.onSurfaceVariant)
                     }

@@ -419,7 +419,7 @@ object ListItemRenderer {
         // `trailing_a11y_label` wins, else humanize the machine icon name
         // ("more_vert" -> "more vert") so it's never unlabeled.
         val iconButtonDescription = a11yLabel.ifEmpty {
-            effectiveValue.replace('_', ' ').replace('-', ' ')
+            effectiveValue.removePrefix(com.nativephp.mobile.ui.CUSTOM_ICON_PREFIX).replace('_', ' ').replace('-', ' ')
         }
 
         return {

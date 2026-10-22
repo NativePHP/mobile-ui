@@ -37,6 +37,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.R
+import com.nativephp.mobile.ui.CUSTOM_ICON_PREFIX
+import com.nativephp.mobile.ui.MaterialIcon
 import com.nativephp.mobile.ui.getIconName
 import com.nativephp.mobile.ui.nativerender.LocalSafeAreaBottom
 import com.nativephp.mobile.ui.nativerender.LocalSafeAreaTop
@@ -112,21 +114,28 @@ object TopBarRenderer {
                 val icon = action.props.getString("icon", "more_vert")
                 val url = action.props.getString("url")
                 val actionLabel = action.props.getString("label")
-                Text(
-                    text = getIconName(icon), fontFamily = iconFont, fontSize = 24.sp, color = textColor,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .clickable(role = Role.Button) {
-                            if (url.isNotEmpty()) {
-                                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
-                            } else if (action.onPress != 0) {
-                                NativeElementBridge.sendPressEvent(action.onPress, action.id)
-                            }
+                val actionModifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable(role = Role.Button) {
+                        if (url.isNotEmpty()) {
+                            try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
+                        } else if (action.onPress != 0) {
+                            NativeElementBridge.sendPressEvent(action.onPress, action.id)
                         }
-                        .let { m ->
-                            if (actionLabel.isNotEmpty()) m.semantics { contentDescription = actionLabel } else m
-                        }
-                )
+                    }
+                    .let { m ->
+                        if (actionLabel.isNotEmpty()) m.semantics { contentDescription = actionLabel } else m
+                    }
+                // Custom SVG icons are drawables, not font ligatures, so they
+                // go through core's MaterialIcon. Font glyphs stay as they were.
+                if (icon.startsWith(CUSTOM_ICON_PREFIX)) {
+                    MaterialIcon(name = icon, contentDescription = null, modifier = actionModifier, size = 24.dp, tint = textColor)
+                } else {
+                    Text(
+                        text = getIconName(icon), fontFamily = iconFont, fontSize = 24.sp, color = textColor,
+                        modifier = actionModifier
+                    )
+                }
             }
         }
     }
@@ -211,7 +220,11 @@ object BottomNavRenderer {
                     // Box wraps the icon at center; badge / news dot anchored
                     // to the icon's TopEnd corner via `.align(TopEnd)`.
                     Box(contentAlignment = Alignment.Center) {
-                        Text(text = getIconName(icon), fontFamily = iconFont, fontSize = 24.sp, color = itemColor, textAlign = TextAlign.Center)
+                        if (icon.startsWith(CUSTOM_ICON_PREFIX)) {
+                            MaterialIcon(name = icon, contentDescription = null, size = 24.dp, tint = itemColor)
+                        } else {
+                            Text(text = getIconName(icon), fontFamily = iconFont, fontSize = 24.sp, color = itemColor, textAlign = TextAlign.Center)
+                        }
                         if (badge.isNotEmpty()) {
                             Box(
                                 modifier = Modifier

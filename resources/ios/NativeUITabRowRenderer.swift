@@ -42,7 +42,7 @@ struct NativeUITabRowRenderer: View {
                             let effectiveA11y = !tabA11y.isEmpty
                                 ? tabA11y
                                 : (label.isEmpty
-                                    ? icon.replacingOccurrences(of: "_", with: " ")
+                                    ? (NativeIcon.customName(icon) ?? icon).replacingOccurrences(of: "_", with: " ")
                                           .replacingOccurrences(of: "-", with: " ")
                                     : "")
 
@@ -55,7 +55,7 @@ struct NativeUITabRowRenderer: View {
                             }) {
                                 VStack(spacing: 4) {
                                     if !icon.isEmpty {
-                                        Image(systemName: getIconForName(icon))
+                                        NativeIcon.image(icon)
                                     }
                                     if !label.isEmpty {
                                         Text(label).nuiScaledFont(size: theme.fontSm, weight: .medium)

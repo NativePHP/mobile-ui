@@ -194,7 +194,11 @@ struct NativeUIListRenderer: View {
         let button = Button(role: role) {
             NativeElementBridge.sendPressEvent(spec.cb, nodeId: nodeId)
         } label: {
-            if !spec.icon.isEmpty {
+            if spec.icon.hasPrefix(NativeIcon.customPrefix) {
+                // Swipe icons are raw SF Symbol names (no getIconForName
+                // mapping), so only custom icons take the NativeIcon path.
+                Label { Text(spec.label.isEmpty ? " " : spec.label) } icon: { NativeIcon.image(spec.icon) }
+            } else if !spec.icon.isEmpty {
                 Label(spec.label.isEmpty ? " " : spec.label, systemImage: spec.icon)
             } else {
                 Text(spec.label.isEmpty ? " " : spec.label)

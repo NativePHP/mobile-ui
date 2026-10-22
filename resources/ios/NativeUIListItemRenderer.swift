@@ -137,13 +137,13 @@ struct NativeUIListItemRenderer: View {
             if iconBgColor != 0 {
                 ZStack {
                     Circle().fill(Color(argb: iconBgColor))
-                    Image(systemName: getIconForName(value))
+                    NativeIconView(value, pointSize: 18, relativeTo: .body)
                         .nuiScaledFont(size: 18, weight: .medium)
                         .foregroundColor(.white)
                 }
                 .frame(width: 40, height: 40)
             } else {
-                Image(systemName: getIconForName(value))
+                NativeIcon.image(value)
                     .frame(width: 24, height: 24)
                     .foregroundColor(.secondary)
             }
@@ -232,7 +232,7 @@ struct NativeUIListItemRenderer: View {
         if !badges.isEmpty {
             HStack(spacing: 6) {
                 ForEach(badges) { b in
-                    Image(systemName: getIconForName(b.icon))
+                    NativeIconView(b.icon, pointSize: 15, relativeTo: .body)
                         .nuiScaledFont(size: 15)
                         .foregroundColor(parseListItemHex(b.color) ?? .secondary)
                 }
@@ -246,7 +246,7 @@ struct NativeUIListItemRenderer: View {
     private func buildTrailingContent(type: String, value: String, iconColor: Int, textColor: Int, textStyle: String = "", checked: Bool = false, changeCb: Int = 0) -> some View {
         switch type {
         case "icon":
-            Image(systemName: getIconForName(value))
+            NativeIcon.image(value)
                 .frame(width: 24, height: 24)
                 .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
         case "text":
@@ -261,7 +261,7 @@ struct NativeUIListItemRenderer: View {
             let trailingA11y = node.props.getString("trailing_a11y_label")
             let effectiveTrailingA11y = !trailingA11y.isEmpty
                 ? trailingA11y
-                : value.replacingOccurrences(of: "_", with: " ")
+                : (NativeIcon.customName(value) ?? value).replacingOccurrences(of: "_", with: " ")
                        .replacingOccurrences(of: "-", with: " ")
             // When the row has `:trailing-menu` attached, the trailing
             // icon button becomes a Menu trigger instead of a plain
@@ -280,7 +280,7 @@ struct NativeUIListItemRenderer: View {
                     // without it only the symbol's opaque pixels respond,
                     // which makes the ellipsis glyph (mostly empty space)
                     // almost un-tappable.
-                    Image(systemName: getIconForName(value))
+                    NativeIcon.image(value)
                         .frame(width: 24, height: 24)
                         .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
                         .nuiMinTapTarget()
@@ -298,7 +298,7 @@ struct NativeUIListItemRenderer: View {
                         }
                     }
                 }) {
-                    Image(systemName: getIconForName(value))
+                    NativeIcon.image(value)
                         .frame(width: 24, height: 24)
                         .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
                         .nuiMinTapTarget()
@@ -340,7 +340,7 @@ private func listItemMenuItem(_ item: NativeUINode) -> some View {
             }
         } label: {
             if !icon.isEmpty {
-                Label(label, systemImage: getIconForName(icon))
+                Label { Text(label) } icon: { NativeIcon.image(icon) }
             } else {
                 Text(label)
             }
