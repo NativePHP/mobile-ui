@@ -4,6 +4,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -63,6 +64,8 @@ internal data class TextInputProps(
     val capitalization: KeyboardCapitalization?,
     val contentType: ContentType?,
     val submitLabel: String,
+    val focusRef: String,
+    val nextFocus: String,
     val disabled: Boolean,
     val keepFocusOnSubmit: Boolean,
     val readOnly: Boolean,
@@ -152,6 +155,8 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getBool("secure"), p.getString("keyboard")),
         contentType  = resolveContentType(p.getString("content_type")),
         submitLabel  = p.getString("submit_label"),
+        focusRef     = p.getString("focus_ref"),
+        nextFocus    = p.getString("next_focus"),
         disabled     = p.getBool("disabled"),
         keepFocusOnSubmit = p.getBool("keep_focus_on_submit"),
         readOnly     = p.getBool("read_only"),
@@ -290,18 +295,21 @@ internal fun Modifier.nuiContentType(type: ContentType?): Modifier =
 /**
  * IME action for the submit key — the `submit_label` prop. The explicit
  * value wins; unset — or unknown, same policy as [resolveKeyboardType] —
- * keeps [ImeAction.Default], i.e. exactly the pre-prop behaviour.
+ * derives [ImeAction.Next] when a `next_focus` chain is set (mirroring how
+ * capitalization derives from the keyboard type), else keeps
+ * [ImeAction.Default], i.e. exactly the pre-prop behaviour.
  *
  * "return" is iOS vocabulary (a plain Return key); Android has no exact
- * equivalent, so it resolves to the IME default too.
+ * equivalent, so it resolves to the IME default — listed explicitly so an
+ * author's `return` beats the `next_focus` derivation.
  *
- * A multiline field ignores the prop entirely: a non-default IME action
+ * A multiline field ignores both props entirely: a non-default IME action
  * replaces the return key, and multiline's return key must keep inserting
- * newlines. iOS ignores the prop for multiline the same way
+ * newlines. iOS ignores them for multiline the same way
  * (`resolveSubmitLabel` in `NativeUITextInputCore.swift`) — keep the two
  * in sync.
  */
-internal fun resolveImeAction(explicit: String, multiline: Boolean): ImeAction {
+internal fun resolveImeAction(explicit: String, multiline: Boolean, nextFocus: String): ImeAction {
     if (multiline) return ImeAction.Default
 
     return when (explicit.lowercase()) {
@@ -310,16 +318,87 @@ internal fun resolveImeAction(explicit: String, multiline: Boolean): ImeAction {
         "go"     -> ImeAction.Go
         "search" -> ImeAction.Search
         "send"   -> ImeAction.Send
-        else     -> ImeAction.Default
+        "return" -> ImeAction.Default
+        else     -> if (nextFocus.isNotEmpty()) ImeAction.Next else ImeAction.Default
     }
 }
 
 internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions {
-    val imeAction = resolveImeAction(props.submitLabel, props.multiline)
+    val imeAction = resolveImeAction(props.submitLabel, props.multiline, props.nextFocus)
 
     return props.capitalization
         ?.let { KeyboardOptions(keyboardType = props.keyboard, capitalization = it, imeAction = imeAction) }
         ?: KeyboardOptions(keyboardType = props.keyboard, imeAction = imeAction)
+}
+
+/**
+ * Screen-wide focus routing for text inputs — the `next-focus` prop.
+ *
+ * Each renderer whose element carries a `ref` registers its
+ * [FocusRequester] under that name (a `DisposableEffect` keyed on the
+ * ref), and the submit handler of a field with `next_focus` set asks the
+ * registry to move the keyboard there. Focus is only ever requested from
+ * a user-initiated submit on another field — never from server pushes —
+ * so the registry cannot steal focus spontaneously.
+ *
+ * Main-thread only: registration happens in composition effects and
+ * requests in IME action handlers. Last registration wins (refs are
+ * unique per screen by convention — they are the same refs
+ * `Native::test()` targets); unregistration is identity-guarded so a
+ * disposed screen can't tear down the ref it was shadowing. iOS keeps the
+ * same contract (`NativeUIFocusRegistry.swift`) — keep the two in sync.
+ */
+internal object NativeUIFocusRegistry {
+    private val entries = mutableMapOf<String, FocusRequester>()
+
+    fun register(ref: String, requester: FocusRequester) {
+        entries[ref] = requester
+    }
+
+    fun unregister(ref: String, requester: FocusRequester) {
+        if (entries[ref] === requester) {
+            entries.remove(ref)
+        }
+    }
+
+    /**
+     * Focus the field registered under [ref]. Returns whether a live
+     * target existed — a missing or detached target (off-screen, recycled
+     * row, typo'd ref) is a no-op, never a crash.
+     */
+    fun request(ref: String): Boolean {
+        val requester = entries[ref] ?: return false
+        return try {
+            requester.requestFocus()
+            true
+        } catch (_: IllegalStateException) {
+            // Registered but no longer attached to a composed node (the
+            // row was recycled between registration and this submit).
+            false
+        }
+    }
+}
+
+/**
+ * Remember a [FocusRequester] kept registered in [NativeUIFocusRegistry]
+ * under the field's `focus_ref` while it is in composition. Hang the
+ * result on the field's `Modifier.focusRequester`; an empty ref returns a
+ * plain, unregistered requester.
+ */
+@Composable
+internal fun rememberRegisteredFocusRequester(focusRef: String): FocusRequester {
+    val requester = remember { FocusRequester() }
+    DisposableEffect(focusRef) {
+        if (focusRef.isNotEmpty()) {
+            NativeUIFocusRegistry.register(focusRef, requester)
+        }
+        onDispose {
+            if (focusRef.isNotEmpty()) {
+                NativeUIFocusRegistry.unregister(focusRef, requester)
+            }
+        }
+    }
+    return requester
 }
 
 /**
