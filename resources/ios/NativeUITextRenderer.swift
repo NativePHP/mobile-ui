@@ -328,6 +328,7 @@ struct NativeUITextRenderer: View {
         switch family {
         case 1: return .serif
         case 2: return .monospaced
+        case 3: return .rounded
         default: return .default
         }
     }

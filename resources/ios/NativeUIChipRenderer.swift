@@ -77,6 +77,7 @@ struct NativeUIChipRenderer: View {
             .modifier(ChipBackgroundModifier(
                 fillColor: bg,
                 borderColor: border,
+                selected: isSelected,
                 glassEnabled: glassEnabled,
                 glassInteractive: glassInteractive,
                 glassClear: glassClear,
@@ -117,6 +118,9 @@ struct NativeUIChipRenderer: View {
 private struct ChipBackgroundModifier: ViewModifier {
     let fillColor: Color
     let borderColor: Color
+    /// A selected glass chip takes its fill as a glass tint: its text is
+    /// the on-primary colour, which an untinted plate can't carry.
+    let selected: Bool
     let glassEnabled: Bool
     let glassInteractive: Bool
     let glassClear: Bool
@@ -131,14 +135,18 @@ private struct ChipBackgroundModifier: ViewModifier {
         )
 
         if glassEnabled, #available(iOS 26.0, *) {
-            if glassClear {
-                bordered.glassEffect(.clear.interactive(glassInteractive), in: shape)
-            } else {
-                bordered.glassEffect(.regular.interactive(glassInteractive), in: shape)
-            }
+            let glass: Glass = glassClear ? .clear : .regular
+            bordered.glassEffect(
+                (selected ? glass.tint(fillColor) : glass).interactive(glassInteractive),
+                in: shape
+            )
         } else if glassEnabled {
             bordered.background(
-                shape.fill(glassClear ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial))
+                shape.fill(
+                    selected
+                        ? AnyShapeStyle(fillColor)
+                        : (glassClear ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial))
+                )
             )
         } else if hasUserBg {
             // User bg wins — paint nothing here, NodeStyleModifier already

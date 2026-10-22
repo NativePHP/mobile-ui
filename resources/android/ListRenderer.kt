@@ -62,6 +62,8 @@ object ListRenderer {
     fun Render(node: NativeUINode, modifier: Modifier) {
         val horizontal = node.props.getBool("horizontal")
         val separator = node.props.getBool("separator")
+        val rowColor = node.props.getColor("row_color", 0)
+        val rowBackground = if (rowColor != 0) Color(rowColor) else null
         val onRefreshCb = node.props.getCallbackId("on_refresh")
         val onEndReachedCb = node.props.getCallbackId("on_end_reached")
         val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
@@ -166,7 +168,7 @@ object ListRenderer {
                     rows.forEachIndexed { index, row ->
                         item(key = row.id) {
                             // Only this list draws the header, not one in its rows.
-                            CompositionLocalProvider(LocalPagerHeader provides null) { ListRow(row, heights) }
+                            CompositionLocalProvider(LocalPagerHeader provides null) { ListRow(row, heights, rowBackground) }
                             if (separator && index < rows.size - 1) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
@@ -209,9 +211,10 @@ object ListRenderer {
                                         SectionRow(
                                             isFirst = i == 0,
                                             isLast = i == child.children.size - 1,
+                                            background = rowBackground,
                                         ) { ListRow(row, heights) }
                                     } else {
-                                        ListRow(row, heights)
+                                        ListRow(row, heights, rowBackground)
                                         if (separator && i < child.children.size - 1) {
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         }
@@ -228,7 +231,7 @@ object ListRenderer {
                             stickyHeader(key = child.id) { NodeView(node = child) }
                         } else {
                             item(key = child.id) {
-                                ListRow(child, heights)
+                                ListRow(child, heights, rowBackground)
                                 if (separator && index < node.children.size - 1) {
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 }
@@ -297,9 +300,8 @@ private fun leafRowIndex(children: List<NativeUINode>): Map<Any, Int> {
     for (child in children) {
         if (child.type == "list_section") {
             for (row in child.children) map[row.id] = counter++
-        } else if (child.type == "sticky_header") {
-            continue
-        } else {
+        } else if (child.type != "sticky_header") {
+            // A sticky header isn't a row, as on iOS.
             map[child.id] = counter++
         }
     }
@@ -308,20 +310,22 @@ private fun leafRowIndex(children: List<NativeUINode>): Map<Any, Int> {
 
 /**
  * One list row, measured into [heights] when the list keeps them, or an
- * empty box at the height its row last drew at when it's a placeholder.
+ * empty box at the height its row last drew at when it's a placeholder,
+ * on the list's row colour like the row it stands in for.
  */
 @Composable
-private fun ListRow(child: NativeUINode, heights: ListRowHeights?) {
+private fun ListRow(child: NativeUINode, heights: ListRowHeights?, background: Color? = null) {
     if (child.type == "list_placeholder") {
         val estimated = child.props.getFloat("estimated_height", 0f)
         val density = LocalDensity.current
         val height = heights?.height(child.id)?.let { with(density) { it.toDp() } }
             ?: if (estimated > 0f) estimated.dp else heights?.typical?.let { with(density) { it.toDp() } } ?: 44.dp
-        Spacer(Modifier.fillMaxWidth().height(height))
+        val fill = if (background != null) Modifier.background(background) else Modifier
+        Spacer(Modifier.fillMaxWidth().height(height).then(fill))
     } else if (heights != null) {
-        Box(Modifier.onSizeChanged { heights.set(child.id, it.height) }) { NodeRow(child) }
+        Box(Modifier.onSizeChanged { heights.set(child.id, it.height) }) { NodeRow(child, background) }
     } else {
-        NodeRow(child)
+        NodeRow(child, background)
     }
 }
 
@@ -332,7 +336,7 @@ private fun ListRow(child: NativeUINode, heights: ListRowHeights?) {
  * destructive trailing action when no structured actions are present.
  */
 @Composable
-private fun NodeRow(child: NativeUINode) {
+private fun NodeRow(child: NativeUINode, background: Color? = null) {
     val legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
     val leading = decodeSwipeActions(child.props.getString("leading_actions_json", ""))
     val trailing = decodeSwipeActions(child.props.getString("trailing_actions_json", ""))
@@ -348,8 +352,18 @@ private fun NodeRow(child: NativeUINode) {
             trailing = effectiveTrailing,
             onAction = { cb -> NativeElementBridge.sendPressEvent(cb, child.id) }
         ) {
-            NodeView(node = child)
+            RowContent(child, background)
         }
+    } else {
+        RowContent(child, background)
+    }
+}
+
+/** The row's node, on the list's row colour when it declares one. */
+@Composable
+private fun RowContent(child: NativeUINode, background: Color?) {
+    if (background != null) {
+        Box(Modifier.fillMaxWidth().background(background)) { NodeView(node = child) }
     } else {
         NodeView(node = child)
     }
@@ -403,7 +417,7 @@ private fun SectionGap() {
  * look SwiftUI's `.insetGrouped` gives for free.
  */
 @Composable
-private fun SectionRow(isFirst: Boolean, isLast: Boolean, content: @Composable () -> Unit) {
+private fun SectionRow(isFirst: Boolean, isLast: Boolean, background: Color? = null, content: @Composable () -> Unit) {
     val radius = 12.dp
     val shape = RoundedCornerShape(
         topStart = if (isFirst) radius else 0.dp,
@@ -416,7 +430,7 @@ private fun SectionRow(isFirst: Boolean, isLast: Boolean, content: @Composable (
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(background ?: MaterialTheme.colorScheme.surfaceVariant)
         ) {
             content()
             if (!isLast) {

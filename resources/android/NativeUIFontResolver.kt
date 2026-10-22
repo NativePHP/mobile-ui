@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -136,8 +137,41 @@ object NativeUIFontResolver {
             }
         }
 
-        return null
+        return buildWeighted(assets, token)
     }
+
+    /**
+     * A family name with no file of its own ("Roboto") picks up every weight
+     * file bundled for it ("Roboto-Regular", "Roboto-Bold", …) as ONE family,
+     * so `font-bold` / `font-semibold` select the real cut instead of Compose
+     * faking bold from a single regular file.
+     */
+    private fun buildWeighted(assets: AssetManager, family: String): FontFamily? {
+        val fonts = weightSuffixes.flatMap { (suffix, weight) ->
+            extensions.mapNotNull { ext ->
+                val path = "fonts/$family-$suffix.$ext"
+                if (assetExists(assets, path)) Font(path = path, assetManager = assets, weight = weight) else null
+            }.take(1)
+        }
+
+        return if (fonts.isEmpty()) null else try {
+            FontFamily(fonts)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private val weightSuffixes = listOf(
+        "Thin" to FontWeight.Thin,
+        "ExtraLight" to FontWeight.ExtraLight,
+        "Light" to FontWeight.Light,
+        "Regular" to FontWeight.Normal,
+        "Medium" to FontWeight.Medium,
+        "SemiBold" to FontWeight.SemiBold,
+        "Bold" to FontWeight.Bold,
+        "ExtraBold" to FontWeight.ExtraBold,
+        "Black" to FontWeight.Black,
+    )
 
     private fun assetExists(assets: AssetManager, path: String): Boolean {
         return try {
