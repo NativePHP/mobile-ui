@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
@@ -22,12 +25,16 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -39,6 +46,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -49,6 +57,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import coil3.compose.AsyncImage
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +68,7 @@ import com.nativephp.mobile.ui.nativerender.NativeElementBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
 import com.nativephp.plugins.native_ui.NativeUITheme
+import kotlin.math.abs
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.floor
@@ -93,7 +103,13 @@ object PagerRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
         val p = node.props
-        val count = p.getInt("count", node.children.size).coerceAtLeast(0)
+        val horizontal = p.getBool("horizontal", false)
+        // The header and the overlay ride beside the pages; neither is one.
+        val pages = remember(node) { node.children.filter { it.type != "pager_header" && it.type != "pager_overlay" } }
+        // Only a horizontal pager's pages scroll up and down under a header.
+        val header = if (horizontal) node.children.firstOrNull { it.type == "pager_header" } else null
+        val overlay = node.children.firstOrNull { it.type == "pager_overlay" }
+        val count = p.getInt("count", pages.size).coerceAtLeast(0)
         val windowFrom = p.getInt("window_from", 0)
         // `has_more` appends one loading page after the last loaded item —
         // a feed has no total, so the user can pull into the tail while
@@ -103,15 +119,14 @@ object PagerRenderer {
         // Image per page index for pages PHP hasn't shipped; "" for none.
         val placeholders = p.getStringList("placeholders")
         val requestedPage = p.getInt("page", 0).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
-        val horizontal = p.getBool("horizontal", false)
         val cbId = p.getCallbackId("on_page_change")
         val reportOnSettle = p.getBool("report_on_settle", false)
         val tabs = PagerTabs.from(p)
         val scope = rememberCoroutineScope()
 
         val pageByIndex: Map<Int, NativeUINode> = remember(node, windowFrom) {
-            val out = HashMap<Int, NativeUINode>(node.children.size)
-            node.children.forEachIndexed { offset, child -> out[windowFrom + offset] = child }
+            val out = HashMap<Int, NativeUINode>(pages.size)
+            pages.forEachIndexed { offset, child -> out[windowFrom + offset] = child }
             out
         }
 
@@ -162,6 +177,34 @@ object PagerRenderer {
 
         val pagerModifier = modifier.nuiA11y(p.getString("a11y_label"), p.getString("a11y_hint"))
 
+        val selectTab: (Int) -> Unit = { index ->
+            // The tab consumes the tap, so drop the keyboard
+            // here unless the focused field keeps focus.
+            KeyboardFocusPolicy.dismissForInteractiveTap()
+            if (index == pagerState.currentPage && !pagerState.isScrollInProgress) {
+                // The tab already showing: PHP decides, usually
+                // to take the page back to its top.
+                if (tabs != null && tabs.reselectCbId != 0) {
+                    NativeElementBridge.sendTabChangeEvent(tabs.reselectCbId, node.id, index)
+                }
+            } else if (index in 0 until pageCount) {
+                // Reported when the pager settles, as for a swipe.
+                scope.launch { pagerState.animateScrollToPage(index) }
+            }
+        }
+
+        // Where the header is, and each page's list, when there's a header.
+        val headerScroll = remember { PagerHeaderScroll() }
+        if (header != null) {
+            LaunchedEffect(pagerState) {
+                snapshotFlow { pagerState.currentPage }.collect { headerScroll.lead(it) }
+            }
+        }
+        val background = PagerTabColor(
+            node.style?.bgColor?.takeIf { it != 0 },
+            if (p.has("dark_bg_color")) p.getColor("dark_bg_color", 0).takeIf { it != 0 } else null,
+        )
+
         // A pager needs a bounded main axis. Inside a lazy parent (the
         // plain vertical scroll_view is a LazyColumn) the incoming height
         // is infinite, so fall back to one viewport.
@@ -176,7 +219,12 @@ object PagerRenderer {
             val page: @Composable (Int) -> Unit = { index ->
                 Box(modifier = Modifier.fillMaxSize()) {
                     val child = pageByIndex[index]
-                    if (child != null) {
+                    if (child != null && header != null) {
+                        // The page's list draws the header and the tabs (see PagerHeader).
+                        CompositionLocalProvider(LocalPagerHeader provides headerScroll.header(index, header, tabs, pagerState, selectTab, background)) {
+                            NodeView(node = child)
+                        }
+                    } else if (child != null) {
                         NodeView(node = child)
                     } else if (hasMore && index >= count) {
                         PagerLoadingPage()
@@ -204,26 +252,31 @@ object PagerRenderer {
                 }
             }
 
-            if (tabs == null) {
-                pages(sized)
+            // The overlay hangs under the tabs: under a header, wherever it
+            // has scrolled them to.
+            val withOverlay: @Composable (Modifier, PagerHeaderScroll?) -> Unit = { pagesModifier, scroll ->
+                if (overlay == null) {
+                    pages(pagesModifier)
+                } else {
+                    Box(modifier = pagesModifier) {
+                        pages(Modifier.fillMaxSize())
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset { IntOffset(0, scroll?.stripBottom()?.roundToInt() ?: 0) },
+                        ) { PagerChildren(overlay) }
+                    }
+                }
+            }
+
+            if (header != null) {
+                withOverlay(sized.onGloballyPositioned { headerScroll.pagerTop = it.positionInRoot().y }, headerScroll)
+            } else if (tabs == null) {
+                withOverlay(sized, null)
             } else {
                 Column(modifier = sized) {
-                    PagerTabStrip(tabs, pagerState) { index ->
-                        // The tab consumes the tap, so drop the keyboard
-                        // here unless the focused field keeps focus.
-                        KeyboardFocusPolicy.dismissForInteractiveTap()
-                        if (index == pagerState.currentPage && !pagerState.isScrollInProgress) {
-                            // The tab already showing: PHP decides, usually
-                            // to take the page back to its top.
-                            if (tabs.reselectCbId != 0) {
-                                NativeElementBridge.sendTabChangeEvent(tabs.reselectCbId, node.id, index)
-                            }
-                        } else if (index in 0 until pageCount) {
-                            // Reported when the pager settles, as for a swipe.
-                            scope.launch { pagerState.animateScrollToPage(index) }
-                        }
-                    }
-                    pages(Modifier.fillMaxWidth().weight(1f))
+                    PagerTabStrip(tabs, pagerState, selectTab)
+                    withOverlay(Modifier.fillMaxWidth().weight(1f), null)
                 }
             }
         }
@@ -238,7 +291,7 @@ object PagerRenderer {
      * itself to keep the indicator in view. Nothing here waits for PHP.
      */
     @Composable
-    private fun PagerTabStrip(tabs: PagerTabs, pagerState: PagerState, onSelect: (Int) -> Unit) {
+    internal fun PagerTabStrip(tabs: PagerTabs, pagerState: PagerState, onSelect: (Int) -> Unit) {
         val isDark = isSystemInDarkTheme()
         val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
         val density = LocalDensity.current
@@ -394,7 +447,7 @@ object PagerRenderer {
  * The `tabs` row and its look, read from the pager's props. Colours are
  * null where PHP sent none, so the row falls back to the theme.
  */
-private class PagerTabs(p: GenericProps) {
+internal class PagerTabs(p: GenericProps) {
     val labels: List<String> = p.getStringList("tabs")
     val a11yLabels: List<String> = p.getStringList("tab_a11y_labels")
     val scrollable = p.getBool("tabs_scrollable", false)
@@ -418,7 +471,7 @@ private class PagerTabs(p: GenericProps) {
 }
 
 /** A tab colour PHP sent, with its dark shade when it came from a theme token. */
-private class PagerTabColor(private val light: Int?, private val dark: Int?) {
+internal class PagerTabColor(private val light: Int?, private val dark: Int?) {
     fun resolve(isDark: Boolean, fallback: Color): Color {
         val argb = if (isDark) dark ?: light else light
 
@@ -431,4 +484,214 @@ private class PagerTabColor(private val light: Int?, private val dark: Int?) {
             if (p.has("dark_$key")) p.getColor("dark_$key", 0) else null,
         )
     }
+}
+
+/**
+ * A pager's `pager_header`, as one of its pages gets it through
+ * [LocalPagerHeader]. The page's list draws it ([ListRenderer]): the header
+ * as its first item, then the pager's tabs as a sticky header over every
+ * other row, so the tabs pin once the header has scrolled away. Both are
+ * held still while the pager swipes, so the pages seem to slide under them.
+ *
+ * One per page for the life of the pager. A render updates it in place.
+ */
+@Stable
+class PagerHeader internal constructor(
+    val page: Int,
+    node: NativeUINode,
+    internal val scroll: PagerHeaderScroll,
+    internal val pagerState: PagerState,
+) {
+    var node by mutableStateOf(node)
+        internal set
+    internal var tabs: PagerTabs? = null
+    internal var select: (Int) -> Unit = {}
+    internal var background = PagerTabColor(null, null)
+
+    val hasTabs: Boolean get() = tabs != null
+}
+
+/** The header a page's list draws, if the page is in a pager with one. */
+val LocalPagerHeader = compositionLocalOf<PagerHeader?> { null }
+
+/**
+ * How far the header has scrolled, from the page showing, and each page's
+ * list, so the pages beside it can be kept level with it.
+ *
+ * While any of the header shows, every list scrolls with it: a swipe finds
+ * the next page's header at the same height, so the two meet seamlessly.
+ * Once it has gone, each list keeps its own place, and only a list higher
+ * than the header has gone is brought down to where it pins the tabs.
+ */
+@Stable
+class PagerHeaderScroll {
+    /** The header's height in pixels, without the tabs. */
+    var headerHeight by mutableIntStateOf(0)
+        internal set
+    /** How much of the header has scrolled away, 0 to [headerHeight]. */
+    var collapse by mutableFloatStateOf(0f)
+        private set
+    /** The page the header follows. */
+    private var shownPage by mutableIntStateOf(0)
+    /** Where each page's tabs end on screen, and where the pager starts, in root pixels. */
+    internal val stripBottoms = mutableStateMapOf<Int, Float>()
+    internal var pagerTop by mutableFloatStateOf(0f)
+
+    private var leading = 0
+    private val lists = HashMap<Int, LazyListState>()
+    private val offsets = HashMap<Int, Float>()
+    private val headers = HashMap<Int, PagerHeader>()
+
+    internal fun header(page: Int, node: NativeUINode, tabs: PagerTabs?, pagerState: PagerState, select: (Int) -> Unit, background: PagerTabColor): PagerHeader {
+        val header = headers.getOrPut(page) { PagerHeader(page, node, this, pagerState) }
+        if (header.node !== node) header.node = node
+        header.tabs = tabs
+        header.select = select
+        header.background = background
+        return header
+    }
+
+    /** Where the bottom of the tabs is, below the pager's top edge, in pixels, as the page showing has them on screen. */
+    fun stripBottom(): Float = ((stripBottoms[shownPage] ?: pagerTop) - pagerTop).coerceAtLeast(0f)
+
+    /** The page nearest the pager's leading edge, which the header follows. */
+    internal fun lead(page: Int) {
+        if (page == leading) return
+        leading = page
+        shownPage = page
+        follow(offsets[page] ?: 0f)
+    }
+
+    /** A page's list. A page that isn't showing is brought level with the header before it can be seen. */
+    internal fun attach(page: Int, state: LazyListState) {
+        lists[page] = state
+        offsets[page] = offsetOf(state)
+        if (page != leading) align(page)
+    }
+
+    internal fun detach(page: Int, state: LazyListState) {
+        if (lists[page] === state) lists.remove(page)
+    }
+
+    /** A page's list scrolled. */
+    internal fun scrolled(page: Int, state: LazyListState) {
+        val y = offsetOf(state)
+        offsets[page] = y
+        if (page == leading) follow(y)
+    }
+
+    /** A page's list has more room at its end, so it can be brought level now. */
+    internal fun realign(page: Int) {
+        if (page != leading) align(page)
+    }
+
+    /** How far down its own content a list is: exact while the header shows, past it after. */
+    private fun offsetOf(state: LazyListState): Float =
+        if (state.firstVisibleItemIndex == 0) state.firstVisibleItemScrollOffset.toFloat() else headerHeight + 1f
+
+    private fun follow(y: Float) {
+        val collapse = y.coerceAtMost(headerHeight.toFloat())
+        if (collapse == this.collapse) return
+        this.collapse = collapse
+        for (page in lists.keys) {
+            if (page != leading) align(page)
+        }
+    }
+
+    private fun align(page: Int) {
+        val state = lists[page] ?: return
+        if (headerHeight <= 0) return
+
+        val own = offsets[page] ?: 0f
+        val height = headerHeight.toFloat()
+        val target = if (collapse < height) collapse else maxOf(own, height)
+        if (abs(target - own) <= 0.5f) return
+
+        offsets[page] = target
+        state.requestScrollToItem(0, target.roundToInt())
+    }
+}
+
+/** The header as a page's list draws it: its first item. */
+@Composable
+internal fun PagerHeaderRow(header: PagerHeader) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pagerStationary(header)
+            .onSizeChanged { header.scroll.headerHeight = it.height },
+    ) {
+        CompositionLocalProvider(LocalPagerHeader provides null) {
+            PagerChildren(header.node)
+        }
+    }
+}
+
+/** The pager's tabs as a page's list draws them: a sticky header, pinned once the header has gone. */
+@Composable
+internal fun PagerHeaderStrip(header: PagerHeader) {
+    val tabs = header.tabs ?: return
+    val isDark = isSystemInDarkTheme()
+    val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pagerStationary(header)
+            .background(header.background.resolve(isDark, theme.surface))
+            .onGloballyPositioned { header.scroll.stripBottoms[header.page] = it.positionInRoot().y + it.size.height },
+    ) {
+        PagerRenderer.PagerTabStrip(tabs, header.pagerState, header.select)
+    }
+}
+
+/**
+ * Space after a page's last row, so a short list can still scroll the
+ * header away and keep level with the others. Measured from where it sits
+ * while the header is on screen; past the header the list is long enough.
+ */
+@Composable
+internal fun PagerHeaderRoom(header: PagerHeader, state: LazyListState, key: Any) {
+    val density = LocalDensity.current
+    var room by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(state, header) {
+        snapshotFlow {
+            val info = state.layoutInfo
+            val first = info.visibleItemsInfo.firstOrNull()
+            val last = info.visibleItemsInfo.lastOrNull()
+            if (first?.index == 0 && last?.key == key) {
+                val viewport = info.viewportEndOffset - info.viewportStartOffset
+                // Where this item starts in the list's content, without the room it has now.
+                val roomTop = last.offset - first.offset
+                (viewport + header.scroll.headerHeight - roomTop).coerceAtLeast(0)
+            } else {
+                null
+            }
+        }.collect { needed ->
+            if (needed != null && needed != room) {
+                room = needed
+                header.scroll.realign(header.page)
+            }
+        }
+    }
+
+    Spacer(Modifier.fillMaxWidth().height(with(density) { room.toDp() }))
+}
+
+/** What a `pager_header` or `pager_overlay` holds, stacked. Their own renderer draws nothing: the pager places them. */
+@Composable
+private fun PagerChildren(node: NativeUINode) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        node.children.forEach { NodeView(node = it) }
+    }
+}
+
+/**
+ * Holds a page's header still while the pager swipes, by moving it against
+ * the page, in the draw phase. The pages beside each other are level, so the
+ * two headers on screen meet as one.
+ */
+private fun Modifier.pagerStationary(header: PagerHeader): Modifier = graphicsLayer {
+    translationX = (header.pagerState.currentPage + header.pagerState.currentPageOffsetFraction - header.page) * size.width
 }

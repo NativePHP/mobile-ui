@@ -30,6 +30,9 @@ struct NativeUIListRenderer: View {
     let node: NativeUINode
 
     @Environment(\.defaultMinListRowHeight) private var minRowHeight
+    /// Set when this list is a page of a pager with a header, which the list
+    /// draws above its rows (see NativeUIPagerHeader).
+    @Environment(\.nativeUIPagerHeader) private var pagerHeader
 
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
@@ -45,7 +48,7 @@ struct NativeUIListRenderer: View {
         // Sectioned lists adopt the inset-grouped look by default (matching
         // SwiftUI's grouped style); `->plain()` opts back to plain rows.
         let hasSections = children.contains { $0.type == "list_section" }
-        let grouped = hasSections && !node.props.getBool("plain")
+        let grouped = hasSections && !node.props.getBool("plain") && pagerHeader == nil
 
         // Map each leaf row id → its global index across all sections, so
         // end-reached fires near the true bottom rather than when a section
@@ -63,25 +66,48 @@ struct NativeUIListRenderer: View {
             }
         } else {
             List {
-                ForEach(children) { child in
-                    if child.type == "list_section" {
-                        let header = child.props.getString("header", default: "")
-                        let footer = child.props.getString("footer", default: "")
-                        Section {
-                            ForEach(Array(child.children.enumerated()), id: \.element.id) { index, row in
-                                rowView(row, separator: separator, isLastInSection: index == child.children.count - 1)
-                                    .onAppear(perform: Self.endReachedAction(at: leafIndex[row.id], leafCount: leafCount,
-                                        buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
-                            }
-                        } header: {
-                            if !header.isEmpty { Text(header).nuiScaledFont(size: 13) }
-                        } footer: {
-                            if !footer.isEmpty { Text(footer).nuiScaledFont(size: 13) }
+                if let pagerHeader {
+                    // The header, then every row in one section under the
+                    // pager's tabs, which pin once the header has gone. The
+                    // rows of any list sections go in it too: a section in a
+                    // section isn't a thing.
+                    NativeUIPagerHeaderRow(header: pagerHeader)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    Section {
+                        ForEach(Self.leafRows(children)) { row in
+                            rowView(row, separator: separator)
+                                .onAppear(perform: Self.endReachedAction(at: leafIndex[row.id], leafCount: leafCount,
+                                    buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
                         }
-                    } else {
-                        rowView(child, separator: separator)
-                            .onAppear(perform: Self.endReachedAction(at: leafIndex[child.id], leafCount: leafCount,
-                                buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
+                    } header: {
+                        if pagerHeader.hasTabs {
+                            NativeUIPagerHeaderStrip(header: pagerHeader)
+                                .listRowInsets(EdgeInsets())
+                        }
+                    }
+                } else {
+                    ForEach(children) { child in
+                        if child.type == "list_section" {
+                            let header = child.props.getString("header", default: "")
+                            let footer = child.props.getString("footer", default: "")
+                            Section {
+                                ForEach(Array(child.children.enumerated()), id: \.element.id) { index, row in
+                                    rowView(row, separator: separator, isLastInSection: index == child.children.count - 1)
+                                        .onAppear(perform: Self.endReachedAction(at: leafIndex[row.id], leafCount: leafCount,
+                                            buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
+                                }
+                            } header: {
+                                if !header.isEmpty { Text(header).nuiScaledFont(size: 13) }
+                            } footer: {
+                                if !footer.isEmpty { Text(footer).nuiScaledFont(size: 13) }
+                            }
+                        } else {
+                            rowView(child, separator: separator)
+                                .onAppear(perform: Self.endReachedAction(at: leafIndex[child.id], leafCount: leafCount,
+                                    buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
+                        }
                     }
                 }
             }
@@ -98,7 +124,15 @@ struct NativeUIListRenderer: View {
             // static settings/forms where it does nothing. Android's renderer
             // already gates its PullToRefreshBox the same way.
             .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId))
+            .modifier(NativeUIPagerHeaderListModifier(header: pagerHeader))
+            // Only this list draws the header, not one in its rows.
+            .environment(\.nativeUIPagerHeader, nil)
         }
+    }
+
+    /// The rows of a list, with each list section's rows in its place.
+    private static func leafRows(_ children: [NativeUINode]) -> [NativeUINode] {
+        children.flatMap { $0.type == "list_section" ? $0.children : [$0] }
     }
 
     /// One list row: the node plus its leading/trailing swipe actions and
