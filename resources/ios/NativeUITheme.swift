@@ -193,12 +193,14 @@ final class NativeUITheme: ObservableObject {
             return
         }
 
-        guard let psName = NativeUIFontResolver.postScriptName(for: family) else { return }
-
-        if let title = UIFont(name: psName, size: 17) {
+        // UIKit draws these titles semibold / bold in the system font; take
+        // the family's matching faces so a `-Regular` default keeps that look.
+        if let psName = NativeUIFontResolver.postScriptName(for: family, weight: .semibold),
+           let title = UIFont(name: psName, size: 17) {
             UINavigationBar.appearance().titleTextAttributes = [.font: title]
         }
-        if let large = UIFont(name: psName, size: 34) {
+        if let psName = NativeUIFontResolver.postScriptName(for: family, weight: .bold),
+           let large = UIFont(name: psName, size: 34) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
         }
     }
@@ -277,22 +279,20 @@ struct NUIScaledFontModifier: ViewModifier {
         // rendered view is slanted instead. Real italic faces and the system
         // font get the trait from the caller's `Text.italic()`.
         //
-        // `weight` is intentionally NOT applied to a resolved custom font.
-        // Every font this resolver hands back names one specific bundled
-        // static face (see NativeUIFontResolver — one `.ttf`/`.otf` per
-        // weight, registered and referenced by its own PostScript name, never
-        // a variable-font family with sibling weights to select between).
-        // Chaining `.weight()` onto that exact name asks CoreText to
-        // synthesize a different weight it has nothing else to draw from, and
-        // on iOS that silently drops the custom font entirely in favor of the
-        // system font — colors and everything else stay correct, since those
-        // are separate modifiers, so the only visible symptom is the custom
-        // font quietly not applying. The right weight is already selected by
-        // which font file/token was resolved.
-        if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size) {
-            if italic, NativeUIFontResolver.needsSyntheticOblique(name) {
+        // `.weight()` is intentionally NOT chained onto a resolved custom
+        // font. Each bundled static file is one face, referenced by its own
+        // PostScript name; chaining `.weight()` onto that exact name asks
+        // CoreText to synthesize a weight it has nothing to draw from, and on
+        // iOS that silently drops the custom font for the system font —
+        // colors and everything else stay correct, since those are separate
+        // modifiers, so the only visible symptom is the custom font quietly
+        // not applying. Instead `weight` goes to the resolver, which picks the
+        // family's matching sibling file (`Inter-Regular` + `font-bold` →
+        // `Inter-Bold`) or sets a variable font's `wght` axis.
+        if let name = effectiveFontName, let custom = NativeUIFontResolver.font(name, size: size, weight: weight) {
+            if italic, NativeUIFontResolver.needsSyntheticOblique(name, weight: weight) {
                 content.font(custom)
-                    .transformEffect(NativeUIFontResolver.obliqueTransform(name, size: size))
+                    .transformEffect(NativeUIFontResolver.obliqueTransform(name, size: size, weight: weight))
             } else {
                 content.font(custom)
             }
