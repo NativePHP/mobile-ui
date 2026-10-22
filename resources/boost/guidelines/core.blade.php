@@ -18,6 +18,14 @@ paths serialize to the same wire tree.
   Use `.live` / `.blur` / `.debounce.Xms` modifiers to control sync frequency.
 - Wire callbacks with event attributes (`@tap`, `@change`, `@submit`,
   `@dismiss`) pointing at public methods on the component.
+- Image sources — `<native:image src>`, and `leadingAvatar` / `leadingImage`
+  on `<native:list-item>` — all resolve the same way: a remote URL
+  (`https://…`), a device file path (`/var/mobile/…/photo.jpg`, what the
+  camera and gallery hand you), or a RELATIVE path, which resolves against the
+  app's `public/` directory on device — `src="img/logo.png"` renders
+  `public/img/logo.png`. Unlike the web, a leading slash means a device
+  filesystem path, NOT the public root: write `img/logo.png`, never
+  `/img/logo.png`.
 - Text inputs also take `@selectionChange` for caret / selection reporting:
   the handler is called as `method(string $text, int $selectionStart, int
   $selectionEnd)` with offsets in Unicode code points (`start === end` for a
@@ -28,6 +36,12 @@ paths serialize to the same wire tree.
 - Each `@selectionChange` event carries the FULL current text and costs a
   component re-render, independent of the `native:model` sync mode — don't
   reach for it when plain `@change` would do.
+- Add `revealable` alongside `secure` for the in-field eye that lets the user
+  check what they typed. It is native-only — tapping it never round-trips to
+  PHP and never touches the bound value — so don't hand-roll a Show / Hide
+  button bound to a component property. Honored on `outlined-text-input` and
+  `filled-text-input`; `bare-text-input` draws no chrome, so supply your own
+  control there.
 - `<native:date-picker>` handles dates, times, and both. Set `mode` to
   `date` (default), `time`, or `datetime`. Values are always wall-clock ISO
   strings — `2026-07-25`, `14:30`, `2026-07-25T14:30` — never offsets or
@@ -89,6 +103,11 @@ paths serialize to the same wire tree.
 - Disabled controls use the `surface-variant` (fill) + `on-surface-variant`
   (label) tokens on both platforms — tune disabled contrast by adjusting
   those two tokens, not per-component.
+- `outlined-text-input` has NO fill by default — its box is transparent, so on
+  a colored screen it stops reading as a field. Declare the optional
+  `input-fill` / `on-input` token pair to give it one; `on-input` recolors
+  everything drawn inside the box. Do not reach for `surface` / `surface-variant`
+  for this, or every card moves with the field.
 - Buttons render their variant token solid; for a softer tonal fill set
   opacity on the token itself (e.g. `'secondary' => 'fuchsia-500/70'`).
 - `<native:icon>` accepts platform enum overrides as attributes —
@@ -169,7 +188,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 - Use `a11y-hint` sparingly, for supplementary guidance the label doesn't
   cover ("Double-tap to reorder"). Never repeat the label in the hint.
 - List items with a trailing icon button take `trailing-a11y-label` to label
-  that button separately from the row.
+  that button separately from the row, and `on-trailing-press` for its handler.
 - Text scales with the user's system font size on both platforms
   automatically — don't hardcode layouts that break at larger type sizes.
 
@@ -178,6 +197,7 @@ Android). Both are also available fluently as `->a11yLabel()` / `->a11yHint()`.
 <native:button icon="trash" a11y-label="Delete draft" a11y-hint="Deletes the draft permanently" @tap="deleteDraft" />
 <native:icon name="checkmark.seal" a11y-label="Verified" />
 <native:list-item headline="Team meeting" trailingIconButton="ellipsis" trailing-a11y-label="More options" />
+<native:list-item headline="Buy milk" trailingIconButton="trash" trailing-a11y-label="Delete" on-trailing-press="deleteTodo({{ $todo->id }})" />
 </code-snippet>
 @endverbatim
 

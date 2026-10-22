@@ -16,9 +16,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.foundation.clickable
@@ -57,19 +59,20 @@ object ListRenderer {
         val separator = node.props.getBool("separator")
         val onRefreshCb = node.props.getCallbackId("on_refresh")
         val onEndReachedCb = node.props.getCallbackId("on_end_reached")
+        val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
 
         val scrollState = rememberLazyListState()
         val isRefreshing = remember { mutableStateOf(false) }
         val endReachedFired = remember { mutableStateOf(false) }
 
-        // Detect end reached — fire when within 3 items of the bottom
+        // Detect end reached — fire when within the configured number of items of the bottom
         if (onEndReachedCb != 0) {
             LaunchedEffect(scrollState) {
                 snapshotFlow {
                     val info = scrollState.layoutInfo
                     val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
                     val total = info.totalItemsCount
-                    total > 0 && lastVisible >= total - 3
+                    total > 0 && lastVisible >= total - endReachedBuffer
                 }.collect { nearEnd ->
                     if (nearEnd && !endReachedFired.value) {
                         endReachedFired.value = true
@@ -108,8 +111,21 @@ object ListRenderer {
                         if (child.type == "list_section") {
                             val header = child.props.getString("header", "")
                             val footer = child.props.getString("footer", "")
-                            if (header.isNotEmpty()) {
-                                stickyHeader(key = "h_${child.id}") { SectionHeader(header) }
+                            if (header.isNotEmpty() && grouped) {
+                                // iOS `.insetGrouped` headers scroll with their
+                                // section and paint nothing; only plain-style
+                                // headers pin. A pinned, opaque header here
+                                // showed as a coloured band on any screen whose
+                                // background differs from the theme's.
+                                item(key = "h_${child.id}") { SectionHeader(header, pinned = false) }
+                            } else if (header.isNotEmpty()) {
+                                stickyHeader(key = "h_${child.id}") { SectionHeader(header, pinned = true) }
+                            } else if (grouped) {
+                                // A headerless grouped section still needs the gap a
+                                // header's top padding would have given it — otherwise
+                                // its card butts against the previous section's card
+                                // (iOS `.insetGrouped` always spaces sections).
+                                item(key = "s_${child.id}") { SectionGap() }
                             }
                             child.children.forEachIndexed { i, row ->
                                 item(key = row.id) {
@@ -199,19 +215,23 @@ private fun ListRow(child: NativeUINode) {
     }
 }
 
+/** Space above a section: a header's top padding, or a bare gap without one. */
+private val SECTION_TOP_GAP = 20.dp
+
 /**
- * A section's sticky header — a small uppercase label that pins to the
- * top while the section's rows scroll beneath it (mirroring SwiftUI's
- * sticky `Section` header). The opaque background keeps rows from
- * showing through while pinned.
+ * A section header — a small uppercase label. In a plain list it pins to
+ * the top while the section's rows scroll beneath it (mirroring SwiftUI's
+ * sticky plain-style header), so it gets an opaque background to keep rows
+ * from showing through. In a grouped list it scrolls with its section and
+ * paints nothing, as on iOS.
  */
 @Composable
-private fun SectionHeader(text: String) {
+private fun SectionHeader(text: String, pinned: Boolean) {
     Box(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp)
+            .then(if (pinned) Modifier.background(MaterialTheme.colorScheme.background) else Modifier)
+            .padding(start = 16.dp, end = 16.dp, top = SECTION_TOP_GAP, bottom = 6.dp)
     ) {
         Text(
             text = text.uppercase(),
@@ -222,6 +242,12 @@ private fun SectionHeader(text: String) {
             letterSpacing = 0.5.sp,
         )
     }
+}
+
+/** The breathing room above a grouped section that has no header to provide it. */
+@Composable
+private fun SectionGap() {
+    Spacer(Modifier.fillMaxWidth().height(SECTION_TOP_GAP))
 }
 
 /**

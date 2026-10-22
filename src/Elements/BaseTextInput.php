@@ -2,6 +2,7 @@
 
 namespace Native\Mobile\UI\Elements;
 
+use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
 use Native\Mobile\Icon\AndroidSymbol;
@@ -19,7 +20,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalize`, `secure`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalization` / `autocapitalize`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -86,11 +87,21 @@ abstract class BaseTextInput extends Element
         if (isset($attrs['keyboard'])) {
             $this->keyboard($attrs['keyboard']);
         }
-        if (isset($attrs['autocapitalize']) || isset($attrs['autoCapitalize'])) {
-            $this->autocapitalize((string) ($attrs['autocapitalize'] ?? $attrs['autoCapitalize']));
+        $autocapitalization = $attrs['autocapitalization']
+            ?? $attrs['autoCapitalization']
+            ?? $attrs['auto-capitalization']
+            ?? $attrs['autocapitalize']
+            ?? $attrs['autoCapitalize']
+            ?? $attrs['auto-capitalize']
+            ?? null;
+        if ($autocapitalization !== null) {
+            $this->autocapitalize((string) $autocapitalization);
         }
         if (! empty($attrs['secure'])) {
             $this->secure();
+        }
+        if (! empty($attrs['revealable'])) {
+            $this->revealable();
         }
         if (isset($attrs['maxLength']) || isset($attrs['max-length'])) {
             $this->maxLength((int) ($attrs['maxLength'] ?? $attrs['max-length']));
@@ -100,6 +111,12 @@ abstract class BaseTextInput extends Element
         }
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
+        }
+        if (isset($attrs['submit-label']) || isset($attrs['submitLabel'])) {
+            $this->submitLabel((string) ($attrs['submit-label'] ?? $attrs['submitLabel']));
+        }
+        if (! empty($attrs['autofocus']) || ! empty($attrs['auto-focus'])) {
+            $this->autofocus();
         }
         if (isset($attrs['maxLines']) || isset($attrs['max-lines'])) {
             $this->maxLines((int) ($attrs['maxLines'] ?? $attrs['max-lines']));
@@ -259,7 +276,9 @@ abstract class BaseTextInput extends Element
 
     /**
      * Autocapitalization — "none" | "sentences" | "words" | "characters".
-     * Mirrors HTML's `autocapitalize` vocabulary.
+     * Accepts `never` / `off` as aliases for `none` and `on` as an alias for
+     * `sentences`. Blade accepts both `autocapitalization` and the HTML-style
+     * `autocapitalize` spelling, in kebab-case or camelCase.
      *
      * Leave it unset and the field derives capitalization from its `keyboard`
      * type, which is what you want almost always: an `email` or `url` field
@@ -275,9 +294,20 @@ abstract class BaseTextInput extends Element
      */
     public function autocapitalize(string $mode): static
     {
-        $this->inputProps['autocapitalize'] = strtolower(trim($mode));
+        $mode = strtolower(trim($mode));
+        $this->inputProps['autocapitalize'] = match ($mode) {
+            'never', 'off' => 'none',
+            'on' => 'sentences',
+            default => $mode,
+        };
 
         return $this;
+    }
+
+    /** Alias matching the long-form Blade attribute. */
+    public function autocapitalization(string $mode): static
+    {
+        return $this->autocapitalize($mode);
     }
 
     /**
@@ -295,6 +325,29 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Draw a reveal ("eye") toggle inside a `secure()` field, so the user can
+     * check what they typed without the app building a separate Show / Hide
+     * control beside the input.
+     *
+     * The toggle is entirely native: tapping it never crosses the bridge, so
+     * it cannot disturb the bound value, the caret, or the `native:model`
+     * sync mode. The revealed state is local to the field and is deliberately
+     * not reported to PHP.
+     *
+     * Opt-in, and a no-op without `secure()`. Honored by `outlined-text-input`
+     * and `filled-text-input`; ignored by `bare-text-input`, whose contract is
+     * that it draws no chrome of its own — supply your own control there.
+     *
+     * Blade: `revealable`.
+     */
+    public function revealable(bool $value = true): static
+    {
+        $this->inputProps['revealable'] = $value;
+
+        return $this;
+    }
+
     public function maxLength(int $length): static
     {
         $this->inputProps['max_length'] = $length;
@@ -302,6 +355,11 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Multiline: the return/enter key always inserts a line break on both
+     * platforms (never submits), so `@submit` is not reachable from the
+     * keyboard — pair the field with a send/save button instead.
+     */
     public function multiline(bool $value = true): static
     {
         $this->inputProps['multiline'] = $value;
@@ -318,6 +376,61 @@ abstract class BaseTextInput extends Element
     public function keepFocusOnSubmit(bool $value = true): static
     {
         $this->inputProps['keep_focus_on_submit'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Which action the keyboard's submit key advertises — "next" | "done" |
+     * "go" | "search" | "send" | "return". Maps to SwiftUI's `SubmitLabel`
+     * on iOS and the IME action on Android.
+     *
+     * Leave it unset and each platform keeps its current default (iOS shows
+     * Done when `@submit` is wired, Return otherwise; Android leaves the IME
+     * action to the platform). The label is purely cosmetic — pressing the
+     * key still fires `@submit` and commits per `sync_mode`, whatever face
+     * it shows.
+     *
+     * "return" is iOS vocabulary (a plain Return key); Android has no exact
+     * equivalent and renders its IME default for it.
+     *
+     * IGNORED on a `multiline()` field natively, on both platforms: there
+     * the return key must keep inserting newlines, and a non-return submit
+     * label would silently replace that. Not validated here because the
+     * fluent order (`multiline()` before or after `submitLabel()`) must not
+     * change the outcome.
+     *
+     * Blade: `submit-label` (or `submitLabel`).
+     */
+    public function submitLabel(string $label): static
+    {
+        $label = strtolower(trim($label));
+
+        if (! in_array($label, ['next', 'done', 'go', 'search', 'send', 'return'], true)) {
+            throw new InvalidArgumentException(
+                "Unknown submit-label `{$label}`. "
+                .'Use one of: next, done, go, search, send, return — or omit the attribute to keep the platform default.'
+            );
+        }
+
+        $this->inputProps['submit_label'] = $label;
+
+        return $this;
+    }
+
+    /**
+     * Focus this field and raise the keyboard as soon as it appears.
+     *
+     * For the field that is the reason its screen exists — a form the user
+     * was just sent to in order to type one thing. Blade: `autofocus`
+     * (or `auto-focus`).
+     *
+     * Only one field per screen should set it. Two would race for first
+     * responder, and the loser's keyboard flickers.
+     */
+    public function autofocus(bool $value = true): static
+    {
+        $this->inputProps['autofocus'] = $value;
 
         return $this;
     }

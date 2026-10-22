@@ -406,6 +406,14 @@
             "self_closing": true
         },
         {
+            "type": "pager",
+            "element": "Native\\Mobile\\UI\\Elements\\Pager",
+            "blade": "Native\\Mobile\\UI\\Components\\Pager",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.PagerRenderer",
+            "ios_renderer": "NativeUIPagerRenderer",
+            "self_closing": false
+        },
+        {
             "type": "carousel",
             "element": "Native\\Mobile\\UI\\Elements\\Carousel",
             "blade": "Native\\Mobile\\UI\\Components\\Carousel",

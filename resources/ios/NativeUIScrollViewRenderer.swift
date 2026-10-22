@@ -11,12 +11,45 @@ struct NativeUIScrollViewRenderer: View {
     /// bottom-anchored list opens at the bottom.
     @State private var atBottom: Bool = true
 
+    /// Whether `auto_scroll_to` has been applied once already. The first
+    /// application jumps (a screen that opens already scrolled shouldn't fly
+    /// down from the top); later ones animate, so a move the user didn't
+    /// initiate is visible rather than teleporting the content.
+    @State private var didInitialAutoScroll: Bool = false
+
+    /// The `auto_scroll_to` request this view last saw, and whether the list
+    /// still owes it a scroll. Armed when the author sets or changes the
+    /// request, disarmed once the list has gone there, so content that takes
+    /// the child out of range and brings it back doesn't move the reader again.
+    @State private var lastAutoScrollRequest: Int?
+    @State private var autoScrollArmed: Bool = false
+
+    /// Whether the anchor has pinned the view to the bottom once already, so a
+    /// later re-materialization only re-pins a reader who is still there.
+    @State private var hasPinned: Bool = false
+
+    /// Whether the keyboard is up, from the same show / hide notifications
+    /// that re-pin a bottom-anchored view. While it's down, that view ends
+    /// clear of the home indicator (see `homeIndicatorClearance`).
+    @State private var keyboardShown: Bool = false
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let spacing = CGFloat(node.layout?.gap ?? 0)
         let axis = node.props.getString("axis", default: "")
-        let stickBottom = node.props.getString("scroll_anchor", default: "") == "bottom"
+        // An explicit `auto_scroll_to` wins over `scroll-anchor="bottom"`.
+        // Both drive the same ScrollViewReader, so letting them run together
+        // would have two handlers fighting over the same list — the author
+        // named a specific child, which is the more specific instruction.
+        //
+        // Gated on the REQUEST rather than the resolved target: an author who
+        // named a child owns the scroll position from that moment, including
+        // the frames before the child exists. Gating on the resolved target
+        // would hand control back to the anchor whenever the index is out of
+        // reach, so a list filling in would sit at the bottom and then jump.
+        let stickBottom = autoScrollRequest == nil
+            && node.props.getString("scroll_anchor", default: "") == "bottom"
         let messageSignal = stickBottom ? Self.descendantCount(node) : 0
 
         // 2D mode. Bypass the Lazy stacks (which force 1D layout) and use a
@@ -33,6 +66,10 @@ struct NativeUIScrollViewRenderer: View {
             // content view directly inside the ScrollView so the content's
             // own `.frame(...)` (set by NodeLayoutModifier from `w-[N]` /
             // `h-[N]` classes) drives the scrollable size.
+            //
+            // `auto_scroll_to` is deliberately not honoured here: children in
+            // 2D mode are layered at their own frames rather than sequenced,
+            // so "the child at index N" has no position to scroll to.
             //
             // Multi-child 2D scrolls are rare (typical use is one large
             // image / canvas). For multiple children we layer them in a
@@ -52,16 +89,28 @@ struct NativeUIScrollViewRenderer: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(ScrollViewBackgroundModifier(node: node))
         } else if horizontal {
-            ScrollView(.horizontal, showsIndicators: showsIndicators) {
-                LazyHStack(alignment: .top, spacing: spacing) {
-                    ForEach(node.children) { child in
-                        NodeView(node: child)
-                            .equatable()
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: showsIndicators) {
+                    LazyHStack(alignment: .top, spacing: spacing) {
+                        ForEach(node.children) { child in
+                            NodeView(node: child)
+                                .equatable()
+                        }
                     }
+                }
+                .scrollDismissesKeyboard(.interactively)
+                // `.leading`, so a horizontal auto-scroll parks the target at
+                // the left edge — the same place Android's `scrollToItem`
+                // puts it.
+                .onAppear { applyAutoScroll(proxy: proxy, anchor: .leading, animated: false) }
+                .onChange(of: autoScrollIndex) { _, _ in
+                    applyAutoScroll(proxy: proxy, anchor: .leading, animated: true)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(ScrollViewBackgroundModifier(node: node))
         } else if hasFillHeightChild {
             // A `fill` / `h-full` child asked to be at least as tall as the
             // VIEWPORT — the "short screen centred, still scrolls when the
@@ -144,6 +193,15 @@ struct NativeUIScrollViewRenderer: View {
                             ))
                     }
                     if stickBottom {
+                        // The view runs under the home indicator, as the
+                        // screen does, while a bottom bar sits above it. With
+                        // the keyboard down, end the content clear of the
+                        // indicator. The keyboard shrinks the view to its own
+                        // top edge, which is clear already, so then this
+                        // collapses, and a page that pads its end for a bottom
+                        // bar pads the same amount either way.
+                        Color.clear
+                            .frame(height: keyboardShown ? 0 : Self.homeIndicatorClearance)
                         Color.clear
                             .frame(height: 1)
                             .id(Self.bottomAnchorID)
@@ -155,10 +213,13 @@ struct NativeUIScrollViewRenderer: View {
                             // reader) — this fires after the anchor has
                             // real geometry, so the pin always lands.
                             .onAppear {
-                                // The anchor being on screen IS the definition
-                                // of "still stuck to the bottom" — the keyboard
-                                // dismiss handler reads this to avoid dragging
-                                // a reader out of history.
+                                // A lazy stack also re-creates the anchor when
+                                // content changes near it, a few rows past the
+                                // viewport. After the first pin, that must not
+                                // pull a reader out of history: only re-pin
+                                // while they're at the bottom.
+                                guard !hasPinned || atBottom else { return }
+                                hasPinned = true
                                 atBottom = true
                                 DispatchQueue.main.async {
                                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
@@ -170,6 +231,42 @@ struct NativeUIScrollViewRenderer: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .modifier(ScrollViewBackgroundModifier(node: node))
+            // Whether the reader is at the bottom, from where the scroll view
+            // actually is. The anchor's onAppear / onDisappear can't tell on
+            // their own: a lazy stack keeps the anchor alive a little past the
+            // viewport, so someone a few messages up still read as "at the
+            // bottom" and got pulled down by the next message.
+            //
+            // Only a scroll changes it. New content grows the content first,
+            // which would read as "no longer at the bottom" just before the
+            // follow below asks, and the reader at the bottom would be left
+            // behind.
+            .onScrollGeometryChange(for: BottomProbe.self) { geometry in
+                BottomProbe(
+                    offset: geometry.contentOffset.y,
+                    atBottom: geometry.visibleRect.maxY >= geometry.contentSize.height - 24
+                )
+            } action: { old, new in
+                // Tracked even while `auto_scroll_to` owns the list, so that
+                // when the request goes away the anchor knows whether the
+                // reader is at the bottom and follows new content from there.
+                guard old.offset != new.offset else { return }
+                atBottom = new.atBottom
+            }
+            // Hand this scroll view's proxy to its subtree, so a text input
+            // anywhere inside can bring ITSELF above the keyboard when it
+            // takes focus (`NativeUITextInputCore`). `ScrollViewReader`
+            // proposes its content the size it was proposed, so this is
+            // identity plumbing and nothing else — no layout of its own.
+            //
+            // Withheld from a bottom-anchored view on purpose. That mode
+            // already owns a keyboard policy (the show / hide re-pins below)
+            // and it is deliberately a different one: a chat log wants the
+            // LATEST MESSAGE above the keyboard, not the composer centered in
+            // what's left. Two policies driving one proxy would race, and the
+            // later one would win by accident.
+            .environment(\.nativeUIScrollProxy, stickBottom ? nil : proxy)
             .onAppear {
                 guard stickBottom else { return }
                 // Defer past first layout — lazy content isn't measured yet
@@ -179,10 +276,32 @@ struct NativeUIScrollViewRenderer: View {
                 }
             }
             .onChange(of: messageSignal) { _ in
-                guard stickBottom else { return }
-                withAnimation(.easeOut(duration: 0.25)) {
-                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                // Follow new content only while the reader is at the bottom
+                // (see the scroll geometry check above). Someone scrolled back
+                // into history stays where they are:
+                // a message arriving, a reaction landing on an old message,
+                // or a page of older messages loading above must not yank
+                // them down to the latest one.
+                guard stickBottom, atBottom else { return }
+                // Lazy rows below the viewport only have estimated heights
+                // until they're on screen, so the animated scroll can stop
+                // short of the real end. Once it has brought them in and they
+                // are measured, a second scroll without animation lands on it.
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
                 }
+            }
+            // `.top`, so the named child parks at the top of the viewport —
+            // matching Android's `scrollToItem`, which puts the item at the
+            // start of the list.
+            .onAppear { applyAutoScroll(proxy: proxy, anchor: .top, animated: false) }
+            .onChange(of: autoScrollIndex) { _, _ in
+                applyAutoScroll(proxy: proxy, anchor: .top, animated: true)
             }
             // The keyboard resizes the scroll viewport in BOTH directions —
             // it shrinks on the way in (the screen shifts up for keyboard
@@ -199,6 +318,7 @@ struct NativeUIScrollViewRenderer: View {
             .onReceive(NotificationCenter.default.publisher(
                 for: UIResponder.keyboardWillShowNotification)
             ) { note in
+                setKeyboardShown(true, stickBottom: stickBottom, note: note)
                 repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
             }
             .onReceive(NotificationCenter.default.publisher(
@@ -209,8 +329,82 @@ struct NativeUIScrollViewRenderer: View {
                 // list toward older messages is itself how you dismiss the
                 // keyboard — re-pinning unconditionally would yank the reader
                 // straight back down and undo the scroll that dismissed it.
+                setKeyboardShown(false, stickBottom: stickBottom, note: note)
                 guard atBottom else { return }
                 repinToBottom(stickBottom: stickBottom, proxy: proxy, note: note)
+            }
+        }
+    }
+
+    /// The author's declared intent: the index passed to
+    /// `ScrollView::autoScrollTo($index)`, or `nil` when they aren't driving
+    /// the scroll position at all (prop absent, or negative).
+    ///
+    /// Deliberately independent of the children, so that precedence over
+    /// `scroll-anchor` doesn't flicker while a list fills in.
+    private var autoScrollRequest: Int? {
+        let requested = node.props.getInt("auto_scroll_to", default: -1)
+
+        return requested >= 0 ? requested : nil
+    }
+
+    /// The child to actually bring into view, or `nil` when there is nothing
+    /// to scroll to yet.
+    ///
+    /// An index past the end is IGNORED, not clamped. Clamping looked like a
+    /// kindness — land on the last child now, correct it later — but it ties
+    /// the scroll to a row that moves whenever the CONTENT does rather than
+    /// when the author's intent does. Removing rows then drags a reader down
+    /// to the new end, and a list streaming in scrolls repeatedly on its way
+    /// to a target it hasn't reached. Ignoring the index keeps the useful
+    /// half: nothing happens until the named child exists, and then the list
+    /// goes there exactly once.
+    ///
+    /// Driving `.onChange` off this RESOLVED value (rather than the raw prop)
+    /// is what keeps a re-publish from yanking the reader: a screen that
+    /// re-renders for an unrelated reason carries the same index and nothing
+    /// fires.
+    private var autoScrollIndex: Int? {
+        guard let requested = autoScrollRequest,
+              requested < node.children.count
+        else { return nil }
+
+        return requested
+    }
+
+    /// Brings the `auto_scroll_to` child into view.
+    ///
+    /// Targets the child's node id, which is the identity `ForEach` already
+    /// assigns to each row (`NativeUINode: Identifiable`), so no extra `.id()`
+    /// is needed on the row's modifier chain.
+    ///
+    /// `animated` is decided by the caller's context, but the FIRST successful
+    /// application always jumps regardless — an `.onChange` can be the first
+    /// thing to fire when the prop arrives after the initial layout.
+    private func applyAutoScroll(proxy: ScrollViewProxy, anchor: UnitPoint, animated: Bool) {
+        let request = autoScrollRequest
+        if request != lastAutoScrollRequest {
+            lastAutoScrollRequest = request
+            autoScrollArmed = request != nil
+        }
+
+        guard autoScrollArmed, let index = autoScrollIndex else { return }
+
+        autoScrollArmed = false
+        let targetID = node.children[index].id
+        let shouldAnimate = animated && didInitialAutoScroll
+        didInitialAutoScroll = true
+
+        // Defer past first layout — lazy content isn't measured yet inside
+        // `onAppear`, so an immediate `scrollTo` no-ops. Same reason the
+        // bottom-anchor pin defers.
+        DispatchQueue.main.async {
+            if shouldAnimate {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(targetID, anchor: anchor)
+                }
+            } else {
+                proxy.scrollTo(targetID, anchor: anchor)
             }
         }
     }
@@ -232,6 +426,26 @@ struct NativeUIScrollViewRenderer: View {
         }
     }
 
+    /// Grows or collapses the home indicator clearance with the keyboard's own
+    /// animation, so the end of the view moves with it.
+    private func setKeyboardShown(_ shown: Bool, stickBottom: Bool, note: Notification) {
+        guard stickBottom, keyboardShown != shown else { return }
+
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+
+        withAnimation(.easeOut(duration: duration)) {
+            keyboardShown = shown
+        }
+    }
+
+    /// The window's bottom safe-area inset: the home indicator, or nothing on
+    /// a device with a home button.
+    private static var homeIndicatorClearance: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first?.safeAreaInsets.bottom ?? 0
+    }
+
     private static let bottomAnchorID = "nphp.scroll.bottom.anchor"
 
     /// Recursive descendant count — a content signal that changes whenever a
@@ -246,6 +460,13 @@ struct NativeUIScrollViewRenderer: View {
     }
 }
 
+/// Where a bottom-anchored scroll view is: its offset, and whether that's at
+/// the bottom of its content.
+private struct BottomProbe: Equatable {
+    let offset: CGFloat
+    let atBottom: Bool
+}
+
 /// Applies a minimum height only when there is one, so children that didn't
 /// ask for viewport height keep the exact modifier chain they always had.
 private struct MinViewportHeightModifier: ViewModifier {
@@ -255,6 +476,53 @@ private struct MinViewportHeightModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let minHeight, minHeight > 0 {
             content.frame(minHeight: minHeight)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Focus-driven scrolling
+
+/// The enclosing vertical `ScrollView`'s proxy, for descendants that need to
+/// scroll themselves into view.
+///
+/// `nil` by default, and nil is a real answer rather than a missing one: a
+/// sheet, a modal, a fixed screen or a bottom-anchored chat log all have no
+/// vertical scroll view whose scrolling is this descendant's business, and a
+/// descendant that finds no proxy correctly does nothing.
+struct NativeUIScrollProxyKey: EnvironmentKey {
+    static let defaultValue: ScrollViewProxy? = nil
+}
+
+extension EnvironmentValues {
+    var nativeUIScrollProxy: ScrollViewProxy? {
+        get { self[NativeUIScrollProxyKey.self] }
+        set { self[NativeUIScrollProxyKey.self] = newValue }
+    }
+}
+
+/// A `ScrollView` is laid out inside the safe area, so its background stops
+/// short of the home indicator and the window (black in dark mode) shows
+/// through as a band behind the tab bar. `List` doesn't have the problem: its
+/// `.scrollContentBackground(.hidden).background(…)` extends through the inset,
+/// which is why a list-based screen looks clean and a scroll-view one doesn't.
+///
+/// Give the scroll view the same reach — but only when the node actually
+/// declares a background, so a screen that never asked for one is untouched
+/// and keeps the system default.
+private struct ScrollViewBackgroundModifier: ViewModifier {
+    let node: NativeUINode
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let darkBg = colorScheme == .dark ? node.props.getColor("dark_bg_color", default: 0) : 0
+        let argb = darkBg != 0 ? darkBg : (node.style?.bgColor ?? 0)
+
+        if argb != 0 {
+            content
+                .scrollContentBackground(.hidden)
+                .background(Color(argb: argb).ignoresSafeArea())
         } else {
             content
         }

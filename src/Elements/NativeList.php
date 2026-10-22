@@ -37,11 +37,17 @@ class NativeList extends Element
         if (! empty($attrs['plain'])) {
             $this->plain();
         }
+        if (! empty($attrs['transparent'])) {
+            $this->transparent();
+        }
         if (isset($attrs['on-refresh']) || isset($attrs['onRefresh'])) {
             $this->onRefresh($attrs['on-refresh'] ?? $attrs['onRefresh']);
         }
         if (isset($attrs['on-end-reached']) || isset($attrs['onEndReached'])) {
             $this->onEndReached($attrs['on-end-reached'] ?? $attrs['onEndReached']);
+        }
+        if (isset($attrs['end-reached-buffer']) || isset($attrs['endReachedBuffer'])) {
+            $this->endReachedBuffer((int) ($attrs['end-reached-buffer'] ?? $attrs['endReachedBuffer']));
         }
 
         $this->applyA11yAttributes($attrs);
@@ -81,6 +87,22 @@ class NativeList extends Element
         return $this;
     }
 
+    /**
+     * Let the screen behind the list show through. SwiftUI's `List` paints
+     * the system grouped background over whatever the screen draws; a
+     * `bg-*` colour or gradient on the list already replaces it, but a
+     * list that should sit directly on the screen's own background (a
+     * gradient, an image, a background layer) has no colour to declare —
+     * `bg-transparent` packs to the same value as "no colour". Android's
+     * `LazyColumn` draws no background of its own, so this is iOS-only.
+     */
+    public function transparent(bool $value = true): static
+    {
+        $this->listProps['transparent'] = $value;
+
+        return $this;
+    }
+
     public function onRefresh(string $method): static
     {
         $this->refreshCallback = $method;
@@ -91,6 +113,13 @@ class NativeList extends Element
     public function onEndReached(string $method): static
     {
         $this->endReachedCallback = $method;
+
+        return $this;
+    }
+
+    public function endReachedBuffer(int $items): static
+    {
+        $this->listProps['end_reached_buffer'] = max(1, $items);
 
         return $this;
     }

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -81,7 +82,15 @@ object ButtonRenderer {
         val onClick: () -> Unit = if (hasMenu) {
             { menuExpanded = true }
         } else {
-            { if (pressCb != 0) NativeUIBridge.sendPressEvent(pressCb, node.id) }
+            {
+                if (pressCb != 0) {
+                    // The Button consumes the tap, so the root's tap-away
+                    // never runs. Drop the keyboard here unless the focused
+                    // field keeps focus (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
+                    NativeUIBridge.sendPressEvent(pressCb, node.id)
+                }
+            }
         }
 
         val buttonModifier = modifier

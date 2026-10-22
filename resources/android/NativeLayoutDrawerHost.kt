@@ -70,7 +70,7 @@ fun NativeLayoutDrawerHost(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
-                        .padding(start = 4.dp, top = 4.dp)
+                        .padding(start = 4.dp, top = 8.dp)
                 ) {
                     Icon(Icons.Filled.Menu, contentDescription = "Open menu")
                 }

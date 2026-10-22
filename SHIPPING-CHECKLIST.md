@@ -270,7 +270,8 @@ Rationale: a Card component fights the "Tailwind classes only" principle (memory
 - [ ] keyboardType (text/number/email/url/phone/decimal)
 - [ ] secureTextEntry
 - [ ] returnKeyType + onSubmit
-- [ ] autoCorrect / autoCapitalize / spellCheck
+- [x] autoCapitalize — keyboard-derived defaults plus explicit `autocapitalization` / `autocapitalize` override
+- [ ] autoCorrect / spellCheck
 - [ ] maxLength
 - [ ] selectionColor / cursorColor
 - [ ] multiline + autoGrow
@@ -459,7 +460,7 @@ Rationale: a Card component fights the "Tailwind classes only" principle (memory
 - [ ] placeholder
 - [ ] error fallback
 - [ ] async loading
-- [ ] local asset references
+- [x] local asset references (relative `src` → app `public/`, absolute → device path)
 - [ ] Docs: `image.md`
 
 ### 8.4 `<canvas>` / `<shapes>`  (engine)

@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -87,6 +88,8 @@ object DatePickerRenderer {
         val disabled     = p.getBool("disabled")
         val a11yLabel    = p.getString("a11y_label")
         val a11yHint     = p.getString("a11y_hint")
+        val isError      = p.getBool("is_error")
+        val supporting   = p.getString("supporting")
 
         val theme  = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
         val zone   = resolveZone(p.getString("timezone"))
@@ -159,6 +162,8 @@ object DatePickerRenderer {
                         onValueChange = {},
                         readOnly = true,
                         enabled = !disabled,
+                        isError = isError,
+                        supportingText = supportingSlot(supporting),
                         placeholder = if (placeholder.isNotEmpty()) {
                             { Text(placeholder, fontFamily = nuiDefaultFontFamily()) }
                         } else null,
@@ -172,6 +177,9 @@ object DatePickerRenderer {
                         modifier = Modifier.fillMaxWidth(),
                         textStyle = TextStyle(color = theme.onSurface),
                         colors = OutlinedTextFieldDefaults.colors(
+                            errorBorderColor = theme.destructive,
+                            errorSupportingTextColor = theme.destructive,
+                            errorTrailingIconColor = theme.destructive,
                             focusedTextColor = theme.onSurface,
                             unfocusedTextColor = theme.onSurface,
                             focusedBorderColor = theme.primary,
@@ -187,6 +195,10 @@ object DatePickerRenderer {
                         Modifier
                             .matchParentSize()
                             .clickable(enabled = !disabled) {
+                                // The trigger consumes the tap, so drop the
+                                // keyboard here unless the focused field
+                                // keeps focus (mobile-air #335).
+                                KeyboardFocusPolicy.dismissForInteractiveTap()
                                 pendingDate = null
                                 showDialog = true
                             }

@@ -8,6 +8,12 @@ import UIKit
 /// wraps the whole content frame.
 ///
 /// Driven by props:
+///   - `pan-x-id` /
+///     `pan-x-initial`        — same as pan-y, for the horizontal axis.
+///   - `on_drag_end`    (int)   — callback fired when a drag ends,
+///                                carrying the final "x,y" translation
+///                                (points) as text; an unbound axis
+///                                reports the raw gesture translation.
 ///   - `pan-y-id`       (int)   — id of the SharedValue receiving the
 ///                                cumulative vertical drag translation.
 ///   - `pan-y-initial`  (float) — value to seed the store with on first
@@ -43,12 +49,17 @@ import UIKit
 struct NativeUIGestureAreaRenderer: View {
     let node: NativeUINode
 
+    @State private var dragStartX: CGFloat = 0
     @State private var dragStart: CGFloat = 0
     @ObservedObject private var store = SharedValueStore.shared
 
     var body: some View {
+        let panXId = node.props.getInt("pan-x-id", default: 0)
+        let panXInitial = CGFloat(node.props.getFloat("pan-x-initial", default: 0))
         let panYId = node.props.getInt("pan-y-id", default: 0)
         let panYInitial = CGFloat(node.props.getFloat("pan-y-initial", default: 0))
+        let onDragEnd = node.props.getInt("on_drag_end", default: 0)
+        let hasPan = panXId != 0 || panYId != 0 || onDragEnd != 0
         let pinchId = node.props.getInt("pinch-id", default: 0)
         let pinchInitial = CGFloat(node.props.getFloat("pinch-initial", default: 1))
         let pinchMin = CGFloat(node.props.getFloat("pinch-min", default: 0))
@@ -72,14 +83,26 @@ struct NativeUIGestureAreaRenderer: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    guard panYId != 0 else { return }
-                    store.set(dragStart + value.translation.height, for: panYId)
+                    if panXId != 0 {
+                        store.set(dragStartX + value.translation.width, for: panXId)
+                    }
+                    if panYId != 0 {
+                        store.set(dragStart + value.translation.height, for: panYId)
+                    }
                 }
-                .onEnded { _ in
-                    guard panYId != 0 else { return }
-                    dragStart = store.value(for: panYId)
+                .onEnded { value in
+                    if panXId != 0 { dragStartX = store.value(for: panXId) }
+                    if panYId != 0 { dragStart = store.value(for: panYId) }
+                    guard onDragEnd != 0 else { return }
+                    // Report the resting translation of each bound axis;
+                    // an unbound axis reports the raw gesture translation
+                    // so a callback-only area (no SharedValue) still learns
+                    // where the finger let go.
+                    let x = panXId != 0 ? store.value(for: panXId) : value.translation.width
+                    let y = panYId != 0 ? store.value(for: panYId) : value.translation.height
+                    NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: "\(x),\(y)")
                 },
-            including: panYId != 0 ? .all : .subviews
+            including: hasPan ? .all : .subviews
         )
         .modifier(PinchModifier(
             nodeId: node.id,
@@ -94,6 +117,7 @@ struct NativeUIGestureAreaRenderer: View {
             fingers: swipeFingers
         ))
         .onAppear {
+            seedPanX(panXId, initial: panXInitial)
             seedPan(panYId, initial: panYInitial)
             seedPinch(pinchId, initial: pinchInitial)
         }
@@ -108,8 +132,16 @@ struct NativeUIGestureAreaRenderer: View {
         //     is an explicit write-back: push it into the store even
         //     though the id already has a live value (a reset button,
         //     a snap-to-position, etc.).
+        .onChange(of: panXId) { _, newId in
+            seedPanX(newId, initial: panXInitial)
+        }
         .onChange(of: panYId) { _, newId in
             seedPan(newId, initial: panYInitial)
+        }
+        .onChange(of: panXInitial) { _, newInitial in
+            guard panXId != 0 else { return }
+            store.set(newInitial, for: panXId)
+            dragStartX = newInitial
         }
         .onChange(of: pinchId) { _, newId in
             seedPinch(newId, initial: pinchInitial)
@@ -125,6 +157,14 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .modifier(A11yLabelModifier(label: a11yLabel))
         .modifier(A11yHintModifier(hint: a11yHint))
+    }
+
+    private func seedPanX(_ id: Int, initial: CGFloat) {
+        guard id != 0 else { return }
+        if store.values[id] == nil {
+            store.seed(initial, for: id)
+        }
+        dragStartX = store.value(for: id)
     }
 
     private func seedPan(_ id: Int, initial: CGFloat) {

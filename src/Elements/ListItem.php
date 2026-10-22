@@ -4,6 +4,7 @@ namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\Edge\ImageSource;
 use Native\Mobile\Edge\Layouts\Builders\NavAction;
 use Native\Mobile\Icon\AndroidSymbol;
 use Native\Mobile\Icon\IconResolver;
@@ -171,6 +172,12 @@ class ListItem extends Element
         if (isset($attrs['trailingTextColor'])) {
             $this->trailingTextColor($attrs['trailingTextColor']);
         }
+        if (isset($attrs['trailingTextStyle'])) {
+            $this->trailingTextStyle($attrs['trailingTextStyle']);
+        }
+        if (isset($attrs['trailingAlign'])) {
+            $this->trailingAlign($attrs['trailingAlign']);
+        }
 
         // Elevation
         if (isset($attrs['tonalElevation'])) {
@@ -197,6 +204,12 @@ class ListItem extends Element
         }
         if (isset($attrs['on-trailing-change']) || isset($attrs['onTrailingChange'])) {
             $this->onTrailingChange($attrs['on-trailing-change'] ?? $attrs['onTrailingChange']);
+        }
+
+        // Trailing icon button press, same spellings as the change
+        // callbacks above.
+        if (isset($attrs['on-trailing-press']) || isset($attrs['onTrailingPress'])) {
+            $this->onTrailingPress($attrs['on-trailing-press'] ?? $attrs['onTrailingPress']);
         }
 
         // Swipe actions — new structured multi-action API. Each entry
@@ -310,7 +323,7 @@ class ListItem extends Element
     public function leadingAvatar(string $url): static
     {
         $this->listItemProps['leading_type'] = 'avatar';
-        $this->listItemProps['leading_value'] = $url;
+        $this->listItemProps['leading_value'] = ImageSource::forDevice($url);
 
         return $this;
     }
@@ -329,7 +342,7 @@ class ListItem extends Element
     public function leadingImage(string $url): static
     {
         $this->listItemProps['leading_type'] = 'image';
-        $this->listItemProps['leading_value'] = $url;
+        $this->listItemProps['leading_value'] = ImageSource::forDevice($url);
 
         return $this;
     }
@@ -507,6 +520,41 @@ class ListItem extends Element
     public function trailingTextColor(string $color): static
     {
         $this->listItemProps['trailing_text_color'] = $this->resolveColorValue($color);
+
+        return $this;
+    }
+
+    /**
+     * Size of `trailingText`: `label` (a small caption — Material's default
+     * on Android) or `headline` (the same size as the headline — iOS's
+     * default). Unset keeps each platform's default; set, both platforms
+     * draw the same thing.
+     */
+    public function trailingTextStyle(string $style): static
+    {
+        if (! in_array($style, ['label', 'headline'], true)) {
+            throw new \InvalidArgumentException("list-item trailingTextStyle must be 'label' or 'headline', got '{$style}'");
+        }
+
+        $this->listItemProps['trailing_text_style'] = $style;
+
+        return $this;
+    }
+
+    /**
+     * Vertical placement of the leading and trailing slots: `top` (Material's
+     * default for rows with an overline and supporting text) or `center`
+     * (iOS's default). Unset keeps each platform's default; set, both
+     * platforms draw the same thing. On Android `center` also gives the row
+     * Material's two-line spacing.
+     */
+    public function trailingAlign(string $align): static
+    {
+        if (! in_array($align, ['top', 'center'], true)) {
+            throw new \InvalidArgumentException("list-item trailingAlign must be 'top' or 'center', got '{$align}'");
+        }
+
+        $this->listItemProps['trailing_align'] = $align;
 
         return $this;
     }

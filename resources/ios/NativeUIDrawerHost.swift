@@ -65,6 +65,7 @@ struct NativeDrawerHost<Content: View>: View {
 
     @ObservedObject private var state = DrawerHostState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.nativeUITheme) private var theme
     @State private var dragOffset: CGFloat = 0
 
     private let edgeSwipeThreshold: CGFloat = 30
@@ -223,10 +224,21 @@ struct NativeDrawerHost<Content: View>: View {
                     NodeView(node: child).equatable()
                 }
             }
+            // The panel ignores the safe area so its background reaches the top
+            // of the screen; without this inset the CONTENT does too, and the
+            // first row slides under the status bar. An app that pins
+            // UIUserInterfaceStyle sees this at every launch, not just on a
+            // notched device in landscape.
+            .padding(.top, windowSafeAreaTop)
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        // The THEME background, not Color(.systemBackground). The drawer's own
+        // content paints only as tall as it is, so everything below the last
+        // row fell through to the system colour — white on a light-pinned app,
+        // regardless of the site's palette. A themed panel that turns white
+        // halfway down reads as a rendering fault, because it is one.
+        .background(theme.background)
     }
 
     // MARK: - Gesture settling
