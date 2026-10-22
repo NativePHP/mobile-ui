@@ -62,6 +62,21 @@ it('accepts the list style switches together', function () {
         ->and($tree['props']['separator'])->toBeTrue();
 });
 
+it('paints rows with a row colour', function () {
+    $tree = collectList(['row-color' => '#FFFFFF']);
+
+    expect($tree['props']['row_color'])->toBe('#FFFFFF');
+});
+
+it('accepts the camelCase rowColor spelling and the fluent builder', function () {
+    expect(collectList(['rowColor' => '#FFF8EE'])['props']['row_color'])->toBe('#FFF8EE')
+        ->and(NativeList::make()->rowColor('#123456')->toArray(new CallbackRegistry)['props']['row_color'])->toBe('#123456');
+});
+
+it('leaves rows clear without a row colour', function () {
+    expect(collectList(['row-color' => ''])['props'] ?? [])->not->toHaveKey('row_color');
+});
+
 it('exposes transparent on the fluent builder', function () {
     $list = NativeList::make()->transparent();
 

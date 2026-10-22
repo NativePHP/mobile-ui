@@ -4,9 +4,12 @@ namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\ResolvesColorValues;
 
 class NativeList extends Element
 {
+    use ResolvesColorValues;
+
     protected string $type = 'list';
 
     protected array $listProps = [];
@@ -39,6 +42,10 @@ class NativeList extends Element
         }
         if (! empty($attrs['transparent'])) {
             $this->transparent();
+        }
+        $rowColor = $attrs['row-color'] ?? $attrs['rowColor'] ?? null;
+        if (is_string($rowColor) && $rowColor !== '') {
+            $this->rowColor($rowColor);
         }
         if (isset($attrs['on-refresh']) || isset($attrs['onRefresh'])) {
             $this->onRefresh($attrs['on-refresh'] ?? $attrs['onRefresh']);
@@ -99,6 +106,19 @@ class NativeList extends Element
     public function transparent(bool $value = true): static
     {
         $this->listProps['transparent'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Fill every row with one colour: the white cards of an inset-grouped
+     * settings list (iOS Settings) or opaque rows on a plain one. Rows are
+     * otherwise clear, so the screen background shows through them. Takes
+     * a hex value or a theme token (`theme('surface')`).
+     */
+    public function rowColor(string $color): static
+    {
+        $this->listProps['row_color'] = $this->resolveColorValue($color);
 
         return $this;
     }
