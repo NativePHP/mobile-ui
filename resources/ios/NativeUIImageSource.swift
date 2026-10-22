@@ -359,10 +359,12 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
 /// Callers supply their own frame and clip shape.
 struct NativeUIRowImage<Placeholder: View>: View {
     private let src: String
+    private let contentMode: ContentMode
     private let placeholder: () -> Placeholder
 
-    init(src: String, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+    init(src: String, contentMode: ContentMode = .fill, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.src = src
+        self.contentMode = contentMode
         self.placeholder = placeholder
     }
 
@@ -372,7 +374,7 @@ struct NativeUIRowImage<Placeholder: View>: View {
             NativeUILocalImage(path: path) { uiImage in
                 Image(uiImage: uiImage)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: contentMode)
             } placeholder: {
                 placeholder()
             }
@@ -380,7 +382,7 @@ struct NativeUIRowImage<Placeholder: View>: View {
             AsyncImage(url: url) { image in
                 image
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: contentMode)
             } placeholder: {
                 placeholder()
             }

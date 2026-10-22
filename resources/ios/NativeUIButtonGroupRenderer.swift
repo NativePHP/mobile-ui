@@ -1,7 +1,11 @@
 import SwiftUI
+import UIKit
 
-/// SwiftUI segmented selector. Each option renders as a pressable pill in a
-/// horizontal bar; the active one gets a theme.primary fill + onPrimary text.
+/// Single-choice segmented selector: the system `UISegmentedControl` (Liquid
+/// Glass on iOS 26), like Android's Material `SingleChoiceSegmentedButtonRow`.
+/// The selected segment takes theme.primary with onPrimary text, the same
+/// colours as Android; labels keep the theme font at `fontSm`, scaled with
+/// Dynamic Type.
 ///
 /// Echo-prevention on selected-index (plan K). Theme-sourced colors — no
 /// per-instance `color` override (Model 3).
@@ -10,81 +14,112 @@ struct NativeUIButtonGroupRenderer: View {
 
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
-
-    @State private var selectedIndex: Int = 0
-    @State private var lastSentValue: Int = 0
-    @State private var initialized: Bool = false
+    // Read so a Dynamic Type change re-renders and rescales the labels
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let theme = themeStore.resolve(for: colorScheme)
         let p = node.props
-        let options     = p.getStringList("options")
-        let serverValue = p.getInt("value")
-        let onChangeCb  = p.getCallbackId("on_change")
-        let disabled    = p.getBool("disabled")
-        let a11yLabel   = p.getString("a11y_label")
+        let options   = p.getStringList("options")
+        let disabled  = p.getBool("disabled")
+        let a11yLabel = p.getString("a11y_label")
 
         guard !options.isEmpty else { return AnyView(EmptyView()) }
 
         return AnyView(
-            HStack(spacing: 0) {
-                ForEach(Array(options.enumerated()), id: \.offset) { index, label in
-                    let isSelected = index == selectedIndex
-                    let isFirst = index == 0
-                    let isLast  = index == options.count - 1
-
-                    Button(action: {
-                        selectedIndex = index
-                        lastSentValue = index
-                        if onChangeCb != 0 {
-                            NativeElementBridge.sendTabChangeEvent(onChangeCb, nodeId: node.id, index: index)
-                        }
-                    }) {
-                        Text(label)
-                            .nuiScaledFont(size: theme.fontSm, weight: .medium)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity)
-                            .foregroundStyle(isSelected ? theme.onPrimary : theme.onSurface)
-                            .background(isSelected ? theme.primary : Color.clear)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(disabled)
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius:     isFirst ? theme.radiusMd : 0,
-                            bottomLeadingRadius:  isFirst ? theme.radiusMd : 0,
-                            bottomTrailingRadius: isLast  ? theme.radiusMd : 0,
-                            topTrailingRadius:    isLast  ? theme.radiusMd : 0
-                        )
-                    )
-                    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-
-                    if !isLast {
-                        Rectangle().fill(theme.outline).frame(width: 1, height: 36)
-                    }
-                }
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: theme.radiusMd)
-                    .stroke(theme.outline, lineWidth: 1)
+            SegmentedControl(
+                nodeId: node.id,
+                options: options,
+                serverValue: p.getInt("value"),
+                onChangeCb: p.getCallbackId("on_change"),
+                selectedTint: UIColor(theme.primary),
+                selectedText: UIColor(theme.onPrimary),
+                text: UIColor(theme.onSurface),
+                font: Self.labelFont(family: theme.fontFamily, size: theme.fontSm)
             )
-            .opacity(disabled ? 0.5 : 1.0)
-            .onAppear {
-                if !initialized {
-                    selectedIndex = serverValue
-                    lastSentValue = serverValue
-                    initialized = true
-                }
-            }
-            .onChange(of: serverValue) { _, new in
-                if new != lastSentValue {
-                    selectedIndex = new
-                    lastSentValue = new
-                }
-            }
+            .disabled(disabled)
             .modifier(A11yLabelModifier(label: a11yLabel))
         )
+    }
+
+    /// The app font when one is set, else the system font, medium like the
+    /// rest of the plugin's controls.
+    private static func labelFont(family: String, size: CGFloat) -> UIFont {
+        let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
+        if family != "System", !family.isEmpty,
+           let name = NativeUIFontResolver.postScriptName(for: family),
+           let custom = UIFont(name: name, size: scaled) {
+            return custom
+        }
+        return UIFont.systemFont(ofSize: scaled, weight: .medium)
+    }
+}
+
+private struct SegmentedControl: UIViewRepresentable {
+    let nodeId: Int
+    let options: [String]
+    let serverValue: Int
+    let onChangeCb: Int
+    let selectedTint: UIColor
+    let selectedText: UIColor
+    let text: UIColor
+    let font: UIFont
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UISegmentedControl {
+        let control = UISegmentedControl(items: options)
+        control.selectedSegmentIndex = serverValue
+        control.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
+        context.coordinator.lastSentValue = serverValue
+        return control
+    }
+
+    func updateUIView(_ control: UISegmentedControl, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.nodeId = nodeId
+        coordinator.onChangeCb = onChangeCb
+
+        let titles = (0..<control.numberOfSegments).map { control.titleForSegment(at: $0) ?? "" }
+        if titles != options {
+            control.removeAllSegments()
+            for (index, label) in options.enumerated() {
+                control.insertSegment(withTitle: label, at: index, animated: false)
+            }
+            control.selectedSegmentIndex = coordinator.lastSentValue
+        }
+
+        // Only a server value we didn't just send moves the selection, so a
+        // round-trip never snaps the control back mid-tap.
+        if serverValue != coordinator.lastSentValue {
+            control.selectedSegmentIndex = serverValue
+            coordinator.lastSentValue = serverValue
+        }
+
+        control.selectedSegmentTintColor = selectedTint
+        control.setTitleTextAttributes([.foregroundColor: selectedText, .font: font], for: .selected)
+        control.setTitleTextAttributes([.foregroundColor: text, .font: font], for: .normal)
+        control.isEnabled = context.environment.isEnabled
+    }
+
+    /// Fill the offered width, keep the system height.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
+        let natural = uiView.intrinsicContentSize
+        return CGSize(width: proposal.width ?? natural.width, height: natural.height)
+    }
+
+    final class Coordinator: NSObject {
+        var nodeId = 0
+        var onChangeCb = 0
+        var lastSentValue = 0
+
+        @objc func valueChanged(_ control: UISegmentedControl) {
+            let index = control.selectedSegmentIndex
+            lastSentValue = index
+            if onChangeCb != 0 {
+                NativeElementBridge.sendTabChangeEvent(onChangeCb, nodeId: nodeId, index: index)
+            }
+        }
     }
 }
 

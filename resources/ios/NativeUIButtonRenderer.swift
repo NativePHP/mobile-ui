@@ -396,7 +396,7 @@ private struct ButtonContent: View {
                 }
             } else {
                 if !icon.isEmpty {
-                    Image(systemName: getIconForName(icon))
+                    NativeIconView(icon, pointSize: iconSize, relativeTo: .body)
                         .nuiScaledFont(size: iconSize)
                         // Pin the layout height to iconSize. SF Symbols report
                         // per-symbol intrinsic heights at the same point size,
@@ -411,7 +411,7 @@ private struct ButtonContent: View {
                     Text(label).nuiScaledFont(size: textSize, weight: .medium, fontName: fontName).lineSpacing(lineSpacing)
                 }
                 if !iconTrailing.isEmpty {
-                    Image(systemName: getIconForName(iconTrailing))
+                    NativeIconView(iconTrailing, pointSize: iconSize, relativeTo: .body)
                         .nuiScaledFont(size: iconSize)
                         .frame(height: iconSize)
                 }
@@ -465,7 +465,7 @@ private func buttonMenuItem(_ item: NativeUINode) -> some View {
             }
         } label: {
             if !icon.isEmpty {
-                Label(label, systemImage: getIconForName(icon))
+                Label { Text(label) } icon: { NativeIcon.image(icon) }
             } else {
                 Text(label)
             }

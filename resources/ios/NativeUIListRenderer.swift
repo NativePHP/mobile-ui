@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A decoded swipe-action descriptor (one button on either edge).
 private struct SwipeActionSpec: Decodable, Identifiable {
@@ -28,10 +29,16 @@ private func colorFromHex(_ hex: String) -> Color? {
 struct NativeUIListRenderer: View {
     let node: NativeUINode
 
+    @Environment(\.defaultMinListRowHeight) private var minRowHeight
+    /// Set when this list is a page of a pager with a header, which the list
+    /// draws above its rows (see NativeUIPagerHeader).
+    @Environment(\.nativeUIPagerHeader) private var pagerHeader
+
     var body: some View {
         let horizontal = node.props.getBool("horizontal")
         let showsIndicators = node.props.getBool("shows_indicators", default: true)
         let separator = node.props.getBool("separator")
+        let rowColor = node.props.getColor("row_color", default: 0)
         let onRefreshCb = node.props.getCallbackId("on_refresh")
         let onEndReachedCb = node.props.getCallbackId("on_end_reached")
         let endReachedBuffer = max(1, node.props.getInt("end_reached_buffer", default: 3))
@@ -42,12 +49,13 @@ struct NativeUIListRenderer: View {
         // Sectioned lists adopt the inset-grouped look by default (matching
         // SwiftUI's grouped style); `->plain()` opts back to plain rows.
         let hasSections = children.contains { $0.type == "list_section" }
-        let grouped = hasSections && !node.props.getBool("plain")
+        let grouped = hasSections && !node.props.getBool("plain") && pagerHeader == nil
 
         // Map each leaf row id → its global index across all sections, so
         // end-reached fires near the true bottom rather than when a section
         // container first appears. Computed once per render.
         let (leafIndex, leafCount) = Self.leafRowIndex(children)
+        let rowStyle = ListRowStyle(separator: separator, rowColor: rowColor, grouped: grouped, minHeight: minRowHeight)
 
         if horizontal {
             ScrollView(.horizontal, showsIndicators: showsIndicators) {
@@ -60,29 +68,65 @@ struct NativeUIListRenderer: View {
             }
         } else {
             List {
-                ForEach(children) { child in
-                    if child.type == "list_section" {
-                        let header = child.props.getString("header", default: "")
-                        let footer = child.props.getString("footer", default: "")
-                        Section {
-                            ForEach(Array(child.children.enumerated()), id: \.element.id) { index, row in
-                                rowView(row, separator: separator, isLastInSection: index == child.children.count - 1)
-                                    .onAppear(perform: Self.endReachedAction(at: leafIndex[row.id], leafCount: leafCount,
-                                        buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
-                            }
-                        } header: {
-                            if !header.isEmpty { Text(header).nuiScaledFont(size: 13) }
-                        } footer: {
-                            if !footer.isEmpty { Text(footer).nuiScaledFont(size: 13) }
+                if let pagerHeader {
+                    // The header, then every row in one section under the
+                    // pager's tabs, which pin once the header has gone. The
+                    // rows of any list sections go in it too: a section in a
+                    // section isn't a thing.
+                    NativeUIPagerHeaderRow(header: pagerHeader)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    Section {
+                        ForEach(Self.leafRows(children)) { row in
+                            Self.row(row, style: rowStyle,
+                                endReachedCb: Self.endReachedCallback(at: leafIndex[row.id], leafCount: leafCount,
+                                    buffer: endReachedBuffer, cb: onEndReachedCb),
+                                listId: nodeId)
                         }
-                    } else {
-                        rowView(child, separator: separator)
-                            .onAppear(perform: Self.endReachedAction(at: leafIndex[child.id], leafCount: leafCount,
-                                buffer: endReachedBuffer, cb: onEndReachedCb, nodeId: nodeId))
+                    } header: {
+                        if pagerHeader.hasTabs {
+                            NativeUIPagerHeaderStrip(header: pagerHeader)
+                                .listRowInsets(EdgeInsets())
+                        }
+                    }
+                } else if hasSections {
+                    ForEach(children) { child in
+                        if child.type == "list_section" {
+                            let header = child.props.getString("header", default: "")
+                            let footer = child.props.getString("footer", default: "")
+                            Section {
+                                ForEach(Array(child.children.enumerated()), id: \.element.id) { index, row in
+                                    Self.row(row, style: rowStyle, isLastInSection: index == child.children.count - 1,
+                                        endReachedCb: Self.endReachedCallback(at: leafIndex[row.id], leafCount: leafCount,
+                                            buffer: endReachedBuffer, cb: onEndReachedCb),
+                                        listId: nodeId)
+                                }
+                            } header: {
+                                if !header.isEmpty { Text(header).nuiScaledFont(size: 13) }
+                            } footer: {
+                                if !footer.isEmpty { Text(footer).nuiScaledFont(size: 13) }
+                            }
+                        } else {
+                            Self.row(child, style: rowStyle,
+                                endReachedCb: Self.endReachedCallback(at: leafIndex[child.id], leafCount: leafCount,
+                                    buffer: endReachedBuffer, cb: onEndReachedCb),
+                                listId: nodeId)
+                        }
+                    }
+                } else {
+                    // Without sections each child is one row, and the ForEach
+                    // says so by building exactly one view for it.
+                    ForEach(children) { child in
+                        Self.row(child, style: rowStyle,
+                            endReachedCb: Self.endReachedCallback(at: leafIndex[child.id], leafCount: leafCount,
+                                buffer: endReachedBuffer, cb: onEndReachedCb),
+                            listId: nodeId)
                     }
                 }
             }
             .modifier(GroupedOrPlainListStyle(grouped: grouped))
+            .environment(\.nativeUIListRowMargin, NativeUIListRowMargin.system)
             .modifier(ListBackgroundModifier(node: node))
             // `List` has no showsIndicators initializer — the modifier is
             // the supported route (iOS 16+).
@@ -94,75 +138,43 @@ struct NativeUIListRenderer: View {
             // static settings/forms where it does nothing. Android's renderer
             // already gates its PullToRefreshBox the same way.
             .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId))
+            .modifier(NativeUIPagerHeaderListModifier(header: pagerHeader))
+            // Only this list draws the header, not one in its rows.
+            .environment(\.nativeUIPagerHeader, nil)
         }
     }
 
-    /// One list row: the node plus its leading/trailing swipe actions and
-    /// row-level styling. Shared by both flat rows and section children.
-    @ViewBuilder
-    private func rowView(_ child: NativeUINode, separator: Bool, isLastInSection: Bool = false) -> some View {
-        // Legacy single-action API.
-        let legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
-        // New multi-action API.
-        let leading = decodeActions(child.props.getString("leading_actions_json", default: ""))
-        let trailing = decodeActions(child.props.getString("trailing_actions_json", default: ""))
-        // The swipe closures capture only this, not the row or `self` (see endReachedAction).
-        let rowId = child.id
-
-        NodeView(node: child)
-            .equatable()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .listRowInsets(EdgeInsets())
-            // Rows carry SwiftUI's opaque system fill, which paints over the
-            // list's own background — so hiding the scroll background via
-            // ListBackgroundModifier still left a white sheet on a themed
-            // screen. Clear the row and let its content decide.
-            .listRowBackground(Color.clear)
-            // Drive dividers from the bottom edge only; always hide the top
-            // edge. The top separator renders solely on a section's first row,
-            // so hiding it removes the stray full-width line that otherwise
-            // sits on top of an inset-grouped section (under its header).
-            // Also hide the bottom edge on a section's last row so the group
-            // ends clean (SwiftUI's grouped default), rather than drawing a
-            // divider under the final row.
-            .listRowSeparator(separator && !isLastInSection ? .visible : .hidden, edges: .bottom)
-            .listRowSeparator(.hidden, edges: .top)
-            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                ForEach(leading) { action in
-                    Self.actionButton(spec: action, nodeId: rowId)
-                }
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: trailing.contains(where: { $0.role == "destructive" }) || legacyDeleteCb != 0) {
-                // New multi-action takes precedence over legacy.
-                if !trailing.isEmpty {
-                    ForEach(trailing) { action in
-                        Self.actionButton(spec: action, nodeId: rowId)
-                    }
-                } else if legacyDeleteCb != 0 {
-                    Button(role: .destructive) {
-                        NativeElementBridge.sendPressEvent(legacyDeleteCb, nodeId: rowId)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
-            }
+    /// The rows of a list, with each list section's rows in its place.
+    private static func leafRows(_ children: [NativeUINode]) -> [NativeUINode] {
+        children.flatMap { $0.type == "list_section" ? $0.children : [$0] }
     }
 
-    /// What a row does when it appears: fire the end-reached callback if it's
-    /// within the configured number of leaf rows of the end. Works across
-    /// sections via the precomputed leaf index.
-    ///
-    /// Static and built from plain values on purpose. SwiftUI keeps a row's
-    /// closures until the row draws again, which for a row scrolled past is
-    /// never. A closure that called an instance method captured `self`, and
-    /// with it this list's whole node tree, so every row above the viewport
-    /// kept the entire list from the frame it last drew in. A long list held
-    /// many copies of itself and the app ran out of memory.
-    private static func endReachedAction(at index: Int?, leafCount: Int, buffer: Int,
-                                         cb: Int, nodeId: Int) -> () -> Void {
-        guard cb != 0, let index, index >= leafCount - buffer else { return {} }
+    /// One list row: the node, then what the List reads off it, outside the
+    /// node's EquatableView, where the List can see it (see ListRow).
+    @ViewBuilder
+    private static func row(_ child: NativeUINode, style: ListRowStyle, isLastInSection: Bool = false,
+                            endReachedCb: Int, listId: Int) -> some View {
+        let row = ListRow(node: child, minHeight: style.minHeight, endReachedCb: endReachedCb, listId: listId)
+        let traits = ListRowTraits(separator: style.separator && !isLastInSection, rowColor: style.rowColor, grouped: style.grouped)
+        if let swipeActions = ListRowSwipeActions(node: child) {
+            row
+                .equatable()
+                .modifier(traits)
+                .modifier(swipeActions)
+        } else {
+            row
+                .equatable()
+                .modifier(traits)
+        }
+    }
 
-        return { NativeElementBridge.sendPressEvent(cb, nodeId: nodeId) }
+    /// The list's end-reached callback for a row within the configured number
+    /// of leaf rows of the end, or 0. Works across sections via the
+    /// precomputed leaf index.
+    private static func endReachedCallback(at index: Int?, leafCount: Int, buffer: Int, cb: Int) -> Int {
+        guard cb != 0, let index, index >= leafCount - buffer else { return 0 }
+
+        return cb
     }
 
     /// Flatten the list's direct children into an ordered map of leaf-row id
@@ -184,6 +196,148 @@ struct NativeUIListRenderer: View {
         }
         return (map, counter)
     }
+}
+
+/// How every row of a list is styled, from the list's own props.
+private struct ListRowStyle {
+    let separator: Bool
+    let rowColor: Int
+    let grouped: Bool
+    let minHeight: CGFloat
+}
+
+/// The part of a list row SwiftUI can skip: the row's node, built from plain
+/// values and compared with `==`.
+///
+/// SwiftUI's List runs the ForEach's content for every row each time the list
+/// draws. A row of modifiers carrying closures (swipe actions, onAppear) never
+/// compared equal to last frame's, so each frame updated every row SwiftUI had
+/// made, whether one row had changed or none of the ones on screen had.
+/// mobile-air's frame diff keeps the node object of a subtree that didn't
+/// change, so an unchanged row now compares equal and SwiftUI skips it.
+///
+/// It goes in an EquatableView, which costs less than leaving SwiftUI to find
+/// `==` itself. The List doesn't see insets, backgrounds, separators or swipe
+/// actions set inside one, so those go on outside it (ListRowTraits,
+/// ListRowSwipeActions).
+private struct ListRow: View, Equatable {
+    let node: NativeUINode
+    /// The list's minimum row height, passed in so it's part of `==`.
+    let minHeight: CGFloat
+    /// The list's end-reached callback when this row is near enough the end to fire it, otherwise 0.
+    let endReachedCb: Int
+    /// The list's node id, which the end-reached event is sent for.
+    let listId: Int
+
+    var body: some View {
+        NodeView(node: node)
+            .equatable()
+            // A node fills the height it is offered with its content pinned
+            // to the top, so a one-line row in a cell taller than itself (the
+            // list's minimum row height, 52pt on iOS 26) sat high. Keep the
+            // row at its own height and centre it in that minimum instead.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .leading)
+            .onAppear(perform: Self.endReachedAction(cb: endReachedCb, listId: listId))
+    }
+
+    /// What a row does when it appears: fire the end-reached callback if the
+    /// list gave this row one.
+    ///
+    /// Static and built from plain values on purpose. SwiftUI keeps a row's
+    /// closures until the row draws again, which for a row scrolled past is
+    /// never. A closure that called an instance method captured `self`, and
+    /// with it this list's whole node tree, so every row above the viewport
+    /// kept the entire list from the frame it last drew in. A long list held
+    /// many copies of itself and the app ran out of memory.
+    private static func endReachedAction(cb: Int, listId: Int) -> () -> Void {
+        guard cb != 0 else { return {} }
+
+        return { NativeElementBridge.sendPressEvent(cb, nodeId: listId) }
+    }
+}
+
+/// What the List reads off every row, outside the row's EquatableView, where
+/// it can see it.
+private struct ListRowTraits: ViewModifier {
+    let separator: Bool
+    let rowColor: Int
+    let grouped: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .listRowInsets(EdgeInsets())
+            // Plain rows are cleared: SwiftUI's opaque system fill paints
+            // over the list's own background, leaving a white sheet on a
+            // themed screen. Grouped rows keep a card — the system grouped
+            // cell colour, which is what draws the rounded inset-grouped
+            // sections — and `row_color` themes either.
+            .listRowBackground(Self.rowBackground(rowColor: rowColor, grouped: grouped))
+            // Drive dividers from the bottom edge only; always hide the top
+            // edge. The top separator renders solely on a section's first row,
+            // so hiding it removes the stray full-width line that otherwise
+            // sits on top of an inset-grouped section (under its header).
+            // Also hide the bottom edge on a section's last row so the group
+            // ends clean (SwiftUI's grouped default), rather than drawing a
+            // divider under the final row.
+            .listRowSeparator(separator ? .visible : .hidden, edges: .bottom)
+            .listRowSeparator(.hidden, edges: .top)
+    }
+
+    /// A row's fill: the list's `row_color` when set, else the system card
+    /// colour in the grouped style and nothing in the plain one.
+    private static func rowBackground(rowColor: Int, grouped: Bool) -> Color {
+        if rowColor != 0 { return Color(argb: rowColor) }
+        return grouped ? Color(uiColor: .secondarySystemGroupedBackground) : .clear
+    }
+}
+
+/// A row's leading/trailing swipe actions, for a row that has any.
+///
+/// Kept as the props' JSON and decoded when drawn, so a frame that doesn't
+/// change them compares equal and builds nothing again.
+private struct ListRowSwipeActions: ViewModifier, Equatable {
+    /// The swipe closures capture only this, not the row (see ListRow.endReachedAction).
+    let rowId: Int
+    /// New multi-action API.
+    let leadingJson: String
+    let trailingJson: String
+    /// Legacy single-action API.
+    let legacyDeleteCb: Int
+
+    init?(node: NativeUINode) {
+        rowId = node.id
+        leadingJson = node.props.getString("leading_actions_json", default: "")
+        trailingJson = node.props.getString("trailing_actions_json", default: "")
+        legacyDeleteCb = node.props.getCallbackId("on_swipe_delete")
+        if leadingJson.isEmpty && trailingJson.isEmpty && legacyDeleteCb == 0 { return nil }
+    }
+
+    func body(content: Content) -> some View {
+        let leading = decodeActions(leadingJson)
+        let trailing = decodeActions(trailingJson)
+
+        content
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                ForEach(leading) { action in
+                    Self.actionButton(spec: action, nodeId: rowId)
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: trailing.contains(where: { $0.role == "destructive" }) || legacyDeleteCb != 0) {
+                // New multi-action takes precedence over legacy.
+                if !trailing.isEmpty {
+                    ForEach(trailing) { action in
+                        Self.actionButton(spec: action, nodeId: rowId)
+                    }
+                } else if legacyDeleteCb != 0 {
+                    Button(role: .destructive) {
+                        NativeElementBridge.sendPressEvent(legacyDeleteCb, nodeId: rowId)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+    }
 
     /// Build a SwiftUI Button for one swipe action spec.
     /// Destructive role gets the red treatment automatically; otherwise
@@ -194,7 +348,11 @@ struct NativeUIListRenderer: View {
         let button = Button(role: role) {
             NativeElementBridge.sendPressEvent(spec.cb, nodeId: nodeId)
         } label: {
-            if !spec.icon.isEmpty {
+            if spec.icon.hasPrefix(NativeIcon.customPrefix) {
+                // Swipe icons are raw SF Symbol names (no getIconForName
+                // mapping), so only custom icons take the NativeIcon path.
+                Label { Text(spec.label.isEmpty ? " " : spec.label) } icon: { NativeIcon.image(spec.icon) }
+            } else if !spec.icon.isEmpty {
                 Label(spec.label.isEmpty ? " " : spec.label, systemImage: spec.icon)
             } else {
                 Text(spec.label.isEmpty ? " " : spec.label)
@@ -277,5 +435,34 @@ private struct ListRefreshModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// The horizontal inset of a list row's content: the system's minimum
+/// layout margin (16pt on most iPhones, 20pt on the wide ones), which is
+/// where iOS puts section headers, footers and its own cell content. Rows
+/// pad by it so their text lines up with their headers on every device.
+enum NativeUIListRowMargin {
+    @MainActor
+    static var system: CGFloat {
+        let root = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController
+
+        return root?.systemMinimumLayoutMargins.leading ?? 16
+    }
+}
+
+private struct NativeUIListRowMarginKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 16
+}
+
+extension EnvironmentValues {
+    /// Horizontal padding for list rows; 16pt outside a `native:list`.
+    var nativeUIListRowMargin: CGFloat {
+        get { self[NativeUIListRowMarginKey.self] }
+        set { self[NativeUIListRowMarginKey.self] = newValue }
     }
 }

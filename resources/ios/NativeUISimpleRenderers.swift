@@ -41,7 +41,7 @@ private func pressableMenuItem(_ item: NativeUINode) -> some View {
             }
         } label: {
             if !icon.isEmpty {
-                Label(label, systemImage: getIconForName(icon))
+                Label { Text(label) } icon: { NativeIcon.image(icon) }
             } else {
                 Text(label)
             }
@@ -232,10 +232,19 @@ struct NativeUIImageRenderer: View {
         }
     }
 
+    /// Wire values of the `fit` prop, matching PHP's `ImageFit` enum.
+    private enum ImageFit {
+        static let none = 0
+        static let contain = 1
+        static let cover = 2
+        static let fill = 3
+    }
+
+    /// SwiftUI only letterboxes or crops, so `none` draws as contain and
+    /// `fill` (stretch) draws as cover.
     private func resolveContentMode(_ fit: Int) -> ContentMode {
         switch fit {
-        case 2: return .fill
-        case 3: return .fill
+        case ImageFit.cover, ImageFit.fill: return .fill
         default: return .fit
         }
     }

@@ -10,6 +10,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,11 +59,16 @@ object ListRenderer {
     fun Render(node: NativeUINode, modifier: Modifier) {
         val horizontal = node.props.getBool("horizontal")
         val separator = node.props.getBool("separator")
+        val rowColor = node.props.getColor("row_color", 0)
+        val rowBackground = if (rowColor != 0) Color(rowColor) else null
         val onRefreshCb = node.props.getCallbackId("on_refresh")
         val onEndReachedCb = node.props.getCallbackId("on_end_reached")
         val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
 
         val scrollState = rememberLazyListState()
+        // Set when this list is a page of a pager with a header, which the
+        // list draws above its rows (see PagerHeader).
+        val pagerHeader = if (horizontal) null else LocalPagerHeader.current
         val isRefreshing = remember { mutableStateOf(false) }
         val endReachedFired = remember { mutableStateOf(false) }
 
@@ -71,7 +78,8 @@ object ListRenderer {
                 snapshotFlow {
                     val info = scrollState.layoutInfo
                     val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                    val total = info.totalItemsCount
+                    // Under a pager header, the room after the rows isn't one.
+                    val total = info.totalItemsCount - if (pagerHeader != null) 1 else 0
                     total > 0 && lastVisible >= total - endReachedBuffer
                 }.collect { nearEnd ->
                     if (nearEnd && !endReachedFired.value) {
@@ -81,6 +89,17 @@ object ListRenderer {
                         endReachedFired.value = false
                     }
                 }
+            }
+        }
+
+        if (pagerHeader != null) {
+            DisposableEffect(pagerHeader, scrollState) {
+                pagerHeader.scroll.attach(pagerHeader.page, scrollState)
+                onDispose { pagerHeader.scroll.detach(pagerHeader.page, scrollState) }
+            }
+            LaunchedEffect(pagerHeader, scrollState) {
+                snapshotFlow { scrollState.firstVisibleItemIndex to scrollState.firstVisibleItemScrollOffset }
+                    .collect { pagerHeader.scroll.scrolled(pagerHeader.page, scrollState) }
             }
         }
 
@@ -97,6 +116,26 @@ object ListRenderer {
                             NodeView(node = child)
                         }
                     }
+                }
+            } else if (pagerHeader != null) {
+                LazyColumn(modifier = (if (onRefreshCb != 0) Modifier else modifier).then(dismissKeyboardModifier), state = scrollState) {
+                    // The header, then the pager's tabs pinned over every row,
+                    // the rows of any list sections among them.
+                    item(key = PAGER_HEADER_KEY) { PagerHeaderRow(pagerHeader) }
+                    if (pagerHeader.hasTabs) {
+                        stickyHeader(key = PAGER_TABS_KEY) { PagerHeaderStrip(pagerHeader) }
+                    }
+                    val rows = node.children.flatMap { if (it.type == "list_section") it.children else listOf(it) }
+                    rows.forEachIndexed { index, row ->
+                        item(key = row.id) {
+                            // Only this list draws the header, not one in its rows.
+                            CompositionLocalProvider(LocalPagerHeader provides null) { ListRow(row, rowBackground) }
+                            if (separator && index < rows.size - 1) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
+                    item(key = PAGER_ROOM_KEY) { PagerHeaderRoom(pagerHeader, scrollState, PAGER_ROOM_KEY) }
                 }
             } else {
                 // A list is "sectioned" when any direct child is a
@@ -133,9 +172,10 @@ object ListRenderer {
                                         SectionRow(
                                             isFirst = i == 0,
                                             isLast = i == child.children.size - 1,
+                                            background = rowBackground,
                                         ) { ListRow(row) }
                                     } else {
-                                        ListRow(row)
+                                        ListRow(row, rowBackground)
                                         if (separator && i < child.children.size - 1) {
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         }
@@ -147,7 +187,7 @@ object ListRenderer {
                             }
                         } else {
                             item(key = child.id) {
-                                ListRow(child)
+                                ListRow(child, rowBackground)
                                 if (separator && index < node.children.size - 1) {
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 }
@@ -192,7 +232,7 @@ object ListRenderer {
  * destructive trailing action when no structured actions are present.
  */
 @Composable
-private fun ListRow(child: NativeUINode) {
+private fun ListRow(child: NativeUINode, background: Color? = null) {
     val legacyDeleteCb = child.props.getCallbackId("on_swipe_delete")
     val leading = decodeSwipeActions(child.props.getString("leading_actions_json", ""))
     val trailing = decodeSwipeActions(child.props.getString("trailing_actions_json", ""))
@@ -208,12 +248,27 @@ private fun ListRow(child: NativeUINode) {
             trailing = effectiveTrailing,
             onAction = { cb -> NativeElementBridge.sendPressEvent(cb, child.id) }
         ) {
-            NodeView(node = child)
+            RowContent(child, background)
         }
+    } else {
+        RowContent(child, background)
+    }
+}
+
+/** The row's node, on the list's row colour when it declares one. */
+@Composable
+private fun RowContent(child: NativeUINode, background: Color?) {
+    if (background != null) {
+        Box(Modifier.fillMaxWidth().background(background)) { NodeView(node = child) }
     } else {
         NodeView(node = child)
     }
 }
+
+/** Keys of the items a list adds under a pager header. Row keys are node ids, so these can't clash. */
+private const val PAGER_HEADER_KEY = "nui_pager_header"
+private const val PAGER_TABS_KEY = "nui_pager_tabs"
+private const val PAGER_ROOM_KEY = "nui_pager_room"
 
 /** Space above a section: a header's top padding, or a bare gap without one. */
 private val SECTION_TOP_GAP = 20.dp
@@ -258,7 +313,7 @@ private fun SectionGap() {
  * look SwiftUI's `.insetGrouped` gives for free.
  */
 @Composable
-private fun SectionRow(isFirst: Boolean, isLast: Boolean, content: @Composable () -> Unit) {
+private fun SectionRow(isFirst: Boolean, isLast: Boolean, background: Color? = null, content: @Composable () -> Unit) {
     val radius = 12.dp
     val shape = RoundedCornerShape(
         topStart = if (isFirst) radius else 0.dp,
@@ -271,7 +326,7 @@ private fun SectionRow(isFirst: Boolean, isLast: Boolean, content: @Composable (
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(background ?: MaterialTheme.colorScheme.surfaceVariant)
         ) {
             content()
             if (!isLast) {

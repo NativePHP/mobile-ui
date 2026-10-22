@@ -2,6 +2,7 @@
 
 namespace Native\Mobile\UI\Elements;
 
+use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
 use Native\Mobile\Icon\AndroidSymbol;
@@ -19,7 +20,7 @@ use Native\Mobile\Icon\IosSymbol;
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
- *   - `keyboard`, `autocapitalization` / `autocapitalize`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines` (behavior)
+ *   - `keyboard`, `autocapitalization` / `autocapitalize`, `content-type` / `autocomplete`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label`, `next-focus` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
@@ -96,6 +97,13 @@ abstract class BaseTextInput extends Element
         if ($autocapitalization !== null) {
             $this->autocapitalize((string) $autocapitalization);
         }
+        $contentType = $attrs['content-type']
+            ?? $attrs['contentType']
+            ?? $attrs['autocomplete']
+            ?? null;
+        if ($contentType !== null && trim((string) $contentType) !== '') {
+            $this->contentType((string) $contentType);
+        }
         if (! empty($attrs['secure'])) {
             $this->secure();
         }
@@ -110,6 +118,12 @@ abstract class BaseTextInput extends Element
         }
         if (! empty($attrs['keepFocusOnSubmit']) || ! empty($attrs['keep-focus-on-submit']) || ! empty($attrs['keep-focus'])) {
             $this->keepFocusOnSubmit();
+        }
+        if (isset($attrs['submit-label']) || isset($attrs['submitLabel'])) {
+            $this->submitLabel((string) ($attrs['submit-label'] ?? $attrs['submitLabel']));
+        }
+        if (isset($attrs['next-focus']) || isset($attrs['nextFocus'])) {
+            $this->nextFocus((string) ($attrs['next-focus'] ?? $attrs['nextFocus']));
         }
         if (! empty($attrs['autofocus']) || ! empty($attrs['auto-focus'])) {
             $this->autofocus();
@@ -307,6 +321,44 @@ abstract class BaseTextInput extends Element
     }
 
     /**
+     * What the field holds, for the platform's AutoFill — "username" |
+     * "email" | "password" | "new-password" | "one-time-code". Spelled as
+     * HTML's `autocomplete` tokens; `current-password` is accepted as an alias
+     * for `password`, and camelCase (`newPassword`) is normalized.
+     *
+     * This is what lets a login form fill as a pair: iOS maps it to
+     * `textContentType` and Android to the Compose autofill `contentType`.
+     * Without it, iOS has no declared credential pair to fill, and a `secure`
+     * field filled as the partner of another field can be written without the
+     * value ever reaching `@change` (NativePHP/mobile-air#422).
+     *
+     * `new-password` is worth setting on its own account: a sign-up or
+     * change-password field without it gets no strong-password suggestion.
+     * `one-time-code` is what surfaces an SMS code above the keyboard.
+     *
+     * Nothing is inferred when this is unset, so every existing field keeps
+     * exactly the behavior it had. Unknown values are ignored natively rather
+     * than erroring, the same policy as `keyboard` and `autocapitalize`.
+     *
+     * Blade: `content-type`, `contentType`, or HTML's `autocomplete`.
+     */
+    public function contentType(string $type): static
+    {
+        // camelCase and snake_case → kebab-case, so `newPassword`,
+        // `new_password` and `new-password` all reach the natives as one form.
+        $type = (string) preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', '-', trim($type));
+        $type = strtolower(str_replace('_', '-', $type));
+
+        $this->inputProps['content_type'] = match ($type) {
+            'current-password' => 'password',
+            'email-address' => 'email',
+            default => $type,
+        };
+
+        return $this;
+    }
+
+    /**
      * Mask the field's contents (password entry).
      *
      * Beyond masking, `secure` carries the typing behavior a secret needs:
@@ -377,6 +429,44 @@ abstract class BaseTextInput extends Element
     }
 
     /**
+     * Which action the keyboard's submit key advertises — "next" | "done" |
+     * "go" | "search" | "send" | "return". Maps to SwiftUI's `SubmitLabel`
+     * on iOS and the IME action on Android.
+     *
+     * Leave it unset and each platform keeps its current default (iOS shows
+     * Done when `@submit` is wired, Return otherwise; Android leaves the IME
+     * action to the platform). The label is purely cosmetic — pressing the
+     * key still fires `@submit` and commits per `sync_mode`, whatever face
+     * it shows.
+     *
+     * "return" is iOS vocabulary (a plain Return key); Android has no exact
+     * equivalent and renders its IME default for it.
+     *
+     * IGNORED on a `multiline()` field natively, on both platforms: there
+     * the return key must keep inserting newlines, and a non-return submit
+     * label would silently replace that. Not validated here because the
+     * fluent order (`multiline()` before or after `submitLabel()`) must not
+     * change the outcome.
+     *
+     * Blade: `submit-label` (or `submitLabel`).
+     */
+    public function submitLabel(string $label): static
+    {
+        $label = strtolower(trim($label));
+
+        if (! in_array($label, ['next', 'done', 'go', 'search', 'send', 'return'], true)) {
+            throw new InvalidArgumentException(
+                "Unknown submit-label `{$label}`. "
+                .'Use one of: next, done, go, search, send, return — or omit the attribute to keep the platform default.'
+            );
+        }
+
+        $this->inputProps['submit_label'] = $label;
+
+        return $this;
+    }
+
+    /**
      * Focus this field and raise the keyboard as soon as it appears.
      *
      * For the field that is the reason its screen exists — a form the user
@@ -389,6 +479,36 @@ abstract class BaseTextInput extends Element
     public function autofocus(bool $value = true): static
     {
         $this->inputProps['autofocus'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Move the keyboard focus to another text input when this one is
+     * submitted — the "Next" affordance of a multi-field form. `$ref` is
+     * the target input's `ref` (the same ref `Native::test()` targets);
+     * the chain is explicit, one hop per field.
+     *
+     * When set (and `submitLabel()` isn't), the renderers derive a `next`
+     * submit label, mirroring how capitalization derives from `keyboard`.
+     * A missing target at submit time (recycled list row, conditional
+     * render, typo) is a no-op — focus then follows `keep-focus-on-submit`
+     * or the platform default. `@submit` still fires first, and the field
+     * being left commits per `sync_mode` on losing focus, so
+     * `native:model.blur` bindings see the value before the hop.
+     *
+     * An empty ref is treated as unset so Blade can pass a conditional
+     * (`next-focus="{{ $next }}"`) without special-casing the last field.
+     *
+     * Blade: `next-focus` (or `nextFocus`).
+     */
+    public function nextFocus(string $ref): static
+    {
+        $ref = trim($ref);
+
+        if ($ref !== '') {
+            $this->inputProps['next_focus'] = $ref;
+        }
 
         return $this;
     }
@@ -558,6 +678,14 @@ abstract class BaseTextInput extends Element
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->inputProps;
+
+        // A field is focus-addressable when its element carries a `ref` —
+        // surfaced to the renderers as a prop, because the node-level ref
+        // is not decoded natively. Each platform's focus registry keys the
+        // field under this name; another input's `next_focus` targets it.
+        if ($this->elementRef !== null && $this->elementRef !== '') {
+            $props['focus_ref'] = $this->elementRef;
+        }
 
         if ($this->changeCallback !== null) {
             $props['on_change'] = $registry->register($this->changeCallback);
