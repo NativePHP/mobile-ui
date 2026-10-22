@@ -62,6 +62,9 @@ object OutlinedTextInputRenderer {
         // the server-push behavior below).
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
+        // Values sent to PHP whose re-render hasn't come back yet; see
+        // TextEchoTracker for why `lastSentValue` alone isn't enough.
+        val echoes = remember { TextEchoTracker(props.serverValue) }
 
         // Reveal state for a `revealable` secure field. Local on purpose, and
         // that is the whole safety argument for the feature: flipping it never
@@ -78,6 +81,7 @@ object OutlinedTextInputRenderer {
                 nodeId = node.id,
                 setLastSent = { lastSentValue = it },
                 getLastSent = { lastSentValue },
+                echoes = echoes,
             )
         }
 
@@ -88,7 +92,10 @@ object OutlinedTextInputRenderer {
         }
 
         LaunchedEffect(props.serverValue) {
-            if (props.serverValue != lastSentValue) {
+            // An echo of an earlier keystroke must not overwrite what the user
+            // has typed since, so check the whole in-flight queue, not just
+            // the newest value sent.
+            if (echoes.receive(props.serverValue) && props.serverValue != lastSentValue) {
                 // Programmatic server push: replace the text and drop the caret
                 // at the very end (parity with the pre-migration String sync,
                 // which reset the field wholesale). We do NOT emit stale

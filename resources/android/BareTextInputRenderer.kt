@@ -82,6 +82,9 @@ object BareTextInputRenderer {
         val scope = rememberCoroutineScope()
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
+        // Values sent to PHP whose re-render hasn't come back yet; see
+        // TextEchoTracker for why `lastSentValue` alone isn't enough.
+        val echoes = remember { TextEchoTracker(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
         val focusManager = LocalFocusManager.current
 
@@ -102,7 +105,10 @@ object BareTextInputRenderer {
         }
 
         LaunchedEffect(props.serverValue) {
-            if (props.serverValue != lastSentValue) {
+            // An echo of an earlier keystroke must not overwrite what the user
+            // has typed since, so check the whole in-flight queue, not just
+            // the newest value sent.
+            if (echoes.receive(props.serverValue) && props.serverValue != lastSentValue) {
                 // Programmatic server push: replace text, caret to the end, and
                 // flush a single end-caret selection event (deduped) rather
                 // than emitting stale pre-push offsets.
@@ -128,7 +134,10 @@ object BareTextInputRenderer {
                 // the change event (parity with the String overload).
                 if (textChanged) {
                     lastSentValue = newValue.text
-                    props.dispatchChange?.invoke(newValue.text)
+                    props.dispatchChange?.let { dispatch ->
+                        echoes.sent(newValue.text)
+                        dispatch(newValue.text)
+                    }
                 }
                 selectionReporter.onValueChanged(newValue)
             },
