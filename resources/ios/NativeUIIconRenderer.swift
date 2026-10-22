@@ -27,7 +27,7 @@ struct NativeUIIconRenderer: View {
             ? darkArgb
             : lightArgb
 
-        Image(systemName: getIconForName(name))
+        NativeIcon.image(name)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)

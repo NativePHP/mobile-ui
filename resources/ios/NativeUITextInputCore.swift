@@ -33,16 +33,16 @@ struct NativeUITextInputCore: View {
     /// chromeless `BasicTextField` doesn't have).
     var supportsRevealToggle: Bool = false
 
-    /// Colour for the placeholder. Nil keeps SwiftUI's own placeholder style,
-    /// which is what every variant drew before. The outlined variant passes
-    /// its `on-input` token here, so a declared `on-input` recolours the
-    /// placeholder along with everything else inside the box, as it already
-    /// does on Android. Without it the placeholder stays system grey, which
-    /// all but disappears on a dark `input-fill`.
+    /// Optional placeholder override (for example, the outlined variant's
+    /// `on-input` token). Otherwise use a muted field text colour so a custom
+    /// surface stays readable even when it differs from the system appearance.
     var placeholderColor: Color? = nil
 
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
+    /// Values sent to PHP whose re-render hasn't come back yet. See
+    /// `NativeUITextEchoTracker` for why `lastSentValue` alone isn't enough.
+    @State private var echoes = NativeUITextEchoTracker()
     @State private var initialized: Bool = false
     @State private var debounceTask: Task<Void, Never>? = nil
     /// Whether a `secure` field is currently showing its contents.
@@ -103,9 +103,8 @@ struct NativeUITextInputCore: View {
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
-        // Nil unless the variant asked for a colour, and a nil prompt leaves the
-        // title as the placeholder, exactly as the prompt-less initializers do.
-        let prompt        = placeholderColor.map { Text(placeholder).foregroundColor($0) }
+        let resolvedPlaceholderColor = placeholderColor ?? contentColor.opacity(0.6)
+        let prompt        = Text(placeholder).foregroundColor(resolvedPlaceholderColor)
         let serverValue   = p.getString("value")
         let secure        = p.getBool("secure")
         let multiline     = p.getBool("multiline")
@@ -309,13 +308,11 @@ struct NativeUITextInputCore: View {
                         .focused($isFocused)
                     }
                     .overlay(alignment: .topLeading) {
-                        // TextEditor has no placeholder slot. Same colour rule
-                        // as the `prompt` the TextField branches take: the
-                        // variant's colour when it passed one, else the system
-                        // placeholder grey.
+                        // TextEditor has no placeholder slot. Match the prompt
+                        // used by the single-line and secure fields.
                         if text.isEmpty && !placeholder.isEmpty {
                             Text(placeholder)
-                                .foregroundStyle(placeholderColor ?? Color(UIColor.placeholderText))
+                                .foregroundStyle(resolvedPlaceholderColor)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -355,6 +352,7 @@ struct NativeUITextInputCore: View {
             if !initialized {
                 text = serverValue
                 lastSentValue = serverValue
+                echoes.reset(serverValue: serverValue)
                 initialized = true
 
                 // First appearance only: a later re-render must not steal
@@ -385,10 +383,13 @@ struct NativeUITextInputCore: View {
             NativeUIKeyboardAccessoryState.shared.release(id: accessoryToken)
         }
         .onChange(of: serverValue) { _, newServerValue in
-            // Only sync from server when the incoming value differs from what
-            // we last sent. Matching == it's an echo of our own change; ignore
-            // to avoid cursor jumps / clobbering in-flight edits.
-            if newServerValue != lastSentValue {
+            // Only sync from server when the incoming value is not an echo of
+            // something we sent. PHP re-renders once per change event, so with
+            // fast typing several echoes are in flight and an EARLIER one can
+            // land after the user has typed more. Comparing only against
+            // `lastSentValue` would let that stale echo overwrite the newer
+            // text, which is how letters went missing.
+            if echoes.receive(newServerValue) && newServerValue != lastSentValue {
                 text = newServerValue
                 lastSentValue = newServerValue
                 // A programmatic push replaces the field wholesale and drops
@@ -604,6 +605,7 @@ struct NativeUITextInputCore: View {
     private func commit(_ value: String, onChangeCb: Int) {
         lastSentValue = value
         if onChangeCb != 0 {
+            echoes.sent(value)
             NativeElementBridge.sendTextChangeEvent(onChangeCb, nodeId: node.id, text: value)
         }
     }
@@ -726,6 +728,61 @@ struct NativeUITextInputCore: View {
             let packed = "\(payload.start),\(payload.end)\u{1F}\(payload.text)"
             NativeElementBridge.sendTextChangeEvent(cb, nodeId: node.id, text: packed)
         }
+    }
+}
+
+/// Tells an echo of our own change apart from a value PHP actually set.
+///
+/// Every change event makes PHP re-render, and the tree it publishes carries
+/// the value from THAT event. When keystrokes arrive faster than the round
+/// trip, several of those renders are in flight at once. The field used to
+/// remember only the newest value it sent, so the echo of an older keystroke
+/// looked like a real server change and replaced everything typed since
+/// ("Buy milk" saved as "Buyilk").
+///
+/// PHP handles events one at a time and in order, so echoes come back in the
+/// order they were sent, though the renderer may skip some when trees arrive
+/// faster than it draws. Matching an incoming value against the queue and
+/// dropping everything up to it handles both. A value that isn't in the queue
+/// is something PHP chose (clearing the field after "Add", say) and is applied
+/// as before.
+struct NativeUITextEchoTracker {
+    /// Unacknowledged values, oldest first.
+    private(set) var inFlight: [String] = []
+    /// The newest value PHP has published for this field.
+    private var serverValue: String = ""
+
+    /// Bounds the queue for a field whose model PHP never publishes back.
+    static let limit = 64
+
+    mutating func reset(serverValue: String) {
+        inFlight.removeAll()
+        self.serverValue = serverValue
+    }
+
+    /// Record a value just sent to PHP.
+    mutating func sent(_ value: String) {
+        // With nothing in flight PHP already holds this value, so its echo
+        // won't change the published tree and would never be seen. Leaving it
+        // out of the queue stops it from later masking a real push of the
+        // same value.
+        if inFlight.isEmpty && value == serverValue { return }
+        inFlight.append(value)
+        if inFlight.count > Self.limit {
+            inFlight.removeFirst(inFlight.count - Self.limit)
+        }
+    }
+
+    /// Record a newly published server value. Returns true when it should be
+    /// applied to the field, false when it is an echo of our own change.
+    mutating func receive(_ value: String) -> Bool {
+        serverValue = value
+        if let index = inFlight.firstIndex(of: value) {
+            inFlight.removeFirst(index + 1)
+            return false
+        }
+        inFlight.removeAll()
+        return true
     }
 }
 
