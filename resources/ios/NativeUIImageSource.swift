@@ -4,8 +4,8 @@ import UIKit
 /// Where an image `src` actually points.
 ///
 /// `src` reads like a web URL to whoever authored it, but SwiftUI has to know
-/// whether to decode a file off disk or go out to the network — `AsyncImage` /
-/// `URLSession` can't load `file://` or bare filesystem paths at all.
+/// whether to decode a file off disk or go out to the network — `URLSession`
+/// can't load `file://` or bare filesystem paths at all.
 ///
 /// Shared by every renderer that loads an image (the `<native:image>` element,
 /// the list-item avatar / thumbnail slots) so a path means the same thing
@@ -13,7 +13,7 @@ import UIKit
 enum NativeUIImageSource {
     /// A file on this device — load it through `NativeUIImageCache`.
     case local(path: String)
-    /// A remote URL — stream through `AsyncImage`.
+    /// A remote URL — download it through `NativeUIRemoteImageCache`.
     case remote(url: URL)
     /// Empty, or a string that isn't a usable URL.
     case unresolvable
@@ -56,8 +56,8 @@ enum NativeUIImageSource {
 /// main thread only ever looks in memory here: `image(atPath:)` is a lookup
 /// by path. Checking the file, reading it and decoding it all happen in
 /// `load(atPath:)`, off the main thread. Android works the same way: Coil
-/// keys a file by its path and decodes it on an IO thread. Remote images get
-/// `URLCache` via `AsyncImage`; this is the local-file equivalent.
+/// keys a file by its path and decodes it on an IO thread. `NativeUIRemoteImageCache`
+/// is the remote equivalent.
 ///
 /// Each entry remembers the file's modification date and size, and `load`
 /// compares them before trusting it. `NativeUILocalImage` calls `load` each
@@ -358,6 +358,165 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
     }
 }
 
+/// Decoded remote images in memory, and the downloads in flight.
+///
+/// `AsyncImage` keeps neither: each one starts its own download, and a
+/// download that fails leaves it on its failure phase for good. That includes
+/// one cancelled because the view was recreated mid-download, which a screen
+/// that re-renders while its images load (a poll, a list update) does all the
+/// time, so images on such a screen can stay blank until it's rebuilt. Here a
+/// download belongs to the cache rather than to a view, so a recreated view
+/// waits on the same one; a download that fails for a reason that can pass
+/// (no connection, a timeout, a 5xx) is tried again a couple of times; and an
+/// image that failed starts over the next time it comes on screen. The bytes
+/// still go through the shared `URLCache`, as with `AsyncImage`.
+enum NativeUIRemoteImageCache {
+    private static let cache: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.totalCostLimit = 64 * 1024 * 1024
+
+        return cache
+    }()
+
+    /// Downloads in progress, so views showing the same URL share one.
+    @MainActor private static var loads: [URL: Task<UIImage?, Never>] = [:]
+
+    /// The waits before the second and third tries.
+    private static let retryDelays: [Duration] = [.milliseconds(500), .milliseconds(1500)]
+
+    /// The decoded image for `url` if it's in memory. Never touches the
+    /// network.
+    static func image(for url: URL) -> UIImage? {
+        cache.object(forKey: url as NSURL)
+    }
+
+    /// The image at `url`, downloaded once however many views wait on it. nil
+    /// when every try failed. Nothing is cached then, so the next call tries
+    /// again.
+    @MainActor
+    static func load(_ url: URL) async -> UIImage? {
+        if let cached = image(for: url) {
+            return cached
+        }
+
+        let task = loads[url] ?? start(url)
+        let image = await task.value
+
+        if loads[url] == task {
+            loads[url] = nil
+        }
+
+        return image
+    }
+
+    /// Not cancelled when the view that asked goes away, so a view recreated
+    /// mid-download picks the download up instead of losing it.
+    @MainActor
+    private static func start(_ url: URL) -> Task<UIImage?, Never> {
+        let task = Task.detached(priority: .userInitiated) {
+            await fetch(url)
+        }
+        loads[url] = task
+
+        return task
+    }
+
+    /// Runs off the main thread.
+    private static func fetch(_ url: URL) async -> UIImage? {
+        for attempt in 0...retryDelays.count {
+            if attempt > 0 {
+                try? await Task.sleep(for: retryDelays[attempt - 1])
+            }
+
+            switch await download(url) {
+            case .image(let image):
+                cache.setObject(image, forKey: url as NSURL, cost: Int(image.size.width * image.scale * image.size.height * image.scale) * 4)
+
+                return image
+            case .permanent:
+                return nil
+            case .transient:
+                continue
+            }
+        }
+
+        return nil
+    }
+
+    private enum Download {
+        case image(UIImage)
+        /// Might work on another try: no connection, a timeout, a 408, 429 or 5xx.
+        case transient
+        /// Won't: a 404 and the like, or bytes that aren't an image.
+        case permanent
+    }
+
+    private static func download(_ url: URL) async -> Download {
+        guard let (data, response) = try? await URLSession.shared.data(from: url) else {
+            return .transient
+        }
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            return http.statusCode == 408 || http.statusCode == 429 || http.statusCode >= 500 ? .transient : .permanent
+        }
+        guard let image = UIImage(data: data) else {
+            return .permanent
+        }
+
+        // Decoded here rather than on the main thread when it's first drawn.
+        return .image(image.preparingForDisplay() ?? image)
+    }
+}
+
+/// A remote image drawn through `NativeUIRemoteImageCache`. An image already
+/// in memory draws straight away; otherwise `placeholder` holds its place,
+/// told whether the download failed. A failed image tries again the next time
+/// it comes on screen.
+struct NativeUIRemoteImage<Content: View, Placeholder: View>: View {
+    private let url: URL
+    private let content: (UIImage) -> Content
+    private let placeholder: (_ failed: Bool) -> Placeholder
+
+    /// What the last load gave, held so an image the cache drops while it's
+    /// on screen keeps drawing.
+    @State private var loaded: (url: URL, image: UIImage)?
+
+    @State private var failed: URL?
+
+    init(url: URL, @ViewBuilder content: @escaping (UIImage) -> Content, @ViewBuilder placeholder: @escaping (_ failed: Bool) -> Placeholder) {
+        self.url = url
+        self.content = content
+        self.placeholder = placeholder
+    }
+
+    var body: some View {
+        // A ZStack rather than a Group, as in NativeUILocalImage: a Group
+        // would hand `.task` to each branch.
+        ZStack {
+            if let image = NativeUIRemoteImageCache.image(for: url) ?? held {
+                content(image)
+            } else {
+                placeholder(failed == url)
+            }
+        }
+        .task(id: url) {
+            let image = await NativeUIRemoteImageCache.load(url)
+            if Task.isCancelled {
+                return
+            }
+            if let image {
+                loaded = (url, image)
+                failed = nil
+            } else {
+                failed = url
+            }
+        }
+    }
+
+    private var held: UIImage? {
+        loaded?.url == url ? loaded?.image : nil
+    }
+}
+
 /// Avatar / thumbnail image for list rows: fills its frame, showing
 /// `placeholder` while the image loads and when the source doesn't resolve.
 /// Callers supply their own frame and clip shape.
@@ -383,11 +542,11 @@ struct NativeUIRowImage<Placeholder: View>: View {
                 placeholder()
             }
         case .remote(let url):
-            AsyncImage(url: url) { image in
-                image
+            NativeUIRemoteImage(url: url) { uiImage in
+                Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
-            } placeholder: {
+            } placeholder: { _ in
                 placeholder()
             }
         case .unresolvable:
