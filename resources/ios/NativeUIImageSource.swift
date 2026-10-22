@@ -290,9 +290,12 @@ enum NativeUIImageCache {
 /// The file is decoded at the size this view is laid out at, which it
 /// measures without changing: the placeholder's size before the image
 /// arrives, the image's after. If it's laid out bigger later, a bigger
-/// decode replaces the image, which keeps drawing until then.
+/// decode replaces the image, which keeps drawing until then. `fullSize`
+/// decodes the whole file instead, for an image drawn at its own size
+/// rather than its frame's (`object-none`).
 struct NativeUILocalImage<Content: View, Placeholder: View>: View {
     private let path: String
+    private let fullSize: Bool
     private let content: (UIImage) -> Content
     private let placeholder: () -> Placeholder
 
@@ -305,14 +308,15 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
     /// Laid-out size in points. Zero until the first layout.
     @State private var size: CGSize = .zero
 
-    init(path: String, @ViewBuilder content: @escaping (UIImage) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+    init(path: String, fullSize: Bool = false, @ViewBuilder content: @escaping (UIImage) -> Content, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.path = path
+        self.fullSize = fullSize
         self.content = content
         self.placeholder = placeholder
     }
 
     var body: some View {
-        let request = Request(path: path, size: size, scale: displayScale)
+        let request = Request(path: path, size: fullSize ? CGSize(width: CGFloat.infinity, height: .infinity) : size, scale: displayScale)
 
         // A ZStack rather than a Group: a Group would hand `.task` to each
         // branch, so swapping in the image would start a second load.
