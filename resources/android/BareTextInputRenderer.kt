@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -82,7 +83,11 @@ object BareTextInputRenderer {
         val scope = rememberCoroutineScope()
         var value by remember { mutableStateOf(TextFieldValue(props.serverValue, TextRange(props.serverValue.length))) }
         var lastSentValue by remember { mutableStateOf(props.serverValue) }
+        // Values sent to PHP whose re-render hasn't come back yet; see
+        // TextEchoTracker for why `lastSentValue` alone isn't enough.
+        val echoes = remember { TextEchoTracker(props.serverValue) }
         var wasFocused by remember { mutableStateOf(false) }
+        val focusRequester = rememberRegisteredFocusRequester(props.focusRef)
         val focusManager = LocalFocusManager.current
 
         // This field's identity in KeyboardFocusPolicy. A blur only releases
@@ -102,7 +107,10 @@ object BareTextInputRenderer {
         }
 
         LaunchedEffect(props.serverValue) {
-            if (props.serverValue != lastSentValue) {
+            // An echo of an earlier keystroke must not overwrite what the user
+            // has typed since, so check the whole in-flight queue, not just
+            // the newest value sent.
+            if (echoes.receive(props.serverValue) && props.serverValue != lastSentValue) {
                 // Programmatic server push: replace text, caret to the end, and
                 // flush a single end-caret selection event (deduped) rather
                 // than emitting stale pre-push offsets.
@@ -128,7 +136,10 @@ object BareTextInputRenderer {
                 // the change event (parity with the String overload).
                 if (textChanged) {
                     lastSentValue = newValue.text
-                    props.dispatchChange?.invoke(newValue.text)
+                    props.dispatchChange?.let { dispatch ->
+                        echoes.sent(newValue.text)
+                        dispatch(newValue.text)
+                    }
                 }
                 selectionReporter.onValueChanged(newValue)
             },
@@ -143,6 +154,7 @@ object BareTextInputRenderer {
             // no-op there, since this field doesn't own the policy yet.
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRequester(focusRequester)
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
@@ -153,6 +165,7 @@ object BareTextInputRenderer {
                     }
                 }
                 .then(modifier)
+                .nuiContentType(props.contentType)
                 .nuiAutofocus(props.autofocus),
             enabled = !props.disabled,
             readOnly = props.readOnly,
@@ -197,10 +210,14 @@ object BareTextInputRenderer {
                 // Flush the settled caret before the submit event fires.
                 selectionReporter.flush(value)
                 props.dispatchSubmit?.invoke(value.text)
-                // Supplying KeyboardActions replaces Compose's default
-                // hide-on-Done, so dismissal is restored here to match
-                // the iOS renderer and the documented default (#335).
-                if (!props.keepFocusOnSubmit) {
+                // Chained focus (`next-focus`): move the keyboard to the
+                // target field. A missing target is a no-op.
+                if (props.nextFocus.isNotEmpty()) {
+                    NativeUIFocusRegistry.request(props.nextFocus)
+                } else if (!props.keepFocusOnSubmit) {
+                    // Supplying KeyboardActions replaces Compose's default
+                    // hide-on-Done, so dismissal is restored here to match
+                    // the iOS renderer and the documented default (#335).
                     focusManager.clearFocus()
                 }
             })

@@ -86,7 +86,7 @@ class ListItem extends Element
             $this->leadingIconBackgroundColor($attrs['leadingIconBgColor']);
         }
         if (isset($attrs['leadingImage'])) {
-            $this->leadingImage($attrs['leadingImage']);
+            $this->leadingImage($attrs['leadingImage'], $attrs['leadingImageFit'] ?? $attrs['leading-image-fit'] ?? null);
         }
         if (isset($attrs['leadingCheckbox'])) {
             $this->leadingCheckbox((bool) $attrs['leadingCheckbox']);
@@ -171,6 +171,12 @@ class ListItem extends Element
         }
         if (isset($attrs['trailingTextColor'])) {
             $this->trailingTextColor($attrs['trailingTextColor']);
+        }
+        if (isset($attrs['trailingTextStyle'])) {
+            $this->trailingTextStyle($attrs['trailingTextStyle']);
+        }
+        if (isset($attrs['trailingAlign'])) {
+            $this->trailingAlign($attrs['trailingAlign']);
         }
 
         // Elevation
@@ -333,10 +339,20 @@ class ListItem extends Element
         return $this;
     }
 
-    public function leadingImage(string $url): static
+    /**
+     * Leading thumbnail, drawn in a 56pt square. `$fit` is `cover` (the
+     * default: fill the square, cropping) or `contain` (letterbox), for
+     * artwork whose aspect ratio carries the meaning — a wide illustration,
+     * a logo. Blade: `leadingImageFit="contain"`.
+     */
+    public function leadingImage(string $url, ?string $fit = null): static
     {
         $this->listItemProps['leading_type'] = 'image';
         $this->listItemProps['leading_value'] = ImageSource::forDevice($url);
+
+        if ($fit !== null && $fit !== '') {
+            $this->listItemProps['leading_image_fit'] = $fit;
+        }
 
         return $this;
     }
@@ -514,6 +530,41 @@ class ListItem extends Element
     public function trailingTextColor(string $color): static
     {
         $this->listItemProps['trailing_text_color'] = $this->resolveColorValue($color);
+
+        return $this;
+    }
+
+    /**
+     * Size of `trailingText`: `label` (a small caption — Material's default
+     * on Android) or `headline` (the same size as the headline — iOS's
+     * default). Unset keeps each platform's default; set, both platforms
+     * draw the same thing.
+     */
+    public function trailingTextStyle(string $style): static
+    {
+        if (! in_array($style, ['label', 'headline'], true)) {
+            throw new \InvalidArgumentException("list-item trailingTextStyle must be 'label' or 'headline', got '{$style}'");
+        }
+
+        $this->listItemProps['trailing_text_style'] = $style;
+
+        return $this;
+    }
+
+    /**
+     * Vertical placement of the leading and trailing slots: `top` (Material's
+     * default for rows with an overline and supporting text) or `center`
+     * (iOS's default). Unset keeps each platform's default; set, both
+     * platforms draw the same thing. On Android `center` also gives the row
+     * Material's two-line spacing.
+     */
+    public function trailingAlign(string $align): static
+    {
+        if (! in_array($align, ['top', 'center'], true)) {
+            throw new \InvalidArgumentException("list-item trailingAlign must be 'top' or 'center', got '{$align}'");
+        }
+
+        $this->listItemProps['trailing_align'] = $align;
 
         return $this;
     }

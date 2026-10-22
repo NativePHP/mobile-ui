@@ -4,14 +4,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -58,6 +62,10 @@ internal data class TextInputProps(
     val maxLength: Int,
     val keyboard: KeyboardType,
     val capitalization: KeyboardCapitalization?,
+    val contentType: ContentType?,
+    val submitLabel: String,
+    val focusRef: String,
+    val nextFocus: String,
     val disabled: Boolean,
     val keepFocusOnSubmit: Boolean,
     val readOnly: Boolean,
@@ -145,6 +153,10 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         maxLength    = p.getInt("max_length"),
         keyboard     = resolveKeyboardType(p.getString("keyboard")),
         capitalization = resolveCapitalization(p.getString("autocapitalize"), p.getBool("secure"), p.getString("keyboard")),
+        contentType  = resolveContentType(p.getString("content_type")),
+        submitLabel  = p.getString("submit_label"),
+        focusRef     = p.getString("focus_ref"),
+        nextFocus    = p.getString("next_focus"),
         disabled     = p.getBool("disabled"),
         keepFocusOnSubmit = p.getBool("keep_focus_on_submit"),
         readOnly     = p.getBool("read_only"),
@@ -243,10 +255,151 @@ internal fun resolveCapitalization(explicit: String, secure: Boolean, keyboard: 
     }
 }
 
-internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions =
-    props.capitalization
-        ?.let { KeyboardOptions(keyboardType = props.keyboard, capitalization = it) }
-        ?: KeyboardOptions(keyboardType = props.keyboard)
+/**
+ * The `content_type` prop → Compose autofill [ContentType]. Tokens are HTML's
+ * `autocomplete` vocabulary, normalized to kebab-case by the element; iOS
+ * resolves the same prop to `UITextContentType` (`NativeUITextInputCore.swift`)
+ * — keep the two in sync.
+ *
+ * Compose already derives a content type from the keyboard type (Email →
+ * EmailAddress, Password → Password, Phone → PhoneNumber) in
+ * `CoreTextFieldSemanticsModifier`. An explicit one set through [nuiContentType]
+ * wins over that: the author's modifier sits at the head of the text field's
+ * chain, and a node's semantics are applied tail to head, so it is written
+ * last. That is what lets `keyboard="email"` and `content-type="username"`
+ * coexist on a login field.
+ *
+ * Note a `secure` field with no `keyboard="password"` gets NO derived type —
+ * masking is a visual transformation, not a keyboard type — so on Android this
+ * prop is the only way such a field is declared a password at all.
+ *
+ * Unknown and empty values return null, matching `resolveKeyboardType`.
+ */
+internal fun resolveContentType(kind: String): ContentType? = when (kind.lowercase()) {
+    "username"      -> ContentType.Username
+    "email"         -> ContentType.EmailAddress
+    "password"      -> ContentType.Password
+    "new-password"  -> ContentType.NewPassword
+    "one-time-code" -> ContentType.SmsOtpCode
+    else            -> null
+}
+
+/**
+ * Declare the field's autofill [ContentType]. Null leaves the modifier chain
+ * untouched, so a field that doesn't set `content-type` keeps exactly the
+ * semantics — including Compose's own keyboard-derived type — it had.
+ */
+internal fun Modifier.nuiContentType(type: ContentType?): Modifier =
+    if (type == null) this else semantics { contentType = type }
+
+/**
+ * IME action for the submit key — the `submit_label` prop. The explicit
+ * value wins; unset — or unknown, same policy as [resolveKeyboardType] —
+ * derives [ImeAction.Next] when a `next_focus` chain is set (mirroring how
+ * capitalization derives from the keyboard type), else keeps
+ * [ImeAction.Default], i.e. exactly the pre-prop behaviour.
+ *
+ * "return" is iOS vocabulary (a plain Return key); Android has no exact
+ * equivalent, so it resolves to the IME default — listed explicitly so an
+ * author's `return` beats the `next_focus` derivation.
+ *
+ * A multiline field ignores both props entirely: a non-default IME action
+ * replaces the return key, and multiline's return key must keep inserting
+ * newlines. iOS ignores them for multiline the same way
+ * (`resolveSubmitLabel` in `NativeUITextInputCore.swift`) — keep the two
+ * in sync.
+ */
+internal fun resolveImeAction(explicit: String, multiline: Boolean, nextFocus: String): ImeAction {
+    if (multiline) return ImeAction.Default
+
+    return when (explicit.lowercase()) {
+        "next"   -> ImeAction.Next
+        "done"   -> ImeAction.Done
+        "go"     -> ImeAction.Go
+        "search" -> ImeAction.Search
+        "send"   -> ImeAction.Send
+        "return" -> ImeAction.Default
+        else     -> if (nextFocus.isNotEmpty()) ImeAction.Next else ImeAction.Default
+    }
+}
+
+internal fun keyboardOptionsFor(props: TextInputProps): KeyboardOptions {
+    val imeAction = resolveImeAction(props.submitLabel, props.multiline, props.nextFocus)
+
+    return props.capitalization
+        ?.let { KeyboardOptions(keyboardType = props.keyboard, capitalization = it, imeAction = imeAction) }
+        ?: KeyboardOptions(keyboardType = props.keyboard, imeAction = imeAction)
+}
+
+/**
+ * Screen-wide focus routing for text inputs — the `next-focus` prop.
+ *
+ * Each renderer whose element carries a `ref` registers its
+ * [FocusRequester] under that name (a `DisposableEffect` keyed on the
+ * ref), and the submit handler of a field with `next_focus` set asks the
+ * registry to move the keyboard there. Focus is only ever requested from
+ * a user-initiated submit on another field — never from server pushes —
+ * so the registry cannot steal focus spontaneously.
+ *
+ * Main-thread only: registration happens in composition effects and
+ * requests in IME action handlers. Last registration wins (refs are
+ * unique per screen by convention — they are the same refs
+ * `Native::test()` targets); unregistration is identity-guarded so a
+ * disposed screen can't tear down the ref it was shadowing. iOS keeps the
+ * same contract (`NativeUIFocusRegistry.swift`) — keep the two in sync.
+ */
+internal object NativeUIFocusRegistry {
+    private val entries = mutableMapOf<String, FocusRequester>()
+
+    fun register(ref: String, requester: FocusRequester) {
+        entries[ref] = requester
+    }
+
+    fun unregister(ref: String, requester: FocusRequester) {
+        if (entries[ref] === requester) {
+            entries.remove(ref)
+        }
+    }
+
+    /**
+     * Focus the field registered under [ref]. Returns whether a live
+     * target existed — a missing or detached target (off-screen, recycled
+     * row, typo'd ref) is a no-op, never a crash.
+     */
+    fun request(ref: String): Boolean {
+        val requester = entries[ref] ?: return false
+        return try {
+            requester.requestFocus()
+            true
+        } catch (_: IllegalStateException) {
+            // Registered but no longer attached to a composed node (the
+            // row was recycled between registration and this submit).
+            false
+        }
+    }
+}
+
+/**
+ * Remember a [FocusRequester] kept registered in [NativeUIFocusRegistry]
+ * under the field's `focus_ref` while it is in composition. Hang the
+ * result on the field's `Modifier.focusRequester`; an empty ref returns a
+ * plain, unregistered requester.
+ */
+@Composable
+internal fun rememberRegisteredFocusRequester(focusRef: String): FocusRequester {
+    val requester = remember { FocusRequester() }
+    DisposableEffect(focusRef) {
+        if (focusRef.isNotEmpty()) {
+            NativeUIFocusRegistry.register(focusRef, requester)
+        }
+        onDispose {
+            if (focusRef.isNotEmpty()) {
+                NativeUIFocusRegistry.unregister(focusRef, requester)
+            }
+        }
+    }
+    return requester
+}
 
 /**
  * Outbound dispatch state machine. Call [onTextChanged] whenever local text
@@ -259,6 +412,7 @@ internal class TextInputDispatcher(
     private val nodeId: Int,
     private val setLastSent: (String) -> Unit,
     private val getLastSent: () -> String,
+    private val echoes: TextEchoTracker,
 ) {
     private var debounceJob: Job? = null
 
@@ -307,8 +461,64 @@ internal class TextInputDispatcher(
     private fun commit(value: String) {
         setLastSent(value)
         if (props.onChangeCb != 0) {
+            echoes.sent(value)
             NativeUIBridge.sendTextChangeEvent(props.onChangeCb, nodeId, value)
         }
+    }
+}
+
+/**
+ * Tells an echo of our own change apart from a value PHP actually set.
+ *
+ * Every change event makes PHP re-render, and the tree it publishes carries
+ * the value from THAT event. When keystrokes arrive faster than the round
+ * trip, several of those renders are in flight at once. The field used to
+ * remember only the newest value it sent, so the echo of an older keystroke
+ * looked like a real server change and replaced everything typed since
+ * ("Buy milk" saved as "Buyilk").
+ *
+ * PHP handles events one at a time and in order, so echoes come back in the
+ * order they were sent, though recomposition may skip some when trees arrive
+ * faster than it draws. Matching an incoming value against the queue and
+ * dropping everything up to it handles both. A value that isn't in the queue
+ * is something PHP chose (clearing the field after "Add", say) and is applied
+ * as before.
+ *
+ * Main-thread only, like the rest of the field state.
+ */
+internal class TextEchoTracker(private var serverValue: String) {
+    /** Unacknowledged values, oldest first. */
+    private val inFlight = ArrayDeque<String>()
+
+    /** Record a value just sent to PHP. */
+    fun sent(value: String) {
+        // With nothing in flight PHP already holds this value, so its echo
+        // won't change the published tree and would never be seen. Leaving it
+        // out of the queue stops it from later masking a real push of the
+        // same value.
+        if (inFlight.isEmpty() && value == serverValue) return
+        inFlight.addLast(value)
+        while (inFlight.size > LIMIT) inFlight.removeFirst()
+    }
+
+    /**
+     * Record a newly published server value. Returns true when it should be
+     * applied to the field, false when it is an echo of our own change.
+     */
+    fun receive(value: String): Boolean {
+        serverValue = value
+        val index = inFlight.indexOf(value)
+        if (index >= 0) {
+            repeat(index + 1) { inFlight.removeFirst() }
+            return false
+        }
+        inFlight.clear()
+        return true
+    }
+
+    private companion object {
+        /** Bounds the queue for a field whose model PHP never publishes back. */
+        const val LIMIT = 64
     }
 }
 
