@@ -17,11 +17,11 @@ object ImageRenderer {
     fun Render(node: NativeUINode, modifier: Modifier) {
         val p = node.props
         val src = p.getString("src")
-        // No `fit` prop means no `object-*` class. Default to Fit (1) so
+        // No `fit` prop means no `object-*` class. Default to contain so
         // an unclassed image scales into its frame like iOS does, instead
         // of ContentScale.None painting the bitmap at intrinsic size and
         // center-cropping it to the frame.
-        val fit = p.getInt("fit", 1)
+        val fit = p.getInt("fit", ImageFit.CONTAIN)
         val alt = p.getString("alt")
         val tintArgb = p.getColor("tint_color", 0)
         val radius = node.style?.borderRadius ?: 0f
@@ -55,13 +55,19 @@ object ImageRenderer {
     }
 }
 
+/** Wire values of the `fit` prop, matching PHP's `ImageFit` enum. */
+private object ImageFit {
+    const val NONE = 0
+    const val CONTAIN = 1
+    const val COVER = 2
+    const val FILL = 3
+}
+
 private fun resolveContentScale(fit: Int): ContentScale {
     return when (fit) {
-        0 -> ContentScale.None
-        1 -> ContentScale.Fit
-        2 -> ContentScale.Crop
-        3 -> ContentScale.FillBounds
-        4 -> ContentScale.Fit
+        ImageFit.NONE -> ContentScale.None
+        ImageFit.COVER -> ContentScale.Crop
+        ImageFit.FILL -> ContentScale.FillBounds
         else -> ContentScale.Fit
     }
 }
