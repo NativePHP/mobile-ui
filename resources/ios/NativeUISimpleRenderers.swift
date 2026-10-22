@@ -160,11 +160,14 @@ struct NativeUIImageRenderer: View {
             // Local device file — camera capture, gallery selection, or an
             // asset shipped in the app's `public/` directory.
             // `AsyncImage`/`URLSession` can't load `file://` or bare
-            // filesystem paths, so decode directly with UIImage (cached, and
-            // HEIC/HEIF handled transparently — UIImage decodes them natively).
-            if let uiImage = NativeUIImageCache.image(atPath: path) {
+            // filesystem paths, so decode with UIImage (cached, off the main
+            // thread, at the size it's drawn, and HEIC/HEIF handled
+            // transparently — UIImage decodes them natively). Until it
+            // arrives, the clear placeholder takes the element's frame, so a
+            // sized image doesn't move anything.
+            NativeUILocalImage(path: path) { uiImage in
                 tinted(Image(uiImage: uiImage), contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
-            } else {
+            } placeholder: {
                 Color.clear
             }
         case .remote(let url):
