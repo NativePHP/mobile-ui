@@ -64,6 +64,16 @@ it('defaults count to the inline page count and forwards horizontal', function (
         ->and($tree['children'])->toHaveCount(3);
 });
 
+it('reports on settle only when asked', function () {
+    NativeElementCollector::open('pager', ['report-on-settle' => true]);
+    NativeElementCollector::close();
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['report_on_settle'])->toBeTrue()
+        ->and(Pager::make()->reportOnSettle()->toArray(new CallbackRegistry)['props']['report_on_settle'])->toBeTrue()
+        ->and(Pager::make()->toArray(new CallbackRegistry)['props'])->not->toHaveKey('report_on_settle');
+});
+
 it('clamps negative count and page to zero', function () {
     $tree = Pager::make()->count(-4)->page(-1)->toArray(new CallbackRegistry);
 

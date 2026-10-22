@@ -40,6 +40,9 @@ struct NativeUITextInputCore: View {
 
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
+    /// Values sent to PHP whose re-render hasn't come back yet. See
+    /// `NativeUITextEchoTracker` for why `lastSentValue` alone isn't enough.
+    @State private var echoes = NativeUITextEchoTracker()
     @State private var initialized: Bool = false
     @State private var debounceTask: Task<Void, Never>? = nil
     /// Whether a `secure` field is currently showing its contents.
@@ -127,6 +130,7 @@ struct NativeUITextInputCore: View {
         let syncMode      = p.getString("sync_mode", default: "live")
         let debounceMs    = p.getInt("debounce_ms", default: 300)
         let keepFocus     = p.getBool("keep_focus_on_submit")
+        let submitLabelKind = p.getString("submit_label")
         let autofocus     = p.getBool("autofocus")
         // Selection reporting is opt-in (0/absent ⇒ off) and never applies to
         // secure fields. Read exactly like `on_change` / `debounce_ms` above.
@@ -255,6 +259,7 @@ struct NativeUITextInputCore: View {
             if !initialized {
                 text = serverValue
                 lastSentValue = serverValue
+                echoes.reset(serverValue: serverValue)
                 initialized = true
 
                 // First appearance only: a later re-render must not steal
@@ -267,10 +272,13 @@ struct NativeUITextInputCore: View {
             }
         }
         .onChange(of: serverValue) { _, newServerValue in
-            // Only sync from server when the incoming value differs from what
-            // we last sent. Matching == it's an echo of our own change; ignore
-            // to avoid cursor jumps / clobbering in-flight edits.
-            if newServerValue != lastSentValue {
+            // Only sync from server when the incoming value is not an echo of
+            // something we sent. PHP re-renders once per change event, so with
+            // fast typing several echoes are in flight and an EARLIER one can
+            // land after the user has typed more. Comparing only against
+            // `lastSentValue` would let that stale echo overwrite the newer
+            // text, which is how letters went missing.
+            if echoes.receive(newServerValue) && newServerValue != lastSentValue {
                 text = newServerValue
                 lastSentValue = newServerValue
                 // A programmatic push replaces the field wholesale and drops
@@ -364,7 +372,7 @@ struct NativeUITextInputCore: View {
                 core
             } else {
                 core
-                    .submitLabel(onSubmitCb != 0 ? .done : .return)
+                    .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0))
                     .onSubmit {
                         // Submit also acts as a commit point — flush pending, then dispatch.
                         flushPending(onChangeCb: onChangeCb)
@@ -481,6 +489,7 @@ struct NativeUITextInputCore: View {
     private func commit(_ value: String, onChangeCb: Int) {
         lastSentValue = value
         if onChangeCb != 0 {
+            echoes.sent(value)
             NativeElementBridge.sendTextChangeEvent(onChangeCb, nodeId: node.id, text: value)
         }
     }
@@ -606,11 +615,90 @@ struct NativeUITextInputCore: View {
     }
 }
 
+/// Tells an echo of our own change apart from a value PHP actually set.
+///
+/// Every change event makes PHP re-render, and the tree it publishes carries
+/// the value from THAT event. When keystrokes arrive faster than the round
+/// trip, several of those renders are in flight at once. The field used to
+/// remember only the newest value it sent, so the echo of an older keystroke
+/// looked like a real server change and replaced everything typed since
+/// ("Buy milk" saved as "Buyilk").
+///
+/// PHP handles events one at a time and in order, so echoes come back in the
+/// order they were sent, though the renderer may skip some when trees arrive
+/// faster than it draws. Matching an incoming value against the queue and
+/// dropping everything up to it handles both. A value that isn't in the queue
+/// is something PHP chose (clearing the field after "Add", say) and is applied
+/// as before.
+struct NativeUITextEchoTracker {
+    /// Unacknowledged values, oldest first.
+    private(set) var inFlight: [String] = []
+    /// The newest value PHP has published for this field.
+    private var serverValue: String = ""
+
+    /// Bounds the queue for a field whose model PHP never publishes back.
+    static let limit = 64
+
+    mutating func reset(serverValue: String) {
+        inFlight.removeAll()
+        self.serverValue = serverValue
+    }
+
+    /// Record a value just sent to PHP.
+    mutating func sent(_ value: String) {
+        // With nothing in flight PHP already holds this value, so its echo
+        // won't change the published tree and would never be seen. Leaving it
+        // out of the queue stops it from later masking a real push of the
+        // same value.
+        if inFlight.isEmpty && value == serverValue { return }
+        inFlight.append(value)
+        if inFlight.count > Self.limit {
+            inFlight.removeFirst(inFlight.count - Self.limit)
+        }
+    }
+
+    /// Record a newly published server value. Returns true when it should be
+    /// applied to the field, false when it is an echo of our own change.
+    mutating func receive(_ value: String) -> Bool {
+        serverValue = value
+        if let index = inFlight.firstIndex(of: value) {
+            inFlight.removeFirst(index + 1)
+            return false
+        }
+        inFlight.removeAll()
+        return true
+    }
+}
+
 /// Snapshot of a reported selection — the dedupe key and the debounce payload.
 private struct NativeUISelectionPayload: Equatable {
     let text: String
     let start: Int
     let end: Int
+}
+
+/// Submit-key face for the field. The explicit `submit_label` prop wins;
+/// unset — or unknown, same policy as `resolveKeyboardType` — keeps the
+/// original default: `.done` when `@submit` is wired, `.return` otherwise.
+///
+/// A multiline field ignores the prop entirely: on the vertical-axis
+/// TextField a non-return submit label swaps newline insertion for a submit
+/// action, silently taking away the field's reason to be multiline. Android
+/// ignores the prop for multiline the same way (`resolveImeAction` in
+/// `TextInputShared.kt`) — keep the two in sync.
+private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bool) -> SubmitLabel {
+    if !multiline {
+        switch explicit.lowercased() {
+        case "next":   return .next
+        case "done":   return .done
+        case "go":     return .go
+        case "search": return .search
+        case "send":   return .send
+        case "return": return .return
+        default:       break
+        }
+    }
+    return hasSubmit ? .done : .return
 }
 
 /// Keyboard resolution — accepts string hints ("email", "number", etc.) that

@@ -66,7 +66,7 @@ struct NativeUIChipRenderer: View {
         }) {
             HStack(spacing: 6) {
                 if !iconName.isEmpty {
-                    Image(systemName: getIconForName(iconName))
+                    NativeIconView(iconName, pointSize: 14, relativeTo: .body)
                         .nuiScaledFont(size: 14)
                 }
                 Text(label).nuiScaledFont(size: theme.fontSm, weight: .medium)

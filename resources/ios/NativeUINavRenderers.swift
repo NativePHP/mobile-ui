@@ -62,14 +62,14 @@ struct NativeUITopBarRenderer: View {
                     ? a11y
                     : (!actionLabel.isEmpty
                         ? actionLabel
-                        : icon.replacingOccurrences(of: "_", with: " ")
+                        : (NativeIcon.customName(icon) ?? icon).replacingOccurrences(of: "_", with: " ")
                               .replacingOccurrences(of: "-", with: " "))
                 Button {
                     if action.onPress != 0 {
                         NativeElementBridge.sendPressEvent(action.onPress, nodeId: action.id)
                     }
                 } label: {
-                    Image(systemName: getIconForName(icon))
+                    NativeIconView(icon, pointSize: 17, relativeTo: .body)
                         .nuiScaledFont(size: 17, weight: .semibold)
                         .foregroundColor(textColor)
                         .frame(width: 32, height: 32)
@@ -166,7 +166,7 @@ struct NativeUIBottomNavRenderer: View {
                 } label: {
                     VStack(spacing: 4) {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: getIconForName(icon))
+                            NativeIconView(icon, pointSize: 24, relativeTo: .body)
                                 .nuiScaledFont(size: 24)
                             if !badge.isEmpty {
                                 Text(badge)

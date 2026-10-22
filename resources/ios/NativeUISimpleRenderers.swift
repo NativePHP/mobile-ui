@@ -41,7 +41,7 @@ private func pressableMenuItem(_ item: NativeUINode) -> some View {
             }
         } label: {
             if !icon.isEmpty {
-                Label(label, systemImage: getIconForName(icon))
+                Label { Text(label) } icon: { NativeIcon.image(icon) }
             } else {
                 Text(label)
             }
