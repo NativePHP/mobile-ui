@@ -161,9 +161,10 @@ struct NativeUIImageRenderer: View {
             // asset shipped in the app's `public/` directory.
             // `AsyncImage`/`URLSession` can't load `file://` or bare
             // filesystem paths, so decode with UIImage (cached, off the main
-            // thread, and HEIC/HEIF handled transparently — UIImage decodes
-            // them natively). Until it arrives, the clear placeholder takes
-            // the element's frame, so a sized image doesn't move anything.
+            // thread, at the size it's drawn, and HEIC/HEIF handled
+            // transparently — UIImage decodes them natively). Until it
+            // arrives, the clear placeholder takes the element's frame, so a
+            // sized image doesn't move anything.
             NativeUILocalImage(path: path) { uiImage in
                 tinted(Image(uiImage: uiImage), contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
             } placeholder: {
