@@ -71,10 +71,31 @@ struct NativeUISpacerRenderer: View {
 
 struct NativeUIDividerRenderer: View {
     let node: NativeUINode
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        let borderArgb = node.style?.borderColor ?? 0
-        let color: Color = borderArgb != 0 ? Color(argb: borderArgb) : Color(uiColor: .separator)
-        Rectangle().fill(color).frame(height: 1)
+        Rectangle().fill(lineColor).frame(height: 1)
+    }
+
+    /// `border-*` colours the rule (`dark:border-*` in dark mode). Without
+    /// one, a `bg-*` colour is the rule: NodeStyleModifier already paints the
+    /// node's background (and its `dark:bg-*` variant) across this 1pt frame,
+    /// so the line stays clear instead of covering it with the separator.
+    /// Neither falls back to the system separator.
+    private var lineColor: Color {
+        let dark = colorScheme == .dark
+        let darkBorder = dark ? node.props.getColor("dark_border_color", default: 0) : 0
+        let borderArgb = darkBorder != 0 ? darkBorder : (node.style?.borderColor ?? 0)
+        if borderArgb != 0 {
+            return Color(argb: borderArgb)
+        }
+
+        let darkBg = dark ? node.props.getColor("dark_bg_color", default: 0) : 0
+        if darkBg != 0 || (node.style?.bgColor ?? 0) != 0 {
+            return .clear
+        }
+
+        return Color(uiColor: .separator)
     }
 }
 
