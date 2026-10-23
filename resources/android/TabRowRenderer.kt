@@ -6,8 +6,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
-import com.nativephp.mobile.ui.nativerender.LocalTopBarColor
-import com.nativephp.mobile.ui.nativerender.LocalTopTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,8 +25,9 @@ import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
 /**
- * Material3 PrimaryTabRow — horizontal tab strip with an indicator under the
- * active tab. Echo-prevention (plan K), theme-sourced colors (Model 3).
+ * Material3 PrimaryScrollableTabRow — horizontal tab strip with an indicator
+ * under the active tab. Echo-prevention (plan K), theme-sourced colors
+ * (Model 3).
  */
 object TabRowRenderer {
     @Composable
@@ -64,10 +63,7 @@ object TabRowRenderer {
             // width evenly and wrapped four Dutch labels onto two lines.
             PrimaryScrollableTabRow(
                 selectedTabIndex = selectedIndex.coerceIn(0, tabs.size - 1),
-                // a strip sitting directly under the
-                // nav bar is chrome — it paints in the bar's colour (see
-                // LocalTopTabRow); inline strips stay transparent.
-                containerColor = if (node === LocalTopTabRow.current) (LocalTopBarColor.current ?: Color.Transparent) else Color.Transparent,
+                containerColor = Color.Transparent,
                 contentColor = theme.primary,
                 edgePadding = 0.dp,
                 divider = { HorizontalDivider(color = theme.outline) },
