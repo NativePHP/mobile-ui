@@ -470,14 +470,6 @@
             "self_closing": false
         },
         {
-            "type": "webview",
-            "element": "Native\\Mobile\\UI\\Elements\\Webview",
-            "blade": "Native\\Mobile\\UI\\Components\\Webview",
-            "android_renderer": "com.nativephp.plugins.native_ui.ui.WebviewRenderer",
-            "ios_renderer": "NativeUIWebviewRenderer",
-            "self_closing": true
-        },
-        {
             "type": "accordion",
             "element": "Native\\Mobile\\UI\\Elements\\Accordion",
             "blade": "Native\\Mobile\\UI\\Components\\Accordion",
