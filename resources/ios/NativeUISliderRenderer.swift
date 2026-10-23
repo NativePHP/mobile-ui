@@ -22,6 +22,8 @@ struct NativeUISliderRenderer: View {
     @State private var value: Double = 0
     @State private var lastSentValue: Double = 0
     @State private var initialized: Bool = false
+    /// True while a finger is on the slider. Server values wait until it lifts.
+    @State private var isEditing: Bool = false
     @State private var debounceTask: Task<Void, Never>? = nil
 
     var body: some View {
@@ -65,7 +67,14 @@ struct NativeUISliderRenderer: View {
                 initialized = true
             }
         }
+        .onDisappear {
+            // A drag must never stick: if the slider goes mid-drag, server values apply again.
+            isEditing = false
+        }
         .onChange(of: serverValue) { _, newServerValue in
+            // The finger owns the value during a drag. Without this, a re-render
+            // (a poll, a timer) puts the thumb back under the finger.
+            guard !isEditing else { return }
             // Echo-prevention: ignore server pushes that match what we sent.
             if abs(newServerValue - lastSentValue) > 0.0001 {
                 value = newServerValue
@@ -104,7 +113,9 @@ struct NativeUISliderRenderer: View {
     }
 
     private func handleEditingChanged(_ editing: Bool, mode: String, onChangeCb: Int) {
-        // Drag started (editing=true): nothing to do — onChange(of:value) handles ticks.
+        isEditing = editing
+        // Drag started (editing=true): onChange(of:value) handles ticks, and
+        // server values wait (see onChange(of: serverValue)).
         // Drag ended (editing=false): flush any pending / un-sent value.
         guard !editing else { return }
         debounceTask?.cancel()
