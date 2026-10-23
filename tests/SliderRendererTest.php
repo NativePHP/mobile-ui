@@ -1,8 +1,9 @@
 <?php
 
 /**
- * While a finger is on the iOS slider, a re-render must not move the thumb:
- * the renderer ignores server values until the finger lifts.
+ * While a finger is on a slider, a re-render must not move the thumb: the
+ * renderers ignore server values until the finger lifts (iOS) or the drag
+ * ends (Android).
  */
 function iosSliderRenderer(): string
 {
@@ -27,4 +28,24 @@ test('the iOS slider ignores server values during a drag', function () {
 test('the iOS slider applies server values again if it goes away mid-drag', function () {
     expect(iosSliderRenderer())
         ->toMatch('/\.onDisappear \{\s*(?:\/\/[^\n]*\n\s*)*isEditing = false\s*\}/');
+});
+
+function androidSliderRenderer(): string
+{
+    $rendererPath = dirname(__DIR__).'/resources/android/SliderRenderer.kt';
+
+    expect($rendererPath)->toBeFile();
+
+    return file_get_contents($rendererPath);
+}
+
+test('the Android slider knows when a finger drags it', function () {
+    expect(androidSliderRenderer())
+        ->toMatch('/val isDragged by interactionSource\.collectIsDraggedAsState\(\)/')
+        ->toMatch('/\n {8}Slider\(.*?\n {12}interactionSource = interactionSource,\n {8}\)/s');
+});
+
+test('the Android slider ignores server values during a drag', function () {
+    expect(androidSliderRenderer())
+        ->toMatch('/LaunchedEffect\(serverValue\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(isDragged\) return@LaunchedEffect/');
 });

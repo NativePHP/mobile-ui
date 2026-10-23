@@ -73,7 +73,7 @@ struct NativeUISliderRenderer: View {
         }
         .onChange(of: serverValue) { _, newServerValue in
             // The finger owns the value during a drag. Without this, a re-render
-            // (a poll, a timer) puts the thumb back under the finger.
+            // (a poll, a timer) moves the thumb away from the finger.
             guard !isEditing else { return }
             // Echo-prevention: ignore server pushes that match what we sent.
             if abs(newServerValue - lastSentValue) > 0.0001 {
