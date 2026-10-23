@@ -2,6 +2,7 @@ package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
+import com.nativephp.mobile.ui.nativerender.NativeScrollTargetRegistry
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
 import kotlinx.coroutines.delay
@@ -74,6 +76,13 @@ object ListRenderer {
         // Set when this list is a page of a pager with a header, which the
         // list draws above its rows (see PagerHeader).
         val pagerHeader = if (horizontal) null else LocalPagerHeader.current
+        // The key a Tab::onReselect() names to act on this list from a
+        // bottom-tab reselect. Absent by default: nothing registers and
+        // the list behaves exactly as before the seam. See ListScrollTarget.
+        val scrollTarget = node.props.getString("scroll_target", "")
+        if (scrollTarget.isNotEmpty()) {
+            ListScrollTarget(scrollTarget, scrollState)
+        }
         // Rows are measured while the list reports its visible range: that's
         // what a list putting placeholders in rows' places goes by.
         val rowHeights = remember { ListRowHeights() }
@@ -271,6 +280,40 @@ object ListRenderer {
 
 /** How long a list waits between reports of its visible range while scrolling. */
 private const val VISIBLE_RANGE_INTERVAL_MS = 150L
+
+/**
+ * Publishes [state] under [key] in the core [NativeScrollTargetRegistry]
+ * while the list that owns it is composed — the list's half of the
+ * bottom-tab reselect scroll seam. A reselect that names [key] scrolls
+ * the list back to its top from native (no PHP round trip), or fires
+ * its refresh method when the list already sits at exact top; see the
+ * registry's docs for the seam. Android only — iOS ignores the prop.
+ *
+ * The effect is keyed on [state] as well as [key]: when a re-keyed or
+ * remounted list gets a fresh `rememberLazyListState`, the entry is
+ * re-registered against the new one, so no entry ever points at a
+ * disposed state. `owner` is a fresh token per composition and the
+ * registry unregisters by identity, so the stale `onDispose` of a
+ * composition a newer one already replaced (a pager page recomposed
+ * under a different list key) can never remove the live entry — only
+ * its own.
+ *
+ * Both orientations register, and "top" is the start of the list: item
+ * 0 at a zero pixel offset, vertically or horizontally.
+ */
+@Composable
+private fun ListScrollTarget(key: String, state: LazyListState) {
+    val owner = remember { Any() }
+    DisposableEffect(key, state) {
+        NativeScrollTargetRegistry.register(
+            key = key,
+            owner = owner,
+            isAtTop = { state.firstVisibleItemIndex == 0 && state.firstVisibleItemScrollOffset == 0 },
+            scrollToTop = { state.animateScrollToItem(0) },
+        )
+        onDispose { NativeScrollTargetRegistry.unregister(key, owner) }
+    }
+}
 
 /**
  * The height each row of a list last drew at, in pixels, by node id. A
