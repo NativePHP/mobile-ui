@@ -206,7 +206,7 @@ struct NativeDrawerHost<Content: View>: View {
                 }
 
                 // ☰ affordance, top-leading, shown while the drawer is closed.
-                if !state.isOpen {
+                if !state.isOpen, drawerNode != nil {
                     Button {
                         withAnimation(drawerAnimation) { state.isOpen = true }
                     } label: {
