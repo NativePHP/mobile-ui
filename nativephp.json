@@ -238,6 +238,14 @@
             "self_closing": true
         },
         {
+            "type": "sign_in_with_apple_button",
+            "element": "Native\\Mobile\\UI\\Elements\\SignInWithAppleButton",
+            "blade": "Native\\Mobile\\UI\\Components\\SignInWithAppleButton",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.SignInWithAppleButtonRenderer",
+            "ios_renderer": "NativeUISignInWithAppleButtonRenderer",
+            "self_closing": false
+        },
+        {
             "type": "progress_bar",
             "element": "Native\\Mobile\\UI\\Elements\\ProgressBar",
             "blade": "Native\\Mobile\\UI\\Components\\ProgressBar",
