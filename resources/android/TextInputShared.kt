@@ -296,12 +296,16 @@ internal fun Modifier.nuiContentType(type: ContentType?): Modifier =
  * IME action for the submit key — the `submit_label` prop. The explicit
  * value wins; unset — or unknown, same policy as [resolveKeyboardType] —
  * derives [ImeAction.Next] when a `next_focus` chain is set (mirroring how
- * capitalization derives from the keyboard type), else keeps
- * [ImeAction.Default], i.e. exactly the pre-prop behaviour.
+ * capitalization derives from the keyboard type), else [ImeAction.Done].
+ *
+ * A single-line field never declares [ImeAction.Default]. The keyboard
+ * shows Done for it anyway, but Compose runs no keyboard action for
+ * Default, so a hardware Enter key or an accessibility IME action would
+ * not submit the field.
  *
  * "return" is iOS vocabulary (a plain Return key); Android has no exact
- * equivalent, so it resolves to the IME default — listed explicitly so an
- * author's `return` beats the `next_focus` derivation.
+ * equivalent, so it resolves to Done — listed explicitly so an author's
+ * `return` beats the `next_focus` derivation.
  *
  * A multiline field ignores both props entirely: a non-default IME action
  * replaces the return key, and multiline's return key must keep inserting
@@ -318,8 +322,8 @@ internal fun resolveImeAction(explicit: String, multiline: Boolean, nextFocus: S
         "go"     -> ImeAction.Go
         "search" -> ImeAction.Search
         "send"   -> ImeAction.Send
-        "return" -> ImeAction.Default
-        else     -> if (nextFocus.isNotEmpty()) ImeAction.Next else ImeAction.Default
+        "return" -> ImeAction.Done
+        else     -> if (nextFocus.isNotEmpty()) ImeAction.Next else ImeAction.Done
     }
 }
 
