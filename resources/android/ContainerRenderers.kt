@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -369,6 +370,38 @@ private fun resolveAutoScrollTarget(node: NativeUINode): Int {
 }
 
 /**
+ * Animates the list to [index] and lets a collapsing top bar follow it.
+ *
+ * Compose only moves the bar on nested-scroll deltas, and a programmatic
+ * scroll emits none, so a chat log scrolling itself to a new message left a
+ * large title fully expanded. When the list ends up further down than it
+ * started, ask the bar to collapse as well. A list that couldn't move, or
+ * that moved back up, leaves the bar where it is, since the controller can
+ * only collapse.
+ *
+ * Compared after the scroll rather than predicted before it: a message that
+ * has just arrived isn't measured yet, so `canScrollForward` would still say
+ * a list sitting at the bottom can't move.
+ */
+private suspend fun LazyListState.animateScrollFollowingChrome(
+    index: Int,
+    scrollOffset: Int,
+    chrome: ChromeScrollController?,
+) {
+    val startIndex = firstVisibleItemIndex
+    val startOffset = firstVisibleItemScrollOffset
+
+    animateScrollToItem(index, scrollOffset)
+
+    val movedDown = firstVisibleItemIndex > startIndex ||
+        (firstVisibleItemIndex == startIndex && firstVisibleItemScrollOffset > startOffset)
+
+    if (movedDown) {
+        chrome?.collapse()
+    }
+}
+
+/**
  * Drives a lazy list from the resolved `auto_scroll_to` target.
  *
  * Keyed on the RESOLVED index, so the scroll fires when the author's intent
@@ -382,10 +415,18 @@ private fun resolveAutoScrollTarget(node: NativeUINode): Int {
  *
  * First application jumps, later ones animate — matching `scroll-anchor`:
  * a screen that opens already scrolled shouldn't visibly fly down from the
- * top, but a later move is a state change the user should see happen.
+ * top, but a later move is a state change the user should see happen. Only
+ * the later moves take the top bar with them, through [chrome], so opening a
+ * screen never animates the bar shut.
  */
 @Composable
-private fun AutoScrollToEffect(request: Int, targetIndex: Int, listState: LazyListState) {
+private fun AutoScrollToEffect(
+    request: Int,
+    targetIndex: Int,
+    listState: LazyListState,
+    chrome: ChromeScrollController? = null,
+) {
+    val currentChrome by rememberUpdatedState(chrome)
     val didInitialScroll = remember { mutableStateOf(false) }
     val armed = remember(request) { mutableStateOf(request >= 0) }
 
@@ -397,7 +438,7 @@ private fun AutoScrollToEffect(request: Int, targetIndex: Int, listState: LazyLi
             didInitialScroll.value = true
             listState.scrollToItem(targetIndex)
         } else {
-            listState.animateScrollToItem(targetIndex)
+            listState.animateScrollFollowingChrome(targetIndex, 0, currentChrome)
         }
     }
 }
@@ -410,12 +451,22 @@ object ScrollViewRenderer {
 
         val autoScrollTarget = resolveAutoScrollTarget(node)
 
+        // Item spacing from `gap-*`. The flex engine spaces ordinary
+        // containers, but a lazy list places its own items, so the gap has
+        // to become the list's arrangement here or it is dropped. iOS already
+        // reads the same layout gap into its LazyVStack/LazyHStack spacing.
+        val gap = (node.layout?.gap ?: 0f).dp
+
         if (horizontal) {
             val rowState = rememberLazyListState()
 
             AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, rowState)
 
-            LazyRow(modifier = modifier, state = rowState) {
+            LazyRow(
+                modifier = modifier,
+                state = rowState,
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
                 items(node.children, key = { it.id }) { child ->
                     NodeView(node = child)
                 }
@@ -445,6 +496,8 @@ object ScrollViewRenderer {
             val listState = rememberLazyListState()
             val didInitialScroll = remember { mutableStateOf(false) }
             val contentSignal = if (stickBottom) totalDescendants(node) else 0
+            // Null unless the screen's top bar collapses on scroll.
+            val chromeScroll by rememberUpdatedState(LocalChromeScrollController.current)
 
             // Observe the list's own drags without consuming its pointer events.
             // Programmatic bottom anchoring must not dismiss the keyboard.
@@ -463,12 +516,12 @@ object ScrollViewRenderer {
                         didInitialScroll.value = true
                         listState.scrollToItem(lastIndex, Int.MAX_VALUE) // jump on open
                     } else {
-                        listState.animateScrollToItem(lastIndex, Int.MAX_VALUE)
+                        listState.animateScrollFollowingChrome(lastIndex, Int.MAX_VALUE, chromeScroll)
                     }
                 }
             }
 
-            AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, listState)
+            AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, listState, chromeScroll)
 
             // A `fill` / `h-full` DIRECT child asked to be at least as tall as
             // the VIEWPORT — the "short screen centred, still scrolls when the
@@ -497,7 +550,10 @@ object ScrollViewRenderer {
                     // Dp.Infinity)` would be catastrophic, so fall through to
                     // the normal path — there is no viewport to fill against.
                     val viewport = maxHeight.takeIf { it.value.isFinite() && it.value > 0f }
-                    LazyColumn(state = listState) {
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(gap),
+                    ) {
                         items(node.children, key = { it.id }) { child ->
                             val layout = child.layout
                             if (viewport != null && layout?.heightMode == SizeMode.FILL) {
@@ -538,7 +594,11 @@ object ScrollViewRenderer {
                     }
                 }
             } else {
-                LazyColumn(modifier = modifier, state = listState) {
+                LazyColumn(
+                    modifier = modifier,
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(gap),
+                ) {
                     items(node.children, key = { it.id }) { child ->
                         NodeView(node = child)
                     }
