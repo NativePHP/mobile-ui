@@ -410,12 +410,22 @@ object ScrollViewRenderer {
 
         val autoScrollTarget = resolveAutoScrollTarget(node)
 
+        // Item spacing from `gap-*`. The flex engine spaces ordinary
+        // containers, but a lazy list places its own items, so the gap has
+        // to become the list's arrangement here or it is dropped. iOS already
+        // reads the same layout gap into its LazyVStack/LazyHStack spacing.
+        val gap = (node.layout?.gap ?: 0f).dp
+
         if (horizontal) {
             val rowState = rememberLazyListState()
 
             AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, rowState)
 
-            LazyRow(modifier = modifier, state = rowState) {
+            LazyRow(
+                modifier = modifier,
+                state = rowState,
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
                 items(node.children, key = { it.id }) { child ->
                     NodeView(node = child)
                 }
@@ -497,7 +507,10 @@ object ScrollViewRenderer {
                     // Dp.Infinity)` would be catastrophic, so fall through to
                     // the normal path — there is no viewport to fill against.
                     val viewport = maxHeight.takeIf { it.value.isFinite() && it.value > 0f }
-                    LazyColumn(state = listState) {
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(gap),
+                    ) {
                         items(node.children, key = { it.id }) { child ->
                             val layout = child.layout
                             if (viewport != null && layout?.heightMode == SizeMode.FILL) {
@@ -538,7 +551,11 @@ object ScrollViewRenderer {
                     }
                 }
             } else {
-                LazyColumn(modifier = modifier, state = listState) {
+                LazyColumn(
+                    modifier = modifier,
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(gap),
+                ) {
                     items(node.children, key = { it.id }) { child ->
                         NodeView(node = child)
                     }
