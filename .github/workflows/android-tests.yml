@@ -1,0 +1,107 @@
+name: Android tests
+
+# A separate workflow rather than a job in tests.yml, because `paths` filters
+# a whole workflow and the Pest/Swift jobs should keep running on every PR.
+# Keep this list in sync with the stageSources inputs in
+# tests/android/build.gradle.kts.
+on:
+  pull_request:
+    paths:
+      - 'resources/android/**'
+      - 'tests/android/**'
+      - 'composer.json'
+      - '.github/workflows/android-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'resources/android/**'
+      - 'tests/android/**'
+      - 'composer.json'
+      - '.github/workflows/android-tests.yml'
+  workflow_dispatch:
+    inputs:
+      mobile:
+        description: 'nativephp/mobile version to test against, e.g. dev-main. Empty uses composer.json.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  robolectric:
+    name: Android renderers (Robolectric)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      # The module compiles this repo's renderers against core's
+      # KeyboardFocusPolicy.kt and NativeUINode.kt, taken from the
+      # nativephp/mobile dist Composer installs into vendor/ (mobile-air has
+      # no export-ignore rules, so resources/androidstudio ships in the zip).
+      #
+      # Until composer.json requires a nativephp/mobile that includes
+      # mobile-air#565 (4.7), this job fails at compileDebugKotlin: the
+      # editors pass a flush closure to KeyboardFocusPolicy.fieldFocused,
+      # which 4.6.0 doesn't accept. It turns green once ^4.7 is required.
+      - name: Install nativephp/mobile
+        env:
+          MOBILE: ${{ inputs.mobile }}
+        run: |
+          if [ -n "$MOBILE" ]; then
+            composer require "nativephp/mobile:$MOBILE" --no-update --no-interaction
+          fi
+          composer update --no-dev --prefer-dist --no-interaction --no-progress
+          composer show nativephp/mobile | grep -E '^(versions|source) '
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            tests/android/*.gradle.kts
+            vendor/nativephp/mobile/resources/androidstudio/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Check Android SDK platform
+        run: |
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36"
+          fi
+
+      # Core's own Gradle wrapper, so the Gradle version moves with core's
+      # Android project (the module pins the same AGP).
+      - name: Run Robolectric tests
+        run: |
+          vendor/nativephp/mobile/resources/androidstudio/gradlew \
+            -p tests/android -PmobileRoot="$PWD/vendor/nativephp/mobile" \
+            testDebugUnitTest --console=plain
+
+      # Gradle prints nothing for passing tests, so count them here.
+      - name: Summarise test results
+        if: always()
+        run: |
+          shopt -s nullglob
+          results=(tests/android/build/test-results/testDebugUnitTest/*.xml)
+          if [ ${#results[@]} -eq 0 ]; then
+            echo "No test results: the module didn't compile or the tests didn't run." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          sed -n 's/.*<testsuite name="\([^"]*\)" tests="\([0-9]*\)" skipped="\([0-9]*\)" failures="\([0-9]*\)" errors="\([0-9]*\)".*/\1: \2 tests, \4 failed, \5 errors, \3 skipped/p' \
+            "${results[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-report
+          path: tests/android/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
