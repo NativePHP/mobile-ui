@@ -8,6 +8,7 @@ use Native\Mobile\Edge\Element;
 use Native\Mobile\Icon\AndroidSymbol;
 use Native\Mobile\Icon\IconResolver;
 use Native\Mobile\Icon\IosSymbol;
+use Native\Mobile\UI\Concerns\ShowsFieldErrors;
 
 /**
  * Shared base for the text input variants (`outlined-text-input`,
@@ -39,6 +40,8 @@ use Native\Mobile\Icon\IosSymbol;
  */
 abstract class BaseTextInput extends Element
 {
+    use ShowsFieldErrors;
+
     /** @var array<string, mixed> */
     protected array $inputProps = [];
 
@@ -76,9 +79,7 @@ abstract class BaseTextInput extends Element
         if (! empty($attrs['readOnly']) || ! empty($attrs['read-only'])) {
             $this->readOnly();
         }
-        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
-            $this->error();
-        }
+        $this->applyErrorAttributes($attrs);
         if (! empty($attrs['loading'])) {
             $this->loading();
         }

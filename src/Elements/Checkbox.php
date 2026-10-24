@@ -4,6 +4,7 @@ namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\ShowsFieldErrors;
 
 /**
  * Checkbox — binary tick/untick with optional inline label.
@@ -16,6 +17,8 @@ use Native\Mobile\Edge\Element;
  */
 class Checkbox extends Element
 {
+    use ShowsFieldErrors;
+
     protected string $type = 'checkbox';
 
     /** @var array<string, mixed> */
@@ -43,9 +46,7 @@ class Checkbox extends Element
         if (isset($attrs['supporting'])) {
             $this->supporting($attrs['supporting']);
         }
-        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
-            $this->error();
-        }
+        $this->applyErrorAttributes($attrs);
 
         $this->applyA11yAttributes($attrs);
 

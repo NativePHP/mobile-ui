@@ -4,6 +4,7 @@ namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\ShowsFieldErrors;
 
 /**
  * Select — single-choice dropdown over a string option list.
@@ -16,6 +17,8 @@ use Native\Mobile\Edge\Element;
  */
 class Select extends Element
 {
+    use ShowsFieldErrors;
+
     protected string $type = 'select';
 
     /** @var array<string, mixed> */
@@ -49,9 +52,7 @@ class Select extends Element
         if (isset($attrs['supporting'])) {
             $this->supporting($attrs['supporting']);
         }
-        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
-            $this->error();
-        }
+        $this->applyErrorAttributes($attrs);
 
         $this->applyA11yAttributes($attrs);
 
