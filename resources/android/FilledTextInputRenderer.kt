@@ -106,6 +106,12 @@ object FilledTextInputRenderer {
         // The effect below keeps the `props` of the first composition, so
         // the keep-focus value is read through updated state.
         val keepFocusOnSubmit by rememberUpdatedState(props.keepFocusOnSubmit)
+        // The focused policy outlives this composition. Always flush through
+        // the current dispatcher/reporter, including callback prop updates.
+        val flushPending by rememberUpdatedState<() -> Unit>({
+            selectionReporter.flush(value)
+            dispatcher.onBlur(value.text)
+        })
         LaunchedEffect(interactionSource) {
             val focusStack = mutableListOf<FocusInteraction.Focus>()
             interactionSource.interactions.collect { interaction: Interaction ->
@@ -114,14 +120,13 @@ object FilledTextInputRenderer {
                         focusStack += interaction
                         // Lets interactive taps elsewhere honor this
                         // field's keep-focus-on-submit (mobile-air #335).
-                        KeyboardFocusPolicy.fieldFocused(focusToken, keepFocusOnSubmit)
+                        KeyboardFocusPolicy.fieldFocused(focusToken, keepFocusOnSubmit) { flushPending() }
                     }
                     is FocusInteraction.Unfocus -> {
                         focusStack.remove(interaction.focus)
                         if (focusStack.isEmpty()) {
                             // Flush the pending selection, then any deferred text.
-                            selectionReporter.flush(value)
-                            dispatcher.onBlur(value.text)
+                            flushPending()
                             KeyboardFocusPolicy.fieldBlurred(focusToken)
                         }
                     }
