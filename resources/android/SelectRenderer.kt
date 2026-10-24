@@ -1,5 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -17,8 +18,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
+import com.nativephp.mobile.ui.nativerender.SizeMode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
 /**
@@ -40,6 +43,8 @@ object SelectRenderer {
         val disabled    = p.getBool("disabled")
         val a11yLabel   = p.getString("a11y_label")
         val a11yHint    = p.getString("a11y_hint")
+        val isError     = p.getBool("is_error")
+        val supporting  = p.getString("supporting")
 
         val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
 
@@ -58,7 +63,14 @@ object SelectRenderer {
 
         ExposedDropdownMenuBox(
             expanded = expanded,
-            onExpandedChange = { if (!disabled) expanded = it },
+            onExpandedChange = {
+                if (!disabled) {
+                    // The anchor consumes the tap, so drop the keyboard here
+                    // unless the focused field keeps focus (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
+                    expanded = it
+                }
+            },
             modifier = anchorModifier,
         ) {
             OutlinedTextField(
@@ -69,9 +81,17 @@ object SelectRenderer {
                 label = if (label.isNotEmpty()) ({ Text(label, fontFamily = nuiDefaultFontFamily()) }) else null,
                 placeholder = if (placeholder.isNotEmpty()) ({ Text(placeholder, fontFamily = nuiDefaultFontFamily()) }) else null,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                isError = isError,
+                supportingText = supportingSlot(supporting),
+                modifier = Modifier
+                    .then(if (node.layout?.widthMode == SizeMode.FILL) Modifier.fillMaxWidth() else Modifier)
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                 textStyle = TextStyle(color = theme.onSurface),
                 colors = OutlinedTextFieldDefaults.colors(
+                    errorBorderColor = theme.destructive,
+                    errorLabelColor = theme.destructive,
+                    errorSupportingTextColor = theme.destructive,
+                    errorTrailingIconColor = theme.destructive,
                     focusedTextColor = theme.onSurface,
                     unfocusedTextColor = theme.onSurface,
                     focusedBorderColor = theme.primary,

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +13,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -27,12 +29,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.SubcomposeAsyncImage
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 
@@ -80,17 +84,21 @@ object ListItemRenderer {
         val pressCbId = node.onPress
         val longPressCbId = node.onLongPress
 
-        // Click / gesture modifier
+        // Click / gesture modifier. These consume the tap, so the root's
+        // tap-away never runs; each one drops the keyboard itself unless
+        // the focused field keeps focus (mobile-air #335).
         val clickModifier = if (longPressCbId != 0) {
             modifier.pointerInput(pressCbId, longPressCbId) {
                 detectTapGestures(
                     onTap = {
                         if (!disabled && pressCbId != 0) {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             NativeUIBridge.sendPressEvent(pressCbId, node.id)
                         }
                     },
                     onLongPress = {
                         if (!disabled) {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             NativeUIBridge.sendLongPressEvent(longPressCbId, node.id)
                         }
                     }
@@ -98,6 +106,7 @@ object ListItemRenderer {
             }
         } else if (pressCbId != 0) {
             modifier.clickable(enabled = !disabled, role = Role.Button) {
+                KeyboardFocusPolicy.dismissForInteractiveTap()
                 NativeUIBridge.sendPressEvent(pressCbId, node.id)
             }
         } else {
@@ -111,24 +120,39 @@ object ListItemRenderer {
             trailingIconColor = if (trailingIconColor != 0) Color(trailingIconColor) else Color.Unspecified
         )
 
+        // `trailing_align = center`: M3 classifies a row with both an
+        // overline and supporting text as three-line and pins the leading
+        // and trailing slots to the top (iOS centres them). Drawing the
+        // overline inside the headline slot keeps the row two-line, so
+        // both slots are vertically centred. The overline keeps the
+        // labelSmall / onSurfaceVariant styling M3 would have applied.
+        val centerSlots = p.getString("trailing_align", "") == "center"
+        val overlineText: @Composable () -> Unit = {
+            Text(
+                text = overline,
+                fontFamily = nuiDefaultFontFamily(),
+                style = if (centerSlots) MaterialTheme.typography.labelSmall else LocalTextStyle.current,
+                color = when {
+                    overlineColor != 0 -> Color(overlineColor)
+                    centerSlots -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> Color.Unspecified
+                }
+            )
+        }
+
         ListItem(
             headlineContent = {
-                Text(
-                    text = headline,
-                    fontFamily = nuiDefaultFontFamily(),
-                    color = if (headlineColor != 0) Color(headlineColor) else Color.Unspecified
-                )
-            },
-            modifier = clickModifier,
-            overlineContent = if (overline.isNotEmpty()) {
-                {
+                Column {
+                    if (centerSlots && overline.isNotEmpty()) overlineText()
                     Text(
-                        text = overline,
+                        text = headline,
                         fontFamily = nuiDefaultFontFamily(),
-                        color = if (overlineColor != 0) Color(overlineColor) else Color.Unspecified
+                        color = if (headlineColor != 0) Color(headlineColor) else Color.Unspecified
                     )
                 }
-            } else null,
+            },
+            modifier = clickModifier,
+            overlineContent = if (overline.isNotEmpty() && !centerSlots) overlineText else null,
             supportingContent = if (supporting.isNotEmpty()) {
                 {
                     Text(
@@ -148,7 +172,8 @@ object ListItemRenderer {
                 iconBgColor = leadingIconBgColor,
                 onChangeCb = onLeadingChangeCb,
                 nodeId = node.id,
-                disabled = disabled
+                disabled = disabled,
+                imageFit = p.getString("leading_image_fit")
             ),
             trailingContent = run {
                 // Multi-badge stack (e.g. flag + pin both visible)
@@ -164,6 +189,7 @@ object ListItemRenderer {
                         checkedInitial = trailingCheckedInitial,
                         iconColor = trailingIconColor,
                         textColor = trailingTextColor,
+                        textStyle = p.getString("trailing_text_style", ""),
                         onChangeCb = onTrailingChangeCb,
                         onPressCb = onTrailingPressCb,
                         nodeId = node.id,
@@ -191,7 +217,8 @@ object ListItemRenderer {
         iconBgColor: Int,
         onChangeCb: Int,
         nodeId: Int,
-        disabled: Boolean
+        disabled: Boolean,
+        imageFit: String = ""
     ): (@Composable () -> Unit)? {
         // Determine effective type — backward compat: fall back to icon if leading_type empty
         val effectiveType = type.ifEmpty {
@@ -227,8 +254,11 @@ object ListItemRenderer {
                     }
                 }
                 "avatar" -> {
+                    val context = LocalContext.current
                     SubcomposeAsyncImage(
-                        model = effectiveValue,
+                        model = remember(effectiveValue, context) {
+                            nuiResolveImageSrc(effectiveValue, context)
+                        },
                         contentDescription = null,
                         modifier = Modifier
                             .size(40.dp)
@@ -272,13 +302,17 @@ object ListItemRenderer {
                     }
                 }
                 "image" -> {
+                    val context = LocalContext.current
                     SubcomposeAsyncImage(
-                        model = effectiveValue,
+                        model = remember(effectiveValue, context) {
+                            nuiResolveImageSrc(effectiveValue, context)
+                        },
                         contentDescription = null,
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(4.dp)),
-                        contentScale = ContentScale.Crop,
+                        // `contain` letterboxes instead of cropping to the square.
+                        contentScale = if (imageFit == "contain") ContentScale.Fit else ContentScale.Crop,
                         loading = {
                             Box(
                                 modifier = Modifier
@@ -300,6 +334,7 @@ object ListItemRenderer {
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, newValue)
@@ -313,6 +348,7 @@ object ListItemRenderer {
                     RadioButton(
                         selected = selected,
                         onClick = {
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             selected = !selected
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, selected)
@@ -369,6 +405,7 @@ object ListItemRenderer {
         checkedInitial: Boolean,
         iconColor: Int,
         textColor: Int,
+        textStyle: String = "",
         onChangeCb: Int,
         onPressCb: Int,
         nodeId: Int,
@@ -385,7 +422,7 @@ object ListItemRenderer {
         // `trailing_a11y_label` wins, else humanize the machine icon name
         // ("more_vert" -> "more vert") so it's never unlabeled.
         val iconButtonDescription = a11yLabel.ifEmpty {
-            effectiveValue.replace('_', ' ').replace('-', ' ')
+            effectiveValue.removePrefix(com.nativephp.mobile.ui.CUSTOM_ICON_PREFIX).replace('_', ' ').replace('-', ' ')
         }
 
         return {
@@ -400,9 +437,13 @@ object ListItemRenderer {
                     )
                 }
                 "text" -> {
+                    // M3 styles the trailing slot as labelSmall (11sp);
+                    // `trailing_text_style = headline` sizes it like the
+                    // headline instead (bodyLarge), as iOS does.
                     Text(
                         text = effectiveValue,
                         fontFamily = nuiDefaultFontFamily(),
+                        style = if (textStyle == "headline") MaterialTheme.typography.bodyLarge else LocalTextStyle.current,
                         color = if (textColor != 0) Color(textColor) else Color.Unspecified
                     )
                 }
@@ -411,6 +452,7 @@ object ListItemRenderer {
                     Checkbox(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendCheckboxChangeEvent(onChangeCb, nodeId, newValue)
@@ -424,6 +466,7 @@ object ListItemRenderer {
                     Switch(
                         checked = checked,
                         onCheckedChange = { newValue ->
+                            KeyboardFocusPolicy.dismissForInteractiveTap()
                             checked = newValue
                             if (onChangeCb != 0) {
                                 NativeUIBridge.sendToggleChangeEvent(onChangeCb, nodeId, newValue)
@@ -463,6 +506,7 @@ object ListItemRenderer {
                         IconButton(
                             onClick = {
                                 if (onPressCb != 0) {
+                                    KeyboardFocusPolicy.dismissForInteractiveTap()
                                     NativeUIBridge.sendPressEvent(onPressCb, nodeId)
                                 }
                             },

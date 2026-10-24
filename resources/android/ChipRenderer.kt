@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
@@ -31,6 +32,7 @@ object ChipRenderer {
         val label       = p.getString("label")
         val iconName    = p.getString("icon")
         val onChangeCb  = p.getCallbackId("on_change")
+        val onPressCb   = p.getCallbackId("on_press").let { if (it != 0) it else node.onPress }
         val disabled    = p.getBool("disabled")
         val a11yLabel   = p.getString("a11y_label")
         val a11yHint    = p.getString("a11y_hint")
@@ -68,11 +70,21 @@ object ChipRenderer {
         FilterChip(
             selected = isSelected,
             onClick = {
-                val new = !isSelected
-                isSelected = new
-                lastSentValue = new
-                if (onChangeCb != 0) {
-                    NativeUIBridge.sendToggleChangeEvent(onChangeCb, node.id, new)
+                // The chip consumes the tap, so drop the keyboard here unless
+                // the focused field keeps focus (mobile-air #335).
+                KeyboardFocusPolicy.dismissForInteractiveTap()
+                if (onPressCb != 0) {
+                    // Server-driven: the press handler owns selection. Toggling
+                    // locally would make the chip fight the state it is handed
+                    // back, so a filter chip would flicker off on its own tap.
+                    NativeUIBridge.sendPressEvent(onPressCb, node.id)
+                } else {
+                    val new = !isSelected
+                    isSelected = new
+                    lastSentValue = new
+                    if (onChangeCb != 0) {
+                        NativeUIBridge.sendToggleChangeEvent(onChangeCb, node.id, new)
+                    }
                 }
             },
             label = { Text(label, fontFamily = nuiDefaultFontFamily()) },

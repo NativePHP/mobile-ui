@@ -374,6 +374,22 @@
             "self_closing": false
         },
         {
+            "type": "list_placeholder",
+            "element": "Native\\Mobile\\UI\\Elements\\ListPlaceholder",
+            "blade": "Native\\Mobile\\UI\\Components\\ListPlaceholder",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": true
+        },
+        {
+            "type": "sticky_header",
+            "element": "Native\\Mobile\\UI\\Elements\\StickyHeader",
+            "blade": "Native\\Mobile\\UI\\Components\\StickyHeader",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.ColumnRenderer",
+            "ios_renderer": "NativeUIColumnRenderer",
+            "self_closing": false
+        },
+        {
             "type": "tab_row",
             "element": "Native\\Mobile\\UI\\Elements\\TabRow",
             "blade": "Native\\Mobile\\UI\\Components\\TabRow",
@@ -404,6 +420,30 @@
             "android_renderer": "com.nativephp.plugins.native_ui.ui.ButtonGroupRenderer",
             "ios_renderer": "NativeUIButtonGroupRenderer",
             "self_closing": true
+        },
+        {
+            "type": "pager",
+            "element": "Native\\Mobile\\UI\\Elements\\Pager",
+            "blade": "Native\\Mobile\\UI\\Components\\Pager",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.PagerRenderer",
+            "ios_renderer": "NativeUIPagerRenderer",
+            "self_closing": false
+        },
+        {
+            "type": "pager_header",
+            "element": "Native\\Mobile\\UI\\Elements\\PagerHeader",
+            "blade": "Native\\Mobile\\UI\\Components\\PagerHeader",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
+        },
+        {
+            "type": "pager_overlay",
+            "element": "Native\\Mobile\\UI\\Elements\\PagerOverlay",
+            "blade": "Native\\Mobile\\UI\\Components\\PagerOverlay",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmptyRenderer",
+            "ios_renderer": "NativeUIEmptyRenderer",
+            "self_closing": false
         },
         {
             "type": "carousel",

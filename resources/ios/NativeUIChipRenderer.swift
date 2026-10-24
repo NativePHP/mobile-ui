@@ -29,6 +29,7 @@ struct NativeUIChipRenderer: View {
         let label       = p.getString("label")
         let iconName    = p.getString("icon")
         let onChangeCb  = p.getCallbackId("on_change")
+        let onPressCb   = p.getCallbackId("on_press") != 0 ? p.getCallbackId("on_press") : node.onPress
         let disabled    = p.getBool("disabled")
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
@@ -45,16 +46,27 @@ struct NativeUIChipRenderer: View {
 
         Button(action: {
             guard !disabled else { return }
-            let new = !isSelected
-            isSelected = new
-            lastSentValue = new
-            if onChangeCb != 0 {
-                NativeElementBridge.sendToggleChangeEvent(onChangeCb, nodeId: node.id, value: new)
+            if onPressCb != 0 {
+                // Server-driven: the press handler owns selection. Toggling
+                // locally would make the chip fight the state it is handed
+                // back, so a filter chip would flicker off on its own tap.
+                // Through the focus policy so a focused field's pending
+                // change reaches PHP before the press does (mobile-air #335).
+                KeyboardFocusPolicy.dispatchPress {
+                    NativeElementBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                }
+            } else {
+                let new = !isSelected
+                isSelected = new
+                lastSentValue = new
+                if onChangeCb != 0 {
+                    NativeElementBridge.sendToggleChangeEvent(onChangeCb, nodeId: node.id, value: new)
+                }
             }
         }) {
             HStack(spacing: 6) {
                 if !iconName.isEmpty {
-                    Image(systemName: getIconForName(iconName))
+                    NativeIconView(iconName, pointSize: 14, relativeTo: .body)
                         .nuiScaledFont(size: 14)
                 }
                 Text(label).nuiScaledFont(size: theme.fontSm, weight: .medium)
@@ -65,6 +77,7 @@ struct NativeUIChipRenderer: View {
             .modifier(ChipBackgroundModifier(
                 fillColor: bg,
                 borderColor: border,
+                selected: isSelected,
                 glassEnabled: glassEnabled,
                 glassInteractive: glassInteractive,
                 glassClear: glassClear,
@@ -105,6 +118,9 @@ struct NativeUIChipRenderer: View {
 private struct ChipBackgroundModifier: ViewModifier {
     let fillColor: Color
     let borderColor: Color
+    /// A selected glass chip takes its fill as a glass tint: its text is
+    /// the on-primary colour, which an untinted plate can't carry.
+    let selected: Bool
     let glassEnabled: Bool
     let glassInteractive: Bool
     let glassClear: Bool
@@ -119,14 +135,18 @@ private struct ChipBackgroundModifier: ViewModifier {
         )
 
         if glassEnabled, #available(iOS 26.0, *) {
-            if glassClear {
-                bordered.glassEffect(.clear.interactive(glassInteractive), in: shape)
-            } else {
-                bordered.glassEffect(.regular.interactive(glassInteractive), in: shape)
-            }
+            let glass: Glass = glassClear ? .clear : .regular
+            bordered.glassEffect(
+                (selected ? glass.tint(fillColor) : glass).interactive(glassInteractive),
+                in: shape
+            )
         } else if glassEnabled {
             bordered.background(
-                shape.fill(glassClear ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial))
+                shape.fill(
+                    selected
+                        ? AnyShapeStyle(fillColor)
+                        : (glassClear ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.regularMaterial))
+                )
             )
         } else if hasUserBg {
             // User bg wins — paint nothing here, NodeStyleModifier already

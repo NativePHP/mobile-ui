@@ -21,6 +21,14 @@ func registerNativeUIChrome() {
         return AnyView(NativeUIBackgroundLayerHost(layerNode: layerNode) { content })
     }
 
+    // Keyboard accessory bar for pad-keyboard text inputs on plain screens
+    // (fields inside a bottom sheet use the sheet renderer's own host — a
+    // root-level bar would sit behind the sheet). No sentinel element:
+    // the host is driven by the shared focus state, not the tree.
+    NativeRootHostRegistry.shared.register("native-ui.keyboard-accessory") { _, content in
+        AnyView(NativeUIKeyboardAccessoryHost(hidesUnderSheets: true) { content })
+    }
+
     // Resolve chrome font tokens (per-layout / per-bar `font_name` props on
     // the root sentinels) for core's chrome renderers — bundle lookup +
     // CoreText registration + PostScript naming is this plugin's knowledge.
@@ -58,14 +66,18 @@ final class DrawerHostState: ObservableObject {
 /// (or none) the screen uses.
 ///
 /// When `drawerNode` is nil this is a transparent pass-through, so it's safe
-/// to wrap every tree unconditionally.
+/// to wrap every tree unconditionally (a drawer drawn earlier stays mounted
+/// off-screen and inert — see `panelNode`).
 struct NativeDrawerHost<Content: View>: View {
     let drawerNode: NativeUINode?
     @ViewBuilder var content: Content
 
     @ObservedObject private var state = DrawerHostState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.nativeUITheme) private var theme
     @State private var dragOffset: CGFloat = 0
+    // The last drawer this host drew — see `panelNode`.
+    @State private var lastDrawer = LastDrawer()
 
     private let edgeSwipeThreshold: CGFloat = 30
 
@@ -87,30 +99,32 @@ struct NativeDrawerHost<Content: View>: View {
     }
 
     var body: some View {
-        if let drawerNode {
-            drawerLayout(drawerNode)
-        } else {
-            // No drawer on this screen — pass through, and make sure a drawer
-            // left open on a previous screen doesn't linger in shared state.
-            content.onAppear {
-                if state.isOpen { state.isOpen = false }
+        // ONE view structure with or without a drawer. An if/else here gave
+        // `content` — the whole tree, e.g. a TabView — a different identity on a
+        // screen without a drawer, so every change between a screen with a drawer
+        // and one without rebuilt the tree from scratch: navigation caches emptied
+        // and a placeholder showed until the next publish.
+        drawerLayout(drawerNode)
+            .onChange(of: drawerNode == nil) { _, isNil in
+                // A drawer left open on a previous screen must not linger.
+                if isNil, state.isOpen { state.isOpen = false }
             }
-        }
     }
 
     @ViewBuilder
-    private func drawerLayout(_ drawerNode: NativeUINode) -> some View {
+    private func drawerLayout(_ drawerNode: NativeUINode?) -> some View {
         GeometryReader { geometry in
             let isLandscape = geometry.size.width > geometry.size.height
-            let propWidth = CGFloat(drawerNode.props.getInt("width", default: 0))
+            let propWidth = CGFloat(drawerNode?.props.getInt("width", default: 0) ?? 0)
             let drawerWidth: CGFloat = propWidth > 0
                 ? propWidth
                 : geometry.size.width * (isLandscape ? 0.4 : 0.85)
-            let isReveal = drawerNode.props.getString("mode", default: "modal") == "reveal"
+            let isReveal = drawerNode?.props.getString("mode", default: "modal") == "reveal"
+            let panel = panelNode(drawerNode)
 
             // Fraction open in [0, 1] — combines the committed open state
             // with any in-flight drag so the drawer tracks the finger.
-            let base: CGFloat = state.isOpen ? drawerWidth : 0
+            let base: CGFloat = state.isOpen && drawerNode != nil ? drawerWidth : 0
             let openWidth = max(0, min(drawerWidth, base + dragOffset))
             let progress = drawerWidth > 0 ? openWidth / drawerWidth : 0
 
@@ -133,8 +147,13 @@ struct NativeDrawerHost<Content: View>: View {
             ZStack(alignment: .leading) {
                 if isReveal {
                     // Drawer pinned at the left edge, behind the content.
-                    drawerView(drawerNode, width: drawerWidth)
-                        .zIndex(0)
+                    if let panel {
+                        drawerView(panel, width: drawerWidth)
+                            .offset(x: drawerNode == nil ? -drawerWidth : 0)
+                            .allowsHitTesting(drawerNode != nil)
+                            .accessibilityHidden(drawerNode == nil)
+                            .zIndex(0)
+                    }
 
                     // Content slides right to expose the drawer. No scrim
                     // dims the drawer; a transparent catcher over the pushed-
@@ -165,14 +184,18 @@ struct NativeDrawerHost<Content: View>: View {
                             .zIndex(1)
                     }
 
-                    drawerView(drawerNode, width: drawerWidth)
-                        .offset(x: openWidth - drawerWidth)
-                        .gesture(closeDrag)
-                        .zIndex(2)
+                    if let panel {
+                        drawerView(panel, width: drawerWidth)
+                            .offset(x: openWidth - drawerWidth)
+                            .gesture(closeDrag)
+                            .allowsHitTesting(drawerNode != nil)
+                            .accessibilityHidden(drawerNode == nil)
+                            .zIndex(2)
+                    }
                 }
 
                 // Left-edge detector for swipe-to-open (both modes), when closed.
-                if !state.isOpen {
+                if !state.isOpen, drawerNode != nil {
                     Color.clear
                         .frame(width: edgeSwipeThreshold)
                         .frame(maxHeight: .infinity)
@@ -183,7 +206,7 @@ struct NativeDrawerHost<Content: View>: View {
                 }
 
                 // ☰ affordance, top-leading, shown while the drawer is closed.
-                if !state.isOpen {
+                if !state.isOpen, drawerNode != nil {
                     Button {
                         withAnimation(drawerAnimation) { state.isOpen = true }
                     } label: {
@@ -210,9 +233,22 @@ struct NativeDrawerHost<Content: View>: View {
         .ignoresSafeArea()
         // If the drawer element disappears between publishes (navigated to a
         // screen / layout without one), make sure we don't strand it open.
-        .onChange(of: drawerNode.id) { _ in
+        .onChange(of: drawerNode?.id) { _ in
             if dragOffset != 0 { dragOffset = 0 }
         }
+    }
+
+    /// The drawer to draw: this screen's, else the last one this host drew.
+    ///
+    /// A screen without a drawer keeps the last one
+    /// mounted — off-screen, closed, not hit-testable, hidden from VoiceOver —
+    /// instead of dropping it. Dropped, it was built again from scratch (scroll
+    /// view, every row, every row's flex layout) inside the swipe back to the
+    /// drawer's screen, and that made the back swipe stutter. Kept, the drawer's
+    /// node is the same object when its screen comes back, so nothing is rebuilt.
+    private func panelNode(_ drawerNode: NativeUINode?) -> NativeUINode? {
+        if let drawerNode { lastDrawer.node = drawerNode }
+        return lastDrawer.node
     }
 
     @ViewBuilder
@@ -223,10 +259,21 @@ struct NativeDrawerHost<Content: View>: View {
                     NodeView(node: child).equatable()
                 }
             }
+            // The panel ignores the safe area so its background reaches the top
+            // of the screen; without this inset the CONTENT does too, and the
+            // first row slides under the status bar. An app that pins
+            // UIUserInterfaceStyle sees this at every launch, not just on a
+            // notched device in landscape.
+            .padding(.top, windowSafeAreaTop)
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        // The THEME background, not Color(.systemBackground). The drawer's own
+        // content paints only as tall as it is, so everything below the last
+        // row fell through to the system colour — white on a light-pinned app,
+        // regardless of the site's palette. A themed panel that turns white
+        // halfway down reads as a rendering fault, because it is one.
+        .background(theme.background)
     }
 
     // MARK: - Gesture settling
@@ -255,4 +302,10 @@ struct NativeDrawerHost<Content: View>: View {
             dragOffset = 0
         }
     }
+}
+
+/// Holds `NativeDrawerHost`'s last drawer node. A reference, so keeping it up to
+/// date during `body` triggers no update.
+private final class LastDrawer {
+    var node: NativeUINode?
 }

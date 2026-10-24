@@ -121,15 +121,18 @@ object WebviewRenderer {
  * `http://127.0.0.1` from the embedded PHP runtime, the POST-capture JS
  * interface, and the `window.Native` injection.
  *
- * Two integration hazards are handled here:
- * - `setup()` claims the process-wide [WebViewManager.shared] slot, which
- *   belongs to the app's root webview. It is restored immediately after.
- * - The stock client's `onPageStarted` drops out of native-UI mode
- *   (`isActive = false`) on every page load. Correct for the root webview;
- *   fatal for one embedded *inside* the native tree — it would unmount this
- *   very renderer. [PhpEmbedClient] delegates to the stock client (keeping
- *   the POST-inspector script injection it performs) and re-asserts
- *   native-UI mode afterwards.
+ * `embedded = true` keeps the stock client out of app-level state: its page
+ * loads never drop the app out of native-UI mode, so the native tree this
+ * renderer lives in stays mounted. [PhpEmbedClient] delegates to the stock
+ * client for everything, keeping the POST-inspector script injection it
+ * performs.
+ *
+ * Mobile releases from before the shell stopped doing so have `setup()`
+ * claim the process-wide [WebViewManager.shared] slot even when embedded.
+ * That slot belongs to the app's root webview, so it is saved and restored
+ * around the call. On a release that leaves the slot alone the restore
+ * changes nothing; drop it once the minimum supported mobile version is one
+ * of those.
  *
  * `src` is an app route path in this mode; anything not starting with `/`
  * (including empty) falls back to the app's configured start URL.
@@ -162,6 +165,9 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
                 val phpRuntime = WebviewPHPRuntime(bridge)
                 bridge.dedicatedWebviewRuntime = phpRuntime
 
+                // Mobile releases without the shell fix claim
+                // WebViewManager.shared here even for an embedded webview;
+                // put the root webview's back.
                 val previousShared = WebViewManager.shared
                 WebViewManager(activity, webView, bridge, embedded = true).setup()
                 WebViewManager.shared = previousShared
@@ -221,10 +227,9 @@ private class PhpEmbedClient(
     ): Boolean = inner.shouldOverrideUrlLoading(view, request)
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+        // The stock client skips the switch to web mode for an embedded
+        // webview, so the native tree around this one stays mounted.
         inner.onPageStarted(view, url, favicon)
-        // The delegate call above just flipped the app to web mode; undo it —
-        // this webview renders inside the native tree, which must stay mounted.
-        NativeUIBridge.isActive.value = true
     }
 
     override fun onPageFinished(view: WebView, url: String?) {

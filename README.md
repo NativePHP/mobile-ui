@@ -56,10 +56,68 @@ Disabled controls draw from the `surface-variant` (fill) and
 `on-surface-variant` (label) tokens on both platforms — adjust those two
 tokens to tune disabled contrast app-wide.
 
+`outlined-text-input` draws a transparent box by default (Material 3's
+outlined container), so on a colored screen the field reads as part of the
+page rather than as a field. Declare the optional `input-fill` / `on-input`
+pair to give it a body of its own — `input-fill` paints the box, `on-input`
+recolors everything inside it (typed text, placeholder, icons,
+prefix/suffix). Leave them unset and nothing changes.
+
 Icons accept platform enum overrides in Blade, matching the fluent API:
 
 ```blade
 <native:icon :ios="Ios::House" :android="Android::Home" :size="24" />
+```
+
+## Lists
+
+The `native:list` element supports an optional end-reached buffer for loading more items before the user reaches the end of the list.
+
+```blade
+<native:list
+    on-end-reached="loadMore"
+    :end-reached-buffer="5"
+/>
+```
+
+A buffer of `5` starts the existing `on-end-reached` callback when the list reaches the configured buffer near the end. The default buffer is `3` when the attribute is omitted.
+
+The same option is available through the fluent API:
+
+```php
+use Native\Mobile\UI\Elements\NativeList;
+
+NativeList::make()
+    ->endReachedBuffer(5)
+    ->onEndReached('loadMore');
+```
+
+### Sticky headers
+
+A `native:sticky-header` in a list is a row that pins to the top of the list once you scroll it there, while the rows after it scroll underneath, like CSS `position: sticky`. The next sticky header pushes it off. It lays its children out like a column, so give it a background or the rows will show through.
+
+```blade
+<native:list>
+    @include('partials.composer')
+
+    <native:sticky-header class="w-full items-center py-3 bg-theme-surface {{ $newPosts ? '' : 'hidden' }}">
+        @if ($newPosts)
+            <native:button @press="showNewPosts">{{ count($newPosts) }} new posts</native:button>
+        @endif
+    </native:sticky-header>
+
+    @foreach ($posts as $post)
+        @include('partials.post')
+    @endforeach
+</native:list>
+```
+
+A hidden sticky header takes no space, so it can wait in its place until it has something to show. On iOS it's the header of a plain list section, and on Android a sticky `LazyColumn` item. It only pins as a direct child of a list with no `native:list-section`s.
+
+```php
+use Native\Mobile\UI\Elements\StickyHeader;
+
+StickyHeader::make($newPostsButton);
 ```
 
 ## Accessibility

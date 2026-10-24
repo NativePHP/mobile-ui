@@ -29,6 +29,7 @@ struct NativeUIListItemRenderer: View {
 
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.nativeUIListRowMargin) private var rowMargin
 
     var body: some View {
         let p = node.props
@@ -57,11 +58,17 @@ struct NativeUIListItemRenderer: View {
         let trailingValue = p.getString("trailing_value")
         let trailingIcon = p.getString("trailing_icon")
         let trailingTextColor = p.getColor("trailing_text_color", default: 0)
+        // Opt-in cross-platform trailing props. Unset keeps this platform's
+        // default (centred slots, 17pt trailing text); set, both platforms
+        // draw the same thing — `top` mirrors Material's three-line rows,
+        // `label` its small trailing label.
+        let trailingAlign = p.getString("trailing_align", default: "")
+        let trailingTextStyle = p.getString("trailing_text_style", default: "")
         let trailingIconColor = p.getColor("trailing_icon_color", default: 0)
         let trailingChecked = p.getBool("trailing_checked")
         let onTrailingChangeCb = p.getCallbackId("on_trailing_change")
 
-        HStack(spacing: 16) {
+        HStack(alignment: trailingAlign == "top" ? .top : .center, spacing: 16) {
             // Leading content
             buildLeadingContent(
                 type: leadingType.isEmpty ? (leadingIcon.isEmpty ? "" : "icon") : leadingType,
@@ -69,7 +76,8 @@ struct NativeUIListItemRenderer: View {
                 monogramColor: leadingMonogramColor,
                 iconBgColor: leadingIconBgColor,
                 checked: leadingChecked,
-                changeCb: onLeadingChangeCb
+                changeCb: onLeadingChangeCb,
+                imageFit: p.getString("leading_image_fit")
             )
 
             // Text content
@@ -106,12 +114,13 @@ struct NativeUIListItemRenderer: View {
                     value: trailingValue.isEmpty ? trailingIcon : trailingValue,
                     iconColor: trailingIconColor,
                     textColor: trailingTextColor,
+                    textStyle: trailingTextStyle,
                     checked: trailingChecked,
                     changeCb: onTrailingChangeCb
                 )
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, rowMargin)
         .padding(.vertical, 12)
         .background(containerColor != 0 ? Color(argb: containerColor) : Color.clear)
         .opacity(disabled ? 0.5 : 1.0)
@@ -124,27 +133,25 @@ struct NativeUIListItemRenderer: View {
     }
 
     @ViewBuilder
-    private func buildLeadingContent(type: String, value: String, monogramColor: Int, iconBgColor: Int = 0, checked: Bool = false, changeCb: Int = 0) -> some View {
+    private func buildLeadingContent(type: String, value: String, monogramColor: Int, iconBgColor: Int = 0, checked: Bool = false, changeCb: Int = 0, imageFit: String = "") -> some View {
         switch type {
         case "icon":
             if iconBgColor != 0 {
                 ZStack {
                     Circle().fill(Color(argb: iconBgColor))
-                    Image(systemName: getIconForName(value))
+                    NativeIconView(value, pointSize: 18, relativeTo: .body)
                         .nuiScaledFont(size: 18, weight: .medium)
                         .foregroundColor(.white)
                 }
                 .frame(width: 40, height: 40)
             } else {
-                Image(systemName: getIconForName(value))
+                NativeIcon.image(value)
                     .frame(width: 24, height: 24)
                     .foregroundColor(.secondary)
             }
         case "avatar":
             // Decorative — the row's text content carries the meaning.
-            AsyncImage(url: URL(string: value)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            NativeUIRowImage(src: value) {
                 Circle().fill(Color(.systemGray5))
             }
             .frame(width: 40, height: 40)
@@ -163,9 +170,8 @@ struct NativeUIListItemRenderer: View {
             .accessibilityHidden(true)
         case "image":
             // Decorative — the row's text content carries the meaning.
-            AsyncImage(url: URL(string: value)) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            // `contain` letterboxes instead of cropping to the square.
+            NativeUIRowImage(src: value, contentMode: imageFit == "contain" ? .fit : .fill) {
                 RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
             }
             .frame(width: 56, height: 56)
@@ -229,7 +235,7 @@ struct NativeUIListItemRenderer: View {
         if !badges.isEmpty {
             HStack(spacing: 6) {
                 ForEach(badges) { b in
-                    Image(systemName: getIconForName(b.icon))
+                    NativeIconView(b.icon, pointSize: 15, relativeTo: .body)
                         .nuiScaledFont(size: 15)
                         .foregroundColor(parseListItemHex(b.color) ?? .secondary)
                 }
@@ -240,15 +246,17 @@ struct NativeUIListItemRenderer: View {
     }
 
     @ViewBuilder
-    private func buildTrailingContent(type: String, value: String, iconColor: Int, textColor: Int, checked: Bool = false, changeCb: Int = 0) -> some View {
+    private func buildTrailingContent(type: String, value: String, iconColor: Int, textColor: Int, textStyle: String = "", checked: Bool = false, changeCb: Int = 0) -> some View {
         switch type {
         case "icon":
-            Image(systemName: getIconForName(value))
+            NativeIcon.image(value)
                 .frame(width: 24, height: 24)
                 .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
         case "text":
+            // `label` mirrors Material's small trailing label; default and
+            // `headline` keep the headline-sized text iOS has always drawn.
             Text(value)
-                .nuiScaledFont(size: 17)
+                .nuiScaledFont(size: textStyle == "label" ? 13 : 17)
                 .foregroundColor(textColor != 0 ? Color(argb: textColor) : .secondary)
         case "icon_button":
             // Spoken name for the icon-only trailing button: explicit
@@ -256,7 +264,7 @@ struct NativeUIListItemRenderer: View {
             let trailingA11y = node.props.getString("trailing_a11y_label")
             let effectiveTrailingA11y = !trailingA11y.isEmpty
                 ? trailingA11y
-                : value.replacingOccurrences(of: "_", with: " ")
+                : (NativeIcon.customName(value) ?? value).replacingOccurrences(of: "_", with: " ")
                        .replacingOccurrences(of: "-", with: " ")
             // When the row has `:trailing-menu` attached, the trailing
             // icon button becomes a Menu trigger instead of a plain
@@ -275,7 +283,7 @@ struct NativeUIListItemRenderer: View {
                     // without it only the symbol's opaque pixels respond,
                     // which makes the ellipsis glyph (mostly empty space)
                     // almost un-tappable.
-                    Image(systemName: getIconForName(value))
+                    NativeIcon.image(value)
                         .frame(width: 24, height: 24)
                         .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
                         .nuiMinTapTarget()
@@ -285,10 +293,15 @@ struct NativeUIListItemRenderer: View {
                 Button(action: {
                     let onPressCb = node.props.getCallbackId("on_trailing_press")
                     if onPressCb != 0 {
-                        NativeUIBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                        // Through the focus policy so a focused field's
+                        // pending change reaches PHP before the press
+                        // does (mobile-air #335).
+                        KeyboardFocusPolicy.dispatchPress {
+                            NativeUIBridge.sendPressEvent(onPressCb, nodeId: node.id)
+                        }
                     }
                 }) {
-                    Image(systemName: getIconForName(value))
+                    NativeIcon.image(value)
                         .frame(width: 24, height: 24)
                         .foregroundColor(iconColor != 0 ? Color(argb: iconColor) : .secondary)
                         .nuiMinTapTarget()
@@ -296,7 +309,10 @@ struct NativeUIListItemRenderer: View {
                 .accessibilityLabel(effectiveTrailingA11y)
             }
         case "switch":
-            EmptyView() // Switch requires state management - handled at a higher level
+            // Real Toggle with local state + echo prevention (same pattern as
+            // NativeUIToggleRenderer). Android has always rendered a Material
+            // Switch for this trailing type; this brings iOS to parity.
+            ListItemTrailingSwitch(node: node, serverValue: checked, changeCb: changeCb)
         case "checkbox":
             selectionControl(
                 glyph: checked ? "checkmark.square.fill" : "square",
@@ -327,11 +343,60 @@ private func listItemMenuItem(_ item: NativeUINode) -> some View {
             }
         } label: {
             if !icon.isEmpty {
-                Label(label, systemImage: getIconForName(icon))
+                Label { Text(label) } icon: { NativeIcon.image(icon) }
             } else {
                 Text(label)
             }
         }
         .tint(isDestructive ? .red : nil)
+    }
+}
+
+/// Trailing switch for `trailingSwitch()` rows. Holds its own on/off state so
+/// the thumb animates instantly on tap, syncs from the server value with the
+/// same echo-prevention as `NativeUIToggleRenderer`, and reports changes over
+/// the row's `on_trailing_change` callback (bool payload — identical to what
+/// the Android renderer has always sent).
+private struct ListItemTrailingSwitch: View {
+    let node: NativeUINode
+    let serverValue: Bool
+    let changeCb: Int
+
+    @ObservedObject private var themeStore = NativeUITheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var isOn: Bool = false
+    @State private var lastSentValue: Bool = false
+    @State private var initialized: Bool = false
+
+    var body: some View {
+        let theme = themeStore.resolve(for: colorScheme)
+
+        Toggle("", isOn: $isOn)
+            .labelsHidden()
+            .tint(theme.primary)
+            .disabled(node.props.getBool("disabled") || changeCb == 0)
+            .onAppear {
+                if !initialized {
+                    isOn = serverValue
+                    lastSentValue = serverValue
+                    initialized = true
+                }
+            }
+            .onChange(of: serverValue) { _, new in
+                // Ignore server pushes that echo our last commit; accept
+                // genuine programmatic updates.
+                if new != lastSentValue {
+                    isOn = new
+                    lastSentValue = new
+                }
+            }
+            .onChange(of: isOn) { _, new in
+                guard new != lastSentValue else { return }
+                lastSentValue = new
+                if changeCb != 0 {
+                    NativeUIBridge.sendToggleChangeEvent(changeCb, nodeId: node.id, value: new)
+                }
+            }
     }
 }

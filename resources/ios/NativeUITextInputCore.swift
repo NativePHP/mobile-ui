@@ -8,8 +8,10 @@ import UIKit
 ///     value we sent out)
 ///   - `sync_mode` dispatch policy (live | debounce | blur) — controlled by
 ///     the `native:model` directive modifier chain
-///   - secure / multiline input
-///   - keyboard type, submit label
+///   - secure input, with an optional in-field reveal toggle; multiline
+///     input (TextEditor-backed — the return key always inserts a line
+///     break, so submit is send-button-only there)
+///   - keyboard type, submit label (single-line only)
 ///   - disabled / readOnly state
 ///   - onChange / onSubmit callbacks
 ///
@@ -21,11 +23,48 @@ struct NativeUITextInputCore: View {
     let contentColor: Color
     let tintColor: Color
 
+    /// Whether this variant has room to draw the `revealable` eye INSIDE the
+    /// field. The chrome variants (outlined, filled) pass true; the chromeless
+    /// one does not, because its whole contract is that it draws no decoration
+    /// of its own — an author using it supplies their own trailing control.
+    /// Defaulted so the bare renderer's call site stays as it was, and so the
+    /// prop is honored on exactly the same two variants on both platforms
+    /// (Android's toggle lives in the M3 `trailingIcon` slot, which the
+    /// chromeless `BasicTextField` doesn't have).
+    var supportsRevealToggle: Bool = false
+
+    /// Optional placeholder override (for example, the outlined variant's
+    /// `on-input` token). Otherwise use a muted field text colour so a custom
+    /// surface stays readable even when it differs from the system appearance.
+    var placeholderColor: Color? = nil
+
     @State private var text: String = ""
     @State private var lastSentValue: String = ""
+    /// Values sent to PHP whose re-render hasn't come back yet. See
+    /// `NativeUITextEchoTracker` for why `lastSentValue` alone isn't enough.
+    @State private var echoes = NativeUITextEchoTracker()
     @State private var initialized: Bool = false
     @State private var debounceTask: Task<Void, Never>? = nil
+    /// Whether a `secure` field is currently showing its contents.
+    ///
+    /// Local `@State` on purpose, and that is the whole safety argument for
+    /// this feature: toggling it never crosses the bridge, so it cannot
+    /// republish the tree, cannot perturb `text` / `lastSentValue`, cannot
+    /// trip the `sync_mode` state machine, and cannot move the caret. Reveal
+    /// state is also the kind of thing that must not be persisted or
+    /// round-tripped anywhere near a password.
+    @State private var revealed: Bool = false
     @FocusState private var isFocused: Bool
+    /// This field's identity in `KeyboardFocusPolicy`. A blur only releases
+    /// the policy while this field still owns it, so a blur that lands after
+    /// the next field's focus can't clobber that field's state.
+    @State private var focusToken = UUID()
+
+    /// The enclosing vertical `<scroll-view>`'s proxy, published by
+    /// `NativeUIScrollViewRenderer`. Nil everywhere there isn't one — sheets,
+    /// modals, non-scrolling screens, and bottom-anchored chat logs, which run
+    /// their own keyboard policy — and nil means this field does not scroll.
+    @Environment(\.nativeUIScrollProxy) private var scrollProxy
 
     // ─── Selection / caret reporting (opt-in via `on_selection_change`) ──────
     //
@@ -48,9 +87,24 @@ struct NativeUITextInputCore: View {
     @State private var pendingSelection: NativeUISelectionPayload? = nil
     @State private var lastEmittedSelection: NativeUISelectionPayload? = nil
 
+    // Token for this field's `focus_ref` registration (see
+    // `NativeUIFocusRegistry`); nil when the element carries no ref.
+    @State private var focusRegistryToken: UUID? = nil
+
+    // Stable identity of this field's claim on the shared keyboard
+    // accessory bar (pad keyboards only — see NativeUIKeyboardAccessoryBar).
+    @State private var accessoryToken = UUID()
+
+    // Channel to the UIKit return-key interceptor (see
+    // NativeUIReturnKeyInterceptor.swift) — refreshed every render so the
+    // proxy always runs the CURRENT submit path and chain state.
+    @State private var returnKeyBox = NativeUIReturnKeyBox()
+
     var body: some View {
         let p = node.props
         let placeholder   = p.getString("placeholder")
+        let resolvedPlaceholderColor = placeholderColor ?? contentColor.opacity(0.6)
+        let prompt        = Text(placeholder).foregroundColor(resolvedPlaceholderColor)
         let serverValue   = p.getString("value")
         let secure        = p.getBool("secure")
         let multiline     = p.getBool("multiline")
@@ -59,6 +113,16 @@ struct NativeUITextInputCore: View {
         let minLines      = p.getInt("min_lines")
         let disabled      = p.getBool("disabled")
         let readOnly      = p.getBool("read_only")
+        // The in-field eye. Only on a secure field, only where the variant has
+        // chrome to host it, and only while the field is interactive — there
+        // is nothing to reveal in a field the user cannot type into, and a
+        // disabled control that still responds to taps is its own bug.
+        let revealToggle  = supportsRevealToggle
+            && secure
+            && p.getBool("revealable")
+            && !(disabled || readOnly)
+        // A secure field is masked unless the user has revealed it.
+        let masked        = secure && !revealed
         let keyboardKind  = p.getString("keyboard")
         let keyboard      = resolveKeyboardType(keyboardKind)
         // Capitalization and autocorrect are derived from `secure` and the
@@ -71,11 +135,21 @@ struct NativeUITextInputCore: View {
             keyboard: keyboardKind
         )
         let autocorrect   = allowsAutocorrection(secure: secure, keyboard: keyboardKind)
+        // What the field holds, for AutoFill. Nil when the author didn't say,
+        // and nil applies nothing at all — see `TextContentTypeModifier`.
+        let contentType   = resolveTextContentType(p.getString("content_type"))
         let onChangeCb    = p.getCallbackId("on_change")
         let onSubmitCb    = p.getCallbackId("on_submit")
         let syncMode      = p.getString("sync_mode", default: "live")
         let debounceMs    = p.getInt("debounce_ms", default: 300)
         let keepFocus     = p.getBool("keep_focus_on_submit")
+        let submitLabelKind = p.getString("submit_label")
+        let autofocus     = p.getBool("autofocus")
+        // Focus chaining (`next-focus`): `focus_ref` is this field's own
+        // address in the focus registry (the element's `ref`, surfaced as a
+        // prop); `next_focus` is the ref to move the keyboard to on submit.
+        let focusRef      = p.getString("focus_ref")
+        let nextFocus     = p.getString("next_focus")
         // Selection reporting is opt-in (0/absent ⇒ off) and never applies to
         // secure fields. Read exactly like `on_change` / `debounce_ms` above.
         let onSelectionCb = p.getCallbackId("on_selection_change")
@@ -94,56 +168,174 @@ struct NativeUITextInputCore: View {
             fontName: fontName
         )
 
+        // One submit routine for both entry points: the keyboard's return key
+        // (`.onSubmit`) and the accessory-bar button below. Reading `text` /
+        // `isFocused` inside resolves the live @State values at call time.
+        let performSubmit = {
+            // Submit also acts as a commit point — flush pending, then dispatch.
+            flushPending(onChangeCb: onChangeCb)
+            // Selection is flushed BEFORE the submit event so PHP sees the final
+            // caret/selection state ahead of (or alongside) the submit.
+            if selectionEnabled {
+                flushSelection(cb: onSelectionCb)
+            }
+            if onSubmitCb != 0 {
+                NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
+            }
+            // Focus routing after submit. `next-focus` wins over
+            // `keep-focus-on-submit` — moving the keyboard to the chained
+            // field IS keeping it up; keepFocus is only the fallback when the
+            // target isn't on screen (recycled row, conditional render,
+            // typo'd ref).
+            //
+            // The hop runs TWICE. Synchronously first: focus moving to the
+            // target inside the same transaction as the return key's resign
+            // reads as focus MOVING between fields, so the keyboard stays up
+            // instead of playing a down-and-back-up bounce (what UIKit's
+            // becomeFirstResponder-in-shouldReturn always did). Then again
+            // async as a safety net: on paths where the system's resign
+            // still wins after this handler returns, the re-assert restores
+            // focus exactly as the async-only version did — a bounce, but
+            // never a lost keyboard. Focusing an already-focused field is a
+            // no-op, so the second pass costs nothing when the first stuck.
+            if !nextFocus.isEmpty {
+                // With the return key intercepted (no dismissal queued),
+                // this is a plain responder handoff to the target's backing
+                // UITextField — the keyboard stays perfectly still. The
+                // async pass is the safety net for a target whose backing
+                // isn't introspected yet.
+                NativeUIFocusRegistry.shared.focus(nextFocus)
+                DispatchQueue.main.async {
+                    if !NativeUIFocusRegistry.shared.focus(nextFocus) && keepFocus {
+                        isFocused = true
+                    }
+                }
+            } else if keepFocus {
+                // Chat "send and keep typing": SwiftUI resigns first responder
+                // on return by default. Re-assert focus so the keyboard stays
+                // up. NOTE: this causes a small keyboard "bounce" on return
+                // (resign → refocus) that the send button doesn't have — the
+                // smooth fix needs a UIKit-backed field (see notes), not the
+                // multiline workaround which mis-sized the field in the flex
+                // layout.
+                DispatchQueue.main.async { isFocused = true }
+            } else {
+                // Accessory-button path: unlike the return key, tapping the
+                // bar doesn't resign first responder — dismiss explicitly so
+                // "Done" behaves like Done. No-op on the return-key path
+                // (focus is already gone by the time this runs).
+                isFocused = false
+            }
+        }
+        // Pad-style keyboards (number / decimal / phone) have NO return key,
+        // so the submit label, `next-focus` chain and `@submit` are physically
+        // unreachable from them. Surface the missing key as the shared
+        // accessory BAR above the keyboard (NativeUIKeyboardAccessoryBar):
+        // this field claims the bar while focused and hands it the same
+        // submit path as the return key. Refreshed from body every render so
+        // the action never goes stale while focused.
+        let padKeyboard = ["number", "decimal", "numberpassword", "phone"].contains(keyboardKind.lowercased())
+        let wantsAccessory = padKeyboard && !multiline
+            && (onSubmitCb != 0 || !nextFocus.isEmpty || !submitLabelKind.isEmpty)
+        let accessoryTitle = accessoryButtonTitle(
+            explicit: submitLabelKind, hasSubmit: onSubmitCb != 0, nextFocus: nextFocus
+        )
+        let _ = refreshAccessoryClaim(wantsAccessory, title: accessoryTitle, perform: performSubmit)
+        let _ = syncReturnKeyBox(chains: !nextFocus.isEmpty && !multiline, perform: performSubmit)
+
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
         // reliably pick up `.foregroundStyle` for the input text on older
         // iOS runtimes — `.foregroundColor` on the field itself always works.
-        Group {
+        let core = Group {
             if secure {
                 // SecureField has no selection binding — caret reporting is
-                // intentionally never available for secure fields.
-                SecureField(placeholder, text: $text)
-                    .foregroundColor(contentColor)
-                    .focused($isFocused)
-            } else if multiline {
-                // A vertical-axis TextField reports a ~0 intrinsic width when
-                // empty and won't expand to fill an ancestor's `maxWidth:
-                // .infinity` the way a single-line field does — so without this
-                // explicit fill it collapses to its content (just the icon).
-                // `min-lines` reserves visible height up front (a textarea
-                // that LOOKS like a textarea before you type); `max-lines`
-                // caps growth. Clamp so a min above the max still renders.
-                let lower = max(minLines, 1)
-                let upper = maxLines > 0 ? max(maxLines, lower) : max(5, lower)
-                // The iOS 18 `selection:` binding is honored on the vertical
-                // (multiline) axis too. Kept as parallel branches so the
-                // feature-off path is byte-for-byte the original field.
-                if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
-                        .lineLimit(lower...upper)
+                // intentionally never available for secure fields. That holds
+                // for the revealed branch too: `selectionEnabled` is gated on
+                // `!secure`, so an unmasked password still reports nothing.
+                if masked {
+                    SecureField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text, axis: .vertical)
-                        .lineLimit(lower...upper)
+                    // SecureField has no unmasked mode, so revealing means
+                    // swapping in a plain TextField. `multiline` is ignored on
+                    // a secure field in both branches, as before.
+                    TextField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .focused($isFocused)
                 }
+            } else if multiline {
+                // NOT a vertical-axis TextField: with a hardware keyboard
+                // (simulator typed from the Mac keyboard, iPad + external
+                // keyboard) Return UNFOCUSES a vertical TextField instead of
+                // inserting a newline — confirmed as-designed by Apple DTS
+                // (developer.apple.com/forums/thread/760511). TextEditor's
+                // return key inserts a line break on every keyboard.
+                //
+                // The invisible Text mirror re-creates the auto-growing
+                // `lineLimit(min...max)` window the vertical TextField had:
+                // it sizes the branch (the trailing space keeps a just-typed
+                // empty last line measurable — Text collapses a trailing
+                // newline on its own), and the editor fills the overlay.
+                let lower = max(minLines, 1)
+                let upper = maxLines > 0 ? max(maxLines, lower) : max(5, lower)
+                Text(text + " ")
+                    .lineLimit(lower...upper)
+                    .opacity(0)
+                    // Sizing-only: without this VoiceOver reads the typed
+                    // text twice (mirror + editor).
+                    .accessibilityHidden(true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay {
+                        Group {
+                            // The iOS 18 `selection:` binding exists on
+                            // TextEditor too. Parallel branches so the
+                            // feature-off path carries no selection state.
+                            if selectionEnabled {
+                                TextEditor(text: $text, selection: $selection)
+                            } else {
+                                TextEditor(text: $text)
+                            }
+                        }
+                        // Let the variant chrome paint the background.
+                        .scrollContentBackground(.hidden)
+                        .foregroundColor(contentColor)
+                        // Pull back UITextView's internal text-container
+                        // padding (5pt line-fragment + ~8pt vertical inset)
+                        // so the typed text lines up with the single-line
+                        // variants inside the same chrome — and with the
+                        // sizing mirror above.
+                        .padding(.horizontal, -5)
+                        .padding(.vertical, -8)
+                        .focused($isFocused)
+                    }
+                    .overlay(alignment: .topLeading) {
+                        // TextEditor has no placeholder slot. Match the prompt
+                        // used by the single-line and secure fields.
+                        if text.isEmpty && !placeholder.isEmpty {
+                            Text(placeholder)
+                                .foregroundStyle(resolvedPlaceholderColor)
+                                .allowsHitTesting(false)
+                        }
+                    }
             } else {
                 if selectionEnabled {
-                    TextField(placeholder, text: $text, selection: $selection)
+                    TextField(placeholder, text: $text, selection: $selection, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 } else {
-                    TextField(placeholder, text: $text)
+                    TextField(placeholder, text: $text, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
                 }
             }
         }
         .nuiScaledFont(size: textSize, fontName: fontName.isEmpty ? nil : fontName)
+        // Invisible introspection anchor: finds the UIKit field backing
+        // this TextField, reroutes its return key through `returnKeyBox`,
+        // and registers the backing field for direct responder handoffs.
+        .background(ReturnKeyInterceptorAnchor(box: returnKeyBox, focusRef: focusRef))
         // NOTE: SwiftUI's editable TextField ignores `.lineSpacing` for its
         // typed text (unlike `Text`), so `leading-*` has no visible effect on
         // iOS inputs. Kept for intent / forward-compat; leading works on
@@ -153,20 +345,55 @@ struct NativeUITextInputCore: View {
         .keyboardType(keyboard)
         .textInputAutocapitalization(capitalization)
         .autocorrectionDisabled(!autocorrect)
+        .modifier(TextContentTypeModifier(contentType: contentType))
         .disabled(disabled || readOnly)
-        .submitLabel(onSubmitCb != 0 ? .done : .return)
+        // Scroll target for `scrollIntoView()` below. `node.id` is already the
+        // ForEach identity of every node in the tree, so it is stable across
+        // republishes; and because it is applied to the view `body` returns
+        // rather than to this struct, it cannot reset the `@State` above.
+        .id(node.id)
         .onAppear {
             if !initialized {
                 text = serverValue
                 lastSentValue = serverValue
+                echoes.reset(serverValue: serverValue)
                 initialized = true
+
+                // First appearance only: a later re-render must not steal
+                // focus back from wherever the user has since moved it.
+                // Deferred a runloop because @FocusState does not take
+                // while the view is still being installed.
+                if autofocus && !disabled && !readOnly {
+                    DispatchQueue.main.async { isFocused = true }
+                }
+            }
+            // Make this field focus-addressable. Capturing the FocusState
+            // binding keeps the registry free of any view reference. This
+            // closure is the fallback hop — the registry prefers a direct
+            // responder handoff to the backing UITextField attached by the
+            // return-key interceptor, which is what keeps the keyboard up.
+            if !focusRef.isEmpty {
+                let binding = $isFocused
+                focusRegistryToken = NativeUIFocusRegistry.shared.register(focusRef) {
+                    binding.wrappedValue = true
+                }
             }
         }
+        .onDisappear {
+            if let token = focusRegistryToken, !focusRef.isEmpty {
+                NativeUIFocusRegistry.shared.unregister(focusRef, token: token)
+                focusRegistryToken = nil
+            }
+            NativeUIKeyboardAccessoryState.shared.release(id: accessoryToken)
+        }
         .onChange(of: serverValue) { _, newServerValue in
-            // Only sync from server when the incoming value differs from what
-            // we last sent. Matching == it's an echo of our own change; ignore
-            // to avoid cursor jumps / clobbering in-flight edits.
-            if newServerValue != lastSentValue {
+            // Only sync from server when the incoming value is not an echo of
+            // something we sent. PHP re-renders once per change event, so with
+            // fast typing several echoes are in flight and an EARLIER one can
+            // land after the user has typed more. Comparing only against
+            // `lastSentValue` would let that stale echo overwrite the newer
+            // text, which is how letters went missing.
+            if echoes.receive(newServerValue) && newServerValue != lastSentValue {
                 text = newServerValue
                 lastSentValue = newServerValue
                 // A programmatic push replaces the field wholesale and drops
@@ -215,6 +442,22 @@ struct NativeUITextInputCore: View {
             scheduleSelectionEmit(text: text, cb: onSelectionCb, debounceMs: selDebounceMs)
         }
         .onChange(of: isFocused) { _, focused in
+            // Lets interactive taps elsewhere honor this field's
+            // keep-focus-on-submit, and gives press dispatch a
+            // flush hook so a tap-committed autocorrection's
+            // change reaches PHP first (mobile-air #335).
+            if focused {
+                KeyboardFocusPolicy.fieldFocused(focusToken, keepsFocus: keepFocus) {
+                    flushPending(onChangeCb: onChangeCb)
+                }
+                if wantsAccessory {
+                    NativeUIKeyboardAccessoryState.shared.claim(
+                        id: accessoryToken, title: accessoryTitle, perform: performSubmit
+                    )
+                }
+            } else {
+                KeyboardFocusPolicy.fieldBlurred(focusToken)
+            }
             // On blur, flush any pending change — covers both `blur` mode
             // (never dispatched mid-typing) and `debounce` mode (in-flight
             // timer that should commit immediately rather than race with
@@ -226,30 +469,104 @@ struct NativeUITextInputCore: View {
                 if selectionEnabled {
                     flushSelection(cb: onSelectionCb)
                 }
+                NativeUIKeyboardAccessoryState.shared.release(id: accessoryToken)
+            } else {
+                scrollIntoView()
             }
         }
-        .onSubmit {
-            // Submit also acts as a commit point — flush pending, then dispatch.
-            flushPending(onChangeCb: onChangeCb)
-            // Selection is flushed BEFORE the submit event so PHP sees the final
-            // caret/selection state ahead of (or alongside) the submit.
-            if selectionEnabled {
-                flushSelection(cb: onSelectionCb)
+        // Return-key policy — parity with Android. `.onSubmit` must NOT be
+        // attached to a multiline (vertical-axis) field: the soft keyboard's
+        // return key inserts a newline either way, but with `.onSubmit`
+        // attached a HARDWARE keyboard's Return (simulator typed from the Mac,
+        // iPad + external keyboard) fires the submit path and swallows the
+        // newline. Android multiline behaves the same on purpose: Enter always
+        // inserts a line break and `@submit` is only reachable through a
+        // dedicated send button. Blur still flushes pending changes above.
+        //
+        // `secure` wins over `multiline` when the field is built above, so a
+        // secure field is a single-line SecureField and keeps its submit path.
+        //
+        // Grouped so the reveal-toggle modifier below has a single view to
+        // attach to, whichever branch was taken.
+        Group {
+            if multiline && !secure {
+                core
+            } else {
+                core
+                    .submitLabel(resolveSubmitLabel(explicit: submitLabelKind, multiline: multiline, hasSubmit: onSubmitCb != 0, nextFocus: nextFocus))
+                    .onSubmit {
+                        performSubmit()
+                    }
             }
-            if onSubmitCb != 0 {
-                NativeElementBridge.sendSubmitEvent(onSubmitCb, nodeId: node.id, text: text)
-            }
-            // Chat "send and keep typing": SwiftUI resigns first responder on
-            // return by default. Re-assert focus so the keyboard stays up. NOTE:
-            // this causes a small keyboard "bounce" on return (resign → refocus)
-            // that the send button doesn't have — the smooth fix needs a
-            // UIKit-backed field (see notes), not the multiline workaround which
-            // mis-sized the field in the flex layout.
-            if keepFocus {
-                DispatchQueue.main.async { isFocused = true }
+        }
+        // Appended rather than woven in: when the toggle is off this modifier
+        // returns its content untouched, so every field that doesn't ask for
+        // an eye keeps the exact view tree it had.
+        .modifier(RevealToggleModifier(
+            enabled: revealToggle,
+            revealed: $revealed,
+            isFocused: $isFocused,
+            textSize: textSize,
+            contentColor: contentColor
+        ))
+        // A field popped off screen while focused gets no blur, so release
+        // the policy here rather than leave it holding this view's flush
+        // closure. Last in the chain so it sits outside the reveal toggle,
+        // whose SecureField / TextField swap is not the field leaving.
+        .onDisappear { KeyboardFocusPolicy.fieldBlurred(focusToken) }
+    }
+
+    /// Body-time refresh of the return-key interceptor's channel — the
+    /// proxy reads it at key-press time, so the submit closure and chain
+    /// state can never go stale under republishes.
+    private func syncReturnKeyBox(chains: Bool, perform: @escaping () -> Void) {
+        returnKeyBox.chains = chains
+        returnKeyBox.perform = perform
+    }
+
+    /// Body-time refresh of this field's accessory-bar claim — keeps the
+    /// bar's action and title current while focused (props can change under
+    /// a focused field when PHP republishes). No-op unless focused and
+    /// accessory-worthy; the state object defers any published change.
+    private func refreshAccessoryClaim(_ wants: Bool, title: String, perform: @escaping () -> Void) {
+        guard wants, isFocused else { return }
+        NativeUIKeyboardAccessoryState.shared.refresh(id: accessoryToken, title: title, perform: perform)
+    }
+
+    // ─── Keyboard avoidance ──────────────────────────────────────────────────
+
+    /// Ask the enclosing `<scroll-view>` to bring this field into view.
+    ///
+    /// SwiftUI already shrinks the screen by the keyboard height, but that
+    /// only guarantees the field is somewhere in the SCROLLABLE CONTENT — not
+    /// that it is on screen. On a chat composer pinned to the bottom the two
+    /// amount to the same thing, which is why nothing needed this before; on a
+    /// login form the password field sits mid-page and a shrunk viewport
+    /// leaves it exactly where it was, under the keyboard.
+    ///
+    /// Deferred past the keyboard's own presentation so the scroll runs
+    /// against the already-shrunk viewport. Centering against the full height
+    /// first would put the field in the middle of a screen that is about to
+    /// lose its bottom half — i.e. back under the keyboard. The delay is a
+    /// little longer than the ~0.25s the system animates the keyboard in.
+    ///
+    /// Runs on focus rather than on `keyboardWillShow`, because moving from
+    /// one field to the next never re-shows the keyboard and is exactly when
+    /// this is needed. Where there is no proxy — sheets, modals, fixed
+    /// screens, bottom-anchored scroll views — this is a no-op.
+    private func scrollIntoView() {
+        guard let scrollProxy else { return }
+
+        let id = node.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusScrollDelay) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                scrollProxy.scrollTo(id, anchor: .center)
             }
         }
     }
+
+    /// How long to wait after focus before scrolling, in seconds.
+    private static let focusScrollDelay: TimeInterval = 0.35
 
     // ─── Dispatch policy ─────────────────────────────────────────────────────
 
@@ -292,6 +609,7 @@ struct NativeUITextInputCore: View {
     private func commit(_ value: String, onChangeCb: Int) {
         lastSentValue = value
         if onChangeCb != 0 {
+            echoes.sent(value)
             NativeElementBridge.sendTextChangeEvent(onChangeCb, nodeId: node.id, text: value)
         }
     }
@@ -417,11 +735,111 @@ struct NativeUITextInputCore: View {
     }
 }
 
+/// Tells an echo of our own change apart from a value PHP actually set.
+///
+/// Every change event makes PHP re-render, and the tree it publishes carries
+/// the value from THAT event. When keystrokes arrive faster than the round
+/// trip, several of those renders are in flight at once. The field used to
+/// remember only the newest value it sent, so the echo of an older keystroke
+/// looked like a real server change and replaced everything typed since
+/// ("Buy milk" saved as "Buyilk").
+///
+/// PHP handles events one at a time and in order, so echoes come back in the
+/// order they were sent, though the renderer may skip some when trees arrive
+/// faster than it draws. Matching an incoming value against the queue and
+/// dropping everything up to it handles both. A value that isn't in the queue
+/// is something PHP chose (clearing the field after "Add", say) and is applied
+/// as before.
+struct NativeUITextEchoTracker {
+    /// Unacknowledged values, oldest first.
+    private(set) var inFlight: [String] = []
+    /// The newest value PHP has published for this field.
+    private var serverValue: String = ""
+
+    /// Bounds the queue for a field whose model PHP never publishes back.
+    static let limit = 64
+
+    mutating func reset(serverValue: String) {
+        inFlight.removeAll()
+        self.serverValue = serverValue
+    }
+
+    /// Record a value just sent to PHP.
+    mutating func sent(_ value: String) {
+        // With nothing in flight PHP already holds this value, so its echo
+        // won't change the published tree and would never be seen. Leaving it
+        // out of the queue stops it from later masking a real push of the
+        // same value.
+        if inFlight.isEmpty && value == serverValue { return }
+        inFlight.append(value)
+        if inFlight.count > Self.limit {
+            inFlight.removeFirst(inFlight.count - Self.limit)
+        }
+    }
+
+    /// Record a newly published server value. Returns true when it should be
+    /// applied to the field, false when it is an echo of our own change.
+    mutating func receive(_ value: String) -> Bool {
+        serverValue = value
+        if let index = inFlight.firstIndex(of: value) {
+            inFlight.removeFirst(index + 1)
+            return false
+        }
+        inFlight.removeAll()
+        return true
+    }
+}
+
 /// Snapshot of a reported selection — the dedupe key and the debounce payload.
 private struct NativeUISelectionPayload: Equatable {
     let text: String
     let start: Int
     let end: Int
+}
+
+/// Submit-key face for the field. The explicit `submit_label` prop wins;
+/// unset — or unknown, same policy as `resolveKeyboardType` — derives
+/// `.next` when a `next_focus` chain is set (mirroring how capitalization
+/// derives from the keyboard type), else keeps the original default:
+/// `.done` when `@submit` is wired, `.return` otherwise.
+///
+/// A multiline field ignores the prop entirely: on the vertical-axis
+/// TextField a non-return submit label swaps newline insertion for a submit
+/// action, silently taking away the field's reason to be multiline. Android
+/// ignores the prop for multiline the same way (`resolveImeAction` in
+/// `TextInputShared.kt`) — keep the two in sync.
+private func resolveSubmitLabel(explicit: String, multiline: Bool, hasSubmit: Bool, nextFocus: String) -> SubmitLabel {
+    if !multiline {
+        switch explicit.lowercased() {
+        case "next":   return .next
+        case "done":   return .done
+        case "go":     return .go
+        case "search": return .search
+        case "send":   return .send
+        case "return": return .return
+        default:       break
+        }
+        if !nextFocus.isEmpty { return .next }
+    }
+    return hasSubmit ? .done : .return
+}
+
+/// Title for the keyboard accessory button shown above pad-style keyboards
+/// (which have no return key to carry the submit label). Same precedence as
+/// `resolveSubmitLabel`: the explicit prop wins, then a `next_focus` chain
+/// implies "Next", then `@submit` implies "Done".
+private func accessoryButtonTitle(explicit: String, hasSubmit: Bool, nextFocus: String) -> String {
+    switch explicit.lowercased() {
+    case "next":   return "Next"
+    case "done":   return "Done"
+    case "go":     return "Go"
+    case "search": return "Search"
+    case "send":   return "Send"
+    case "return": return "Done"
+    default:       break
+    }
+    if !nextFocus.isEmpty { return "Next" }
+    return "Done"
 }
 
 /// Keyboard resolution — accepts string hints ("email", "number", etc.) that
@@ -463,8 +881,8 @@ private func resolveAutocapitalization(explicit: String, secure: Bool, keyboard:
     if secure { return .never }
 
     switch explicit.lowercased() {
-    case "none":       return .never
-    case "sentences":  return .sentences
+    case "none", "never", "off": return .never
+    case "sentences", "on":        return .sentences
     case "words":      return .words
     case "characters": return .characters
     default:           break
@@ -499,5 +917,113 @@ private func allowsAutocorrection(secure: Bool, keyboard: String) -> Bool {
         return false
     default:
         return true
+    }
+}
+
+/// The `content_type` prop → `UITextContentType`, for AutoFill. Tokens are
+/// HTML's `autocomplete` vocabulary, normalized to kebab-case by the element.
+///
+/// This is what declares a login form's credential pair to iOS: a `username`
+/// field beside a `password` one. Without it iOS has no pair to fill, which is
+/// how a secure field filled as the partner of another field could be written
+/// in UIKit without SwiftUI's `text` binding ever seeing the value
+/// (NativePHP/mobile-air#422).
+///
+/// Unknown and empty values return nil — same policy as `resolveKeyboardType`.
+private func resolveTextContentType(_ kind: String) -> UITextContentType? {
+    switch kind.lowercased() {
+    case "username":      return .username
+    case "email":         return .emailAddress
+    case "password":      return .password
+    case "new-password":  return .newPassword
+    case "one-time-code": return .oneTimeCode
+    default:              return nil
+    }
+}
+
+/// Applies `.textContentType` only when the author declared one.
+///
+/// Deliberately not `.textContentType(nil)` for the unset case. That is not
+/// guaranteed to be a no-op: SwiftUI may assign its own content type to a
+/// `SecureField` internally, and an explicit nil applied over it would change
+/// the AutoFill behavior of every existing password field. Returning `content`
+/// untouched keeps each field that doesn't set the prop exactly as it was.
+private struct TextContentTypeModifier: ViewModifier {
+    let contentType: UITextContentType?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let contentType {
+            content.textContentType(contentType)
+        } else {
+            content
+        }
+    }
+}
+
+/// Places the reveal ("eye") control inside the field's own chrome, so it sits
+/// where the trailing icon sits rather than as a separate Show / Hide control
+/// next to the input — which is what an app has to build today, and which
+/// costs a bridge round-trip and a republish on every tap.
+///
+/// Disabled, this returns `content` unchanged: no HStack, no wrapper, nothing
+/// added to the view tree. Every existing field therefore lays out exactly as
+/// it did.
+private struct RevealToggleModifier: ViewModifier {
+    let enabled: Bool
+    @Binding var revealed: Bool
+    var isFocused: FocusState<Bool>.Binding
+    let textSize: CGFloat
+    let contentColor: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            HStack(spacing: 6) {
+                content
+                Button {
+                    // Read focus BEFORE the swap: flipping `revealed` changes
+                    // which branch of the field is built, and SwiftUI treats
+                    // SecureField and TextField as different views, so the
+                    // one that had first responder is torn down and focus is
+                    // dropped. Re-assert it on the next runloop turn — after
+                    // the new field exists — or the keyboard drops away on
+                    // every tap of the eye.
+                    let wasFocused = isFocused.wrappedValue
+                    revealed.toggle()
+                    if wasFocused {
+                        DispatchQueue.main.async { isFocused.wrappedValue = true }
+                    }
+                } label: {
+                    Image(systemName: revealed ? "eye.slash.fill" : "eye.fill")
+                        .nuiScaledFont(size: max(13, textSize - 2))
+                        .foregroundStyle(contentColor.opacity(0.85))
+                        // Deliberately NOT `.nuiMinTapTarget()`. That puts a
+                        // `minHeight: 44` on the icon, and this HStack sits
+                        // INSIDE the field's content — the variant renderer adds
+                        // its own vertical padding around the whole thing — so a
+                        // 44pt floor here makes a revealable field far taller
+                        // than a plain one. Measured on a login form: 42.7pt for
+                        // the email field, 64.7pt for the password field beside
+                        // it. Half again as tall, and it reads as a layout bug.
+                        //
+                        // `maxHeight: .infinity` fills the row rather than
+                        // demanding a height, so the field keeps exactly the
+                        // height it had before it grew an eye (re-measured at
+                        // 40.7pt, matching the same field with the toggle off).
+                        // The tap target is still >= 44 wide by the full height
+                        // of the field, and `contentShape` keeps all of that
+                        // tappable instead of just the glyph.
+                        .frame(minWidth: 44, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // Announce the ACTION the tap performs, not the current state.
+                // VoiceOver reads this as "Show password, button".
+                .accessibilityLabel(revealed ? "Hide password" : "Show password")
+            }
+        } else {
+            content
+        }
     }
 }

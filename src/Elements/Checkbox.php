@@ -40,6 +40,13 @@ class Checkbox extends Element
             $this->disabled();
         }
 
+        if (isset($attrs['supporting'])) {
+            $this->supporting($attrs['supporting']);
+        }
+        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
+            $this->error();
+        }
+
         $this->applyA11yAttributes($attrs);
 
         if (isset($attrs['sync-mode']) || isset($attrs['syncMode'])) {
@@ -116,5 +123,21 @@ class Checkbox extends Element
         unset($layout['padding']);
 
         return $layout;
+    }
+
+    /** Supporting/helper text under the control (error-colored when error()). */
+    public function supporting(string $text): static
+    {
+        $this->checkboxProps['supporting'] = $text;
+
+        return $this;
+    }
+
+    /** Flag the control as invalid — destructive tint + supporting text color. */
+    public function error(bool $on = true): static
+    {
+        $this->checkboxProps['is_error'] = $on;
+
+        return $this;
     }
 }

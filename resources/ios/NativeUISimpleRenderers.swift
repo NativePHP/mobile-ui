@@ -41,7 +41,7 @@ private func pressableMenuItem(_ item: NativeUINode) -> some View {
             }
         } label: {
             if !icon.isEmpty {
-                Label(label, systemImage: getIconForName(icon))
+                Label { Text(label) } icon: { NativeIcon.image(icon) }
             } else {
                 Text(label)
             }
@@ -119,97 +119,118 @@ struct NativeUIImageRenderer: View {
     var body: some View {
         let p = node.props
         let src = p.getString("src")
-        let fit = p.getInt("fit")
+        // No `fit` prop means no `object-*` class: contain, as on Android.
+        let fit = ImageFit(rawValue: p.getInt("fit", default: ImageFit.contain.rawValue)) ?? .contain
         let tintArgb = p.getColor("tint_color", default: 0)
-        let contentMode = resolveContentMode(fit)
         let cornerRadius = CGFloat(node.style?.borderRadius ?? 0)
         let alt = p.getString("alt")
 
-        if contentMode == .fill {
-            // Cover / fill (object-cover, object-fill): the image fills its
-            // frame and may overflow. With just
-            // `image.resizable().aspectRatio(.fill).clipped()`, a higher-res
-            // decoded source reports an intrinsic size larger than the frame,
-            // the proposal-clamping path diverges between simulator and
-            // device, and the image paints beyond its declared frame onto
-            // siblings. Wrapping in `Color.clear.overlay { ... }` pins the
-            // outer view to exactly the proposed frame; `.clipped()` then
-            // crops the overflow. NOTE: this needs a definite height — supply
-            // one via `h-*` or `aspect-*`, since Color.clear has no intrinsic
-            // size and collapses in an unbounded (scroll-view) main axis.
-            Color.clear
-                .overlay(imageContent(src: src, contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius))
-                .clipped()
-                .modifier(ImageAltModifier(alt: alt))
-        } else {
-            // Fit (default / object-contain / scale-down / none): the image
-            // is letterboxed and never overflows, so render it directly.
+        if fit == .contain {
+            // Contain (the default, object-contain, object-scale-down): the
+            // image is letterboxed and never overflows, so render it directly.
             // Without an explicit height the resizable + `.aspectRatio(.fit)`
             // image self-sizes to its source's aspect ratio — i.e. a bare
             // `<image class="w-full">` lays out at its natural ratio like an
-            // HTML <img>. Within a definite frame it just letterboxes.
-            imageContent(src: src, contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
+            // HTML <img>. Inside a definite frame, `.frame(maxWidth:maxHeight:)`
+            // takes that whole frame and centers the letterboxed image, as
+            // CSS's default `object-position` does; without it the node's own
+            // frame leaves the image in its top-leading corner. Where the
+            // proposal leaves a dimension open it takes the image's size, so
+            // self-sizing is unchanged.
+            imageContent(src: src, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+                .modifier(ImageAltModifier(alt: alt))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            // Cover, fill and none (object-cover, object-fill, object-none):
+            // the image fills its frame, is stretched to it, or keeps its own
+            // size, and cover and none can draw past the frame, so clip to it.
+            // `ImageFrameLayout` (applied in `tinted`) gives the image view the
+            // frame's size and centers the image in it.
+            imageContent(src: src, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+                .clipped()
                 .modifier(ImageAltModifier(alt: alt))
         }
     }
 
     @ViewBuilder
-    private func imageContent(src: String, contentMode: ContentMode, tintArgb: Int, cornerRadius: CGFloat) -> some View {
-        if src.isEmpty {
-            Color.clear
-        } else if let path = Self.localFilePath(for: src) {
-            // Local device file — camera capture, gallery selection, etc.
+    private func imageContent(src: String, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat) -> some View {
+        switch NativeUIImageSource.resolve(src) {
+        case .local(let path):
+            // Local device file — camera capture, gallery selection, or an
+            // asset shipped in the app's `public/` directory.
             // `AsyncImage`/`URLSession` can't load `file://` or bare
-            // filesystem paths, so decode directly with UIImage. Handles
-            // HEIC/HEIF transparently (UIImage decodes them natively).
-            if let uiImage = UIImage(contentsOfFile: path) {
-                tinted(Image(uiImage: uiImage), contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
-            } else {
+            // filesystem paths, so decode with UIImage (cached, off the main
+            // thread, at the size it's drawn, and HEIC/HEIF handled
+            // transparently — UIImage decodes them natively). Until it
+            // arrives, the clear placeholder takes the element's frame, so a
+            // sized image doesn't move anything. None draws the image at its
+            // own size, however small the frame, so it needs the whole file.
+            NativeUILocalImage(path: path, fullSize: fit == .none) { uiImage in
+                tinted(Image(uiImage: uiImage), fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+            } placeholder: {
                 Color.clear
             }
-        } else if let url = URL(string: src) {
+        case .remote(let url):
             // Remote URL (http/https) — load asynchronously.
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    tinted(image, contentMode: contentMode, tintArgb: tintArgb, cornerRadius: cornerRadius)
+                    tinted(image, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
                 case .failure:
                     Color.clear
                 case .empty:
                     ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 @unknown default:
                     Color.clear
                 }
             }
-        } else {
+        case .unresolvable:
             Color.clear
         }
     }
 
     @ViewBuilder
-    private func tinted(_ image: Image, contentMode: ContentMode, tintArgb: Int, cornerRadius: CGFloat) -> some View {
-        let img = image
-            .resizable()
-            .aspectRatio(contentMode: contentMode)
+    private func tinted(_ image: Image, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat) -> some View {
         let styled = Group {
             if tintArgb != 0 {
-                img.foregroundStyle(Color(argb: tintArgb))
+                sized(image, fit: fit).foregroundStyle(Color(argb: tintArgb))
             } else {
-                img
+                sized(image, fit: fit)
             }
         }
 
-        // `.fill` (cover/fill) spans the whole frame, so the frame-level
-        // rounded clip from NodeStyleModifier already rounds the visible
-        // pixels. `.fit` (contain/scale-down/none) letterboxes the image
-        // inside the frame, leaving the frame's rounded corners out in the
-        // transparent margin — so round the fitted image itself. Mirrors
-        // ClipRadiusModifier (RoundedRectangle; rounded-full → 9999 clamps
-        // to a capsule).
-        if contentMode == .fit && cornerRadius > 0 {
+        // Contain letterboxes the image inside the frame, leaving the frame's
+        // rounded corners out in the transparent margin — so round the fitted
+        // image itself. Mirrors ClipRadiusModifier (RoundedRectangle;
+        // rounded-full → 9999 clamps to a capsule). Cover and fill span the
+        // whole frame, so the frame-level rounded clip from NodeStyleModifier
+        // already rounds the visible pixels, and none keeps its own size
+        // inside that same clip, as on Android.
+        if fit != .contain {
+            ImageFrameLayout { styled }
+        } else if cornerRadius > 0 {
             styled.clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         } else {
             styled
+        }
+    }
+
+    /// Sizes the image for its fit, after CSS `object-fit`.
+    @ViewBuilder
+    private func sized(_ image: Image, fit: ImageFit) -> some View {
+        switch fit {
+        case .contain:
+            image.resizable().aspectRatio(contentMode: .fit)
+        case .cover:
+            image.resizable().aspectRatio(contentMode: .fill)
+        case .fill:
+            // Stretched to the frame, whatever the image's own shape.
+            image.resizable()
+        case .none:
+            // The image's own size in points: its pixel size for a plain
+            // file, half or a third of it for an @2x or @3x file.
+            image
         }
     }
 
@@ -229,24 +250,49 @@ struct NativeUIImageRenderer: View {
         }
     }
 
-    /// Resolves `src` to a local filesystem path when it points at an
-    /// on-device file (`file://…` URL or an absolute `/…` path), or nil
-    /// when it's a remote URL that should go through AsyncImage.
-    private static func localFilePath(for src: String) -> String? {
-        if src.hasPrefix("file://") {
-            return URL(string: src)?.path ?? String(src.dropFirst("file://".count))
-        }
-        if src.hasPrefix("/") {
-            return src
-        }
-        return nil
+    /// Wire values of the `fit` prop, matching PHP's `ImageFit` enum.
+    private enum ImageFit: Int {
+        case none = 0
+        case contain = 1
+        case cover = 2
+        case fill = 3
     }
 
-    private func resolveContentMode(_ fit: Int) -> ContentMode {
-        switch fit {
-        case 2: return .fill
-        case 3: return .fill
-        default: return .fit
+    /// Frames a cover, fill or none image. A definite frame is taken as is,
+    /// with the image centered in it and free to overflow until `body`
+    /// clips it. Sizing the view from the image instead let a higher-res
+    /// decoded source report an intrinsic size larger than the frame, and
+    /// the image painted beyond its declared frame onto siblings.
+    ///
+    /// A dimension the frame leaves open (`w-full` with no height in a list)
+    /// comes from the image's aspect ratio, as contain and an HTML <img> do.
+    /// With both open, as in a flex container's first unconstrained measure,
+    /// it answers 10pt like an empty view, so a big photo's own size can't
+    /// leak into the layout.
+    private struct ImageFrameLayout: Layout {
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            let natural = subviews.first?.sizeThatFits(.unspecified) ?? .zero
+            let width = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+            let height = proposal.height.flatMap { $0.isFinite ? $0 : nil }
+
+            switch (width, height) {
+            case let (width?, height?):
+                return CGSize(width: width, height: height)
+            case let (width?, nil) where natural.width > 0:
+                return CGSize(width: width, height: width * natural.height / natural.width)
+            case let (nil, height?) where natural.height > 0:
+                return CGSize(width: height * natural.width / natural.height, height: height)
+            default:
+                return proposal.replacingUnspecifiedDimensions()
+            }
+        }
+
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            subviews.first?.place(
+                at: CGPoint(x: bounds.midX, y: bounds.midY),
+                anchor: .center,
+                proposal: ProposedViewSize(bounds.size)
+            )
         }
     }
 }

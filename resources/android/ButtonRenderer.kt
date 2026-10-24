@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
+import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -42,10 +44,13 @@ import com.nativephp.plugins.native_ui.NativeUITokens
  *   - secondary   → [FilledTonalButton] with theme.secondary / onSecondary
  *   - destructive → [Button] with theme.error / onError
  *   - ghost       → [TextButton] with theme.primary as content color
+ *   - any other   → like primary, in the `tint_color` / `label_color` PHP sends
+ *     for a variant that names a theme token (`variant="brand"`), or in
+ *     primary when it sent none
  *
- * All colors come from [LocalNativeUITheme]. No per-instance color/radius/shadow
- * overrides are honored — that's intentional (plan doc Model 3). For full visual
- * control, use `<pressable>`.
+ * All colors come from the theme: [LocalNativeUITheme], or the theme token a
+ * variant names. No per-instance color/radius/shadow overrides are honored —
+ * that's intentional (plan doc Model 3). For full visual control, use `<pressable>`.
  */
 object ButtonRenderer {
     @Composable
@@ -70,8 +75,20 @@ object ButtonRenderer {
         // rather than a CompositionLocal because nothing in the render tree
         // currently provides one — the store is backed by `mutableStateOf`, so
         // Compose recomposes automatically when PHP pushes a theme update.
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val isDark = isSystemInDarkTheme()
+        val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
         val metrics = sizeMetrics(size, theme)
+
+        // A variant that names a theme token arrives with that token's colours,
+        // which PHP resolves and sends as `tint_color` and `label_color`, each
+        // with its `dark_` shade when that differs. The built-ins send neither.
+        fun tokenColor(key: String, fallback: Color): Color {
+            val shade = if (isDark && p.has("dark_$key")) "dark_$key" else key
+
+            return if (p.has(shade)) Color(p.getColor(shade, 0)) else fallback
+        }
+        val tint = tokenColor("tint_color", theme.primary)
+        val onTint = if (p.has("tint_color")) tokenColor("label_color", theme.onPrimary) else theme.onPrimary
         // Leading — button labels are single-line, so this is usually a no-op.
         val lineHeight = nuiLineHeightUnit(p.getFloat("line_height_px", 0f), p.getFloat("line_height", 0f), metrics.textSize.value)
 
@@ -81,7 +98,15 @@ object ButtonRenderer {
         val onClick: () -> Unit = if (hasMenu) {
             { menuExpanded = true }
         } else {
-            { if (pressCb != 0) NativeUIBridge.sendPressEvent(pressCb, node.id) }
+            {
+                if (pressCb != 0) {
+                    // The Button consumes the tap, so the root's tap-away
+                    // never runs. Drop the keyboard here unless the focused
+                    // field keeps focus (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
+                    NativeUIBridge.sendPressEvent(pressCb, node.id)
+                }
+            }
         }
 
         val buttonModifier = modifier
@@ -174,15 +199,16 @@ object ButtonRenderer {
                     content = { content() },
                 )
 
-                // "primary" (default) and any unknown value fall through to filled primary.
+                // "primary" (default), a theme token and any unknown value fall
+                // through to filled primary, in the token's colours if it sent them.
                 else -> Button(
                     onClick = onClick,
                     enabled = enabled,
                     modifier = buttonModifier,
                     contentPadding = metrics.contentPadding,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = theme.primary,
-                        contentColor = theme.onPrimary,
+                        containerColor = tint,
+                        contentColor = onTint,
                         disabledContainerColor = theme.surfaceVariant,
                         disabledContentColor = theme.onSurfaceVariant,
                     ),

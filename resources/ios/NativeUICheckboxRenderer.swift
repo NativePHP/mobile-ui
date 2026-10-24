@@ -25,7 +25,15 @@ struct NativeUICheckboxRenderer: View {
         let disabled    = p.getBool("disabled")
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
+        let isError     = p.getBool("is_error")
+        let supporting  = p.getString("supporting")
 
+        // Error state rides the hint channel unless an explicit hint is
+        // set (same convention as the text inputs).
+        let errorText = (isError && !supporting.isEmpty) ? supporting : ""
+        let effectiveA11yHint = a11yHint.isEmpty ? errorText : a11yHint
+
+        VStack(alignment: .leading, spacing: 4) {
         Button(action: {
             guard !disabled else { return }
             let new = !checked
@@ -38,7 +46,7 @@ struct NativeUICheckboxRenderer: View {
             HStack(spacing: 8) {
                 Image(systemName: checked ? "checkmark.square.fill" : "square")
                     .nuiScaledFont(size: 22)
-                    .foregroundColor(checked ? theme.primary : theme.onSurfaceVariant)
+                    .foregroundColor(isError ? theme.destructive : (checked ? theme.primary : theme.onSurfaceVariant))
                 if !label.isEmpty {
                     Text(label)
                         .nuiScaledFont(size: 17)
@@ -66,7 +74,14 @@ struct NativeUICheckboxRenderer: View {
         .modifier(A11yToggleTraitModifier())
         .accessibilityValue(checked ? "Checked" : "Unchecked")
         .modifier(A11yLabelModifier(label: a11yLabel))
-        .modifier(A11yHintModifier(hint: a11yHint))
+        .modifier(A11yHintModifier(hint: effectiveA11yHint))
+
+        if !supporting.isEmpty {
+            Text(supporting)
+                .nuiScaledFont(size: theme.fontSm)
+                .foregroundStyle(isError ? theme.destructive : theme.onSurfaceVariant)
+        }
+        }
     }
 }
 

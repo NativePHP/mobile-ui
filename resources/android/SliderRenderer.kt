@@ -1,5 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -51,9 +53,17 @@ object SliderRenderer {
         // would lose the reference on each recomposition; a boxed state value
         // survives and lets us cancel() the in-flight job reliably.
         var debounceJob by remember { mutableStateOf<Job?>(null) }
+        // True while a finger drags the thumb. Server values wait until the drag
+        // ends. The draggable ends every drag with Stop or Cancel, also when the
+        // slider is disabled or leaves mid-drag, so this never sticks.
+        val interactionSource = remember { MutableInteractionSource() }
+        val isDragged by interactionSource.collectIsDraggedAsState()
 
         // Echo-prevention — accept programmatic server updates, ignore echoes.
         LaunchedEffect(serverValue) {
+            // The finger owns the value during a drag. Without this, a re-render
+            // (a poll, a timer) moves the thumb away from the finger.
+            if (isDragged) return@LaunchedEffect
             if (abs(serverValue - lastSentValue) > 0.0001f) {
                 value = serverValue
                 lastSentValue = serverValue
@@ -111,6 +121,7 @@ object SliderRenderer {
             valueRange = min..max,
             steps = steps.coerceAtLeast(0),
             colors = colors,
+            interactionSource = interactionSource,
         )
     }
 }

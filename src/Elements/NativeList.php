@@ -4,9 +4,12 @@ namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\ResolvesColorValues;
 
 class NativeList extends Element
 {
+    use ResolvesColorValues;
+
     protected string $type = 'list';
 
     protected array $listProps = [];
@@ -14,6 +17,8 @@ class NativeList extends Element
     protected ?string $refreshCallback = null;
 
     protected ?string $endReachedCallback = null;
+
+    protected ?string $visibleRangeCallback = null;
 
     public static function make(Element ...$children): static
     {
@@ -37,11 +42,27 @@ class NativeList extends Element
         if (! empty($attrs['plain'])) {
             $this->plain();
         }
+        if (! empty($attrs['transparent'])) {
+            $this->transparent();
+        }
+        $rowColor = $attrs['row-color'] ?? $attrs['rowColor'] ?? null;
+        if (is_string($rowColor) && $rowColor !== '') {
+            $this->rowColor($rowColor);
+        }
         if (isset($attrs['on-refresh']) || isset($attrs['onRefresh'])) {
             $this->onRefresh($attrs['on-refresh'] ?? $attrs['onRefresh']);
         }
         if (isset($attrs['on-end-reached']) || isset($attrs['onEndReached'])) {
             $this->onEndReached($attrs['on-end-reached'] ?? $attrs['onEndReached']);
+        }
+        if (isset($attrs['end-reached-buffer']) || isset($attrs['endReachedBuffer'])) {
+            $this->endReachedBuffer((int) ($attrs['end-reached-buffer'] ?? $attrs['endReachedBuffer']));
+        }
+        if (isset($attrs['on-visible-range']) || isset($attrs['onVisibleRange'])) {
+            $this->onVisibleRange($attrs['on-visible-range'] ?? $attrs['onVisibleRange']);
+        }
+        if (isset($attrs['visible-range-step']) || isset($attrs['visibleRangeStep'])) {
+            $this->visibleRangeStep((int) ($attrs['visible-range-step'] ?? $attrs['visibleRangeStep']));
         }
 
         $this->applyA11yAttributes($attrs);
@@ -81,6 +102,35 @@ class NativeList extends Element
         return $this;
     }
 
+    /**
+     * Let the screen behind the list show through. SwiftUI's `List` paints
+     * the system grouped background over whatever the screen draws; a
+     * `bg-*` colour or gradient on the list already replaces it, but a
+     * list that should sit directly on the screen's own background (a
+     * gradient, an image, a background layer) has no colour to declare —
+     * `bg-transparent` packs to the same value as "no colour". Android's
+     * `LazyColumn` draws no background of its own, so this is iOS-only.
+     */
+    public function transparent(bool $value = true): static
+    {
+        $this->listProps['transparent'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Fill every row with one colour: the white cards of an inset-grouped
+     * settings list (iOS Settings) or opaque rows on a plain one. Rows are
+     * otherwise clear, so the screen background shows through them. Takes
+     * a hex value or a theme token (`theme('surface')`).
+     */
+    public function rowColor(string $color): static
+    {
+        $this->listProps['row_color'] = $this->resolveColorValue($color);
+
+        return $this;
+    }
+
     public function onRefresh(string $method): static
     {
         $this->refreshCallback = $method;
@@ -95,6 +145,39 @@ class NativeList extends Element
         return $this;
     }
 
+    public function endReachedBuffer(int $items): static
+    {
+        $this->listProps['end_reached_buffer'] = max(1, $items);
+
+        return $this;
+    }
+
+    /**
+     * Calls $method(int $first, int $last) with the positions of the first and
+     * last rows on screen, counting rows as end-reached does (a section's rows
+     * in its place), each time either end has moved by the step since the last
+     * call. The list doesn't call it before it has moved a step from the top.
+     * Rows are measured while it's set, so a {@see ListPlaceholder} put in a
+     * row's place takes the row's height.
+     */
+    public function onVisibleRange(string $method): static
+    {
+        $this->visibleRangeCallback = $method;
+
+        return $this;
+    }
+
+    /**
+     * How many rows either end of the visible range moves before
+     * {@see onVisibleRange()} is called again. Defaults to 10.
+     */
+    public function visibleRangeStep(int $rows): static
+    {
+        $this->listProps['visible_range_step'] = max(1, $rows);
+
+        return $this;
+    }
+
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->listProps;
@@ -105,6 +188,11 @@ class NativeList extends Element
 
         if ($this->endReachedCallback !== null) {
             $props['on_end_reached'] = $registry->register($this->endReachedCallback);
+        }
+
+        if ($this->visibleRangeCallback !== null) {
+            // The virtual list's "from,to" payload, which dispatch hands the method as two ints.
+            $props['on_visible_range'] = $registry->register($this->visibleRangeCallback, 'virtual_window');
         }
 
         return $props;
