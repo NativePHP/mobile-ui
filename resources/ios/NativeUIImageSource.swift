@@ -13,7 +13,7 @@ import UIKit
 enum NativeUIImageSource {
     /// A file on this device — load it through `NativeUIImageCache`.
     case local(path: String)
-    /// A remote URL — stream through `AsyncImage`.
+    /// A remote URL — stream through `AsyncImage`, via `NativeUIRemoteImage`.
     case remote(url: URL)
     /// Empty, or a string that isn't a usable URL.
     case unresolvable
@@ -358,6 +358,65 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
     }
 }
 
+/// `AsyncImage` that tries again when a download fails. On its own, an
+/// `AsyncImage` whose download fails stays on its failure phase until its
+/// view is rebuilt, so one dropped request or 503 leaves the image blank.
+///
+/// A cancelled download comes back as a failure too, and #157 reports images
+/// left blank that way on screens that re-render while they load. So a
+/// cancelled download starts again straight away and doesn't count as a
+/// failure. Any other failure is tried again after 0.5 s and then 1.5 s.
+/// After that the image stays failed until it next comes on screen. Each try
+/// is a new `AsyncImage`, so a download still stops when its image goes off
+/// screen, and the bytes still go through the shared `URLCache`.
+struct NativeUIRemoteImage<Content: View>: View {
+    // Computed: a generic type can't have a stored static.
+    private static var retryDelays: [Duration] { [.milliseconds(500), .milliseconds(1500)] }
+
+    private let url: URL
+    private let content: (AsyncImagePhase) -> Content
+
+    /// Changed to throw a failed `AsyncImage` away and start a new one.
+    @State private var attempt = 0
+
+    /// Failed tries so far. Back to zero when the URL changes, or when an
+    /// image that has run out of tries goes off screen.
+    @State private var failures = 0
+
+    init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+        self.url = url
+        self.content = content
+    }
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            if case .failure(let error) = phase {
+                if Self.isCancellation(error) {
+                    content(.empty).task { attempt += 1 }
+                } else if failures < Self.retryDelays.count {
+                    content(.empty).task {
+                        try? await Task.sleep(for: Self.retryDelays[failures])
+                        if !Task.isCancelled {
+                            failures += 1
+                            attempt += 1
+                        }
+                    }
+                } else {
+                    content(phase).onDisappear { failures = 0 }
+                }
+            } else {
+                content(phase)
+            }
+        }
+        .id(attempt)
+        .onChange(of: url) { failures = 0 }
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+}
+
 /// Avatar / thumbnail image for list rows: fills its frame, showing
 /// `placeholder` while the image loads and when the source doesn't resolve.
 /// Callers supply their own frame and clip shape.
@@ -383,12 +442,14 @@ struct NativeUIRowImage<Placeholder: View>: View {
                 placeholder()
             }
         case .remote(let url):
-            AsyncImage(url: url) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-            } placeholder: {
-                placeholder()
+            NativeUIRemoteImage(url: url) { phase in
+                if let image = phase.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: contentMode)
+                } else {
+                    placeholder()
+                }
             }
         case .unresolvable:
             placeholder()
