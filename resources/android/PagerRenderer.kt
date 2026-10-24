@@ -132,6 +132,11 @@ object PagerRenderer {
 
         val pagerState = rememberPagerState(initialPage = requestedPage) { pageCount }
 
+        // The pager this one sits in a page of, if any: a page of a page
+        // is only available while every pager around it is settled on its
+        // page (see PagerPageContext).
+        val parentPage = LocalPagerPage.current
+
         // Pages reported to PHP that it has not echoed back yet, oldest
         // first. A `page` prop matching one of these is an echo of our own
         // report, not a programmatic jump.
@@ -218,18 +223,28 @@ object PagerRenderer {
 
             val page: @Composable (Int) -> Unit = { index ->
                 Box(modifier = Modifier.fillMaxSize()) {
-                    val child = pageByIndex[index]
-                    if (child != null && header != null) {
-                        // The page's list draws the header and the tabs (see PagerHeader).
-                        CompositionLocalProvider(LocalPagerHeader provides headerScroll.header(index, header, tabs, pagerState, selectTab, background)) {
+                    // Where the pager is, live, for whatever the page
+                    // contains: the pages beside the one showing stay
+                    // composed, so a page's contents must not act as the
+                    // page showing until the pager settles on it (see
+                    // PagerPageContext). Remembered, so the context survives
+                    // recomposition and its identity only changes when the
+                    // pager or the page around it does.
+                    val pageContext = remember(pagerState, index, parentPage) { PagerPageContext(index, pagerState, parentPage) }
+                    CompositionLocalProvider(LocalPagerPage provides pageContext) {
+                        val child = pageByIndex[index]
+                        if (child != null && header != null) {
+                            // The page's list draws the header and the tabs (see PagerHeader).
+                            CompositionLocalProvider(LocalPagerHeader provides headerScroll.header(index, header, tabs, pagerState, selectTab, background)) {
+                                NodeView(node = child)
+                            }
+                        } else if (child != null) {
                             NodeView(node = child)
+                        } else if (hasMore && index >= count) {
+                            PagerLoadingPage()
+                        } else {
+                            PagerPlaceholder(placeholders.getOrNull(index).orEmpty())
                         }
-                    } else if (child != null) {
-                        NodeView(node = child)
-                    } else if (hasMore && index >= count) {
-                        PagerLoadingPage()
-                    } else {
-                        PagerPlaceholder(placeholders.getOrNull(index).orEmpty())
                     }
                 }
             }
@@ -513,6 +528,52 @@ class PagerHeader internal constructor(
 
 /** The header a page's list draws, if the page is in a pager with one. */
 val LocalPagerHeader = compositionLocalOf<PagerHeader?> { null }
+
+/**
+ * The pager a page is in, for what the page contains to read: which page
+ * this is ([page]) of which pager ([pagerState]), and the same for the
+ * pager around that one, if any ([parent]).
+ *
+ * The pages beside the one showing stay composed
+ * (`beyondViewportPageCount = 1`), so a page can be composed without being
+ * the page showing. A list on such a page publishes a scroll target
+ * (`scroll_target`) that a bottom-tab reselect must not act on until the
+ * pager settles back on that page: PHP names the new page a round trip
+ * after the swipe, and only the pager itself knows where it is in the
+ * meantime. [isAvailable] answers that, read live from the pager's own
+ * state — never from a prop PHP sends, which is exactly what lags.
+ */
+@Stable
+class PagerPageContext(
+    val page: Int,
+    val pagerState: PagerState,
+    val parent: PagerPageContext? = null,
+) {
+    /**
+     * The pager is at rest on this page, and every pager around it is at
+     * rest on its own: no drag and no settle still running, this page both
+     * the nearest one and the one a running gesture targets.
+     *
+     * All three of the pager's own clauses are needed. [PagerState.targetPage]
+     * alone commits as soon as a swipe leans toward a page, so the page
+     * being swiped to would count as available while it is still moving;
+     * [PagerState.currentPage] adds that this page is the nearest one; and
+     * `isScrollInProgress` waits out the whole swipe and settle, so that
+     * neither the page being left nor the one arriving is available
+     * mid-flight — a reselect during that window must find nothing to act
+     * on. Reads are live at whatever moment asks (a tap, a scroll's settle
+     * gate), not at composition time: composition can lag the swipe by a
+     * frame or two, which is precisely the gap this closes.
+     */
+    fun isAvailable(): Boolean =
+        !pagerState.isScrollInProgress &&
+            pagerState.currentPage == page &&
+            pagerState.targetPage == page &&
+            (parent?.isAvailable() ?: true)
+}
+
+/** The page a composable is on, if it is in a pager at all. Null outside one. */
+val LocalPagerPage = compositionLocalOf<PagerPageContext?> { null }
 
 /**
  * How far the header has scrolled, from the page showing, and each page's

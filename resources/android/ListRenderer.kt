@@ -2,6 +2,7 @@ package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
+import com.nativephp.mobile.ui.nativerender.NativeScrollTargetRegistry
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
 import kotlinx.coroutines.delay
@@ -74,6 +76,13 @@ object ListRenderer {
         // Set when this list is a page of a pager with a header, which the
         // list draws above its rows (see PagerHeader).
         val pagerHeader = if (horizontal) null else LocalPagerHeader.current
+        // The key a Tab::onReselect() names to act on this list from a
+        // bottom-tab reselect. Absent by default: nothing registers and
+        // the list behaves exactly as before the seam. See ListScrollTarget.
+        val scrollTarget = node.props.getString("scroll_target", "")
+        if (scrollTarget.isNotEmpty()) {
+            ListScrollTarget(scrollTarget, scrollState, LocalPagerPage.current)
+        }
         // Rows are measured while the list reports its visible range: that's
         // what a list putting placeholders in rows' places goes by.
         val rowHeights = remember { ListRowHeights() }
@@ -271,6 +280,78 @@ object ListRenderer {
 
 /** How long a list waits between reports of its visible range while scrolling. */
 private const val VISIBLE_RANGE_INTERVAL_MS = 150L
+
+/**
+ * Publishes [state] under [key] in the core [NativeScrollTargetRegistry]
+ * while the list that owns it is composed — the list's half of the
+ * bottom-tab reselect scroll seam. A reselect that names [key] scrolls
+ * the list back to its top from native (no PHP round trip), or fires
+ * its refresh method when the list already sits at exact top; see the
+ * registry's docs for the seam. Android only — iOS ignores the prop.
+ *
+ * The effect is keyed on [state] as well as [key]: when a re-keyed or
+ * remounted list gets a fresh `rememberLazyListState`, the entry is
+ * re-registered against the new one, so no entry ever points at a
+ * disposed state. `owner` is a fresh token per composition and the
+ * registry unregisters by identity, so the stale `onDispose` of a
+ * composition a newer one already replaced (a pager page recomposed
+ * under a different list key) can never remove the live entry — only
+ * its own.
+ *
+ * A list on a page of a pager ([page] from [LocalPagerPage]) only
+ * publishes while its page is the one the pager is settled on: the pages
+ * beside the one showing stay composed and would otherwise each answer
+ * the same reselect, and PHP names the new page only a round trip after
+ * the swipe. Two layers keep that true, one at each end of the registry:
+ *
+ * - The map: a list whose page is not the one showing holds no entry at
+ *   all. Nothing registers while `active` is false, the dispose a page
+ *   going away triggers unregisters, and a register under a key replaces
+ *   whatever entry was there (the newest composition wins).
+ * - The read: the registry's `get` consults the live `isAvailable`
+ *   predicate at read time — a bottom-tab tap, or a scroll's settle gate —
+ *   never at composition time, so an entry still present in the map
+ *   during the frame or two between a swipe and this effect applying is
+ *   filtered out all the same. To a caller an absent entry and an
+ *   unavailable one are indistinguishable: both read as nothing to act
+ *   on.
+ *
+ * Keying the effect on [active] also invalidates the entry's identity
+ * when a page goes away and returns: the re-registered entry is a fresh
+ * one, so the core settle gate's identity check cannot match a scroll
+ * that started before the round trip.
+ *
+ * A list outside any pager passes `page = null` and registers exactly as
+ * before the seam: always, with availability that reads true.
+ *
+ * Both orientations register, and "top" is the start of the list: item
+ * 0 at a zero pixel offset, vertically or horizontally.
+ */
+@Composable
+private fun ListScrollTarget(key: String, state: LazyListState, page: PagerPageContext?) {
+    // Read here, in composition, so the pager's page flips are observed
+    // and the effect below restarts when this page stops or starts being
+    // the one showing. The boolean only flips on page changes — never
+    // per frame — so the entry is not churned while the pager rests.
+    val active = page?.isAvailable() ?: true
+    val owner = remember { Any() }
+    // `page` is keyed too: the context is remembered per pager and page,
+    // so its identity only changes when the pager or the pager around it
+    // does — without the key the registered predicate could go on reading
+    // a context from a pager that has been replaced.
+    DisposableEffect(key, state, page, active) {
+        if (active) {
+            NativeScrollTargetRegistry.register(
+                key = key,
+                owner = owner,
+                isAtTop = { state.firstVisibleItemIndex == 0 && state.firstVisibleItemScrollOffset == 0 },
+                scrollToTop = { state.animateScrollToItem(0) },
+                isAvailable = { page?.isAvailable() ?: true },
+            )
+        }
+        onDispose { NativeScrollTargetRegistry.unregister(key, owner) }
+    }
+}
 
 /**
  * The height each row of a list last drew at, in pixels, by node id. A
