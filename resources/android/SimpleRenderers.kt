@@ -26,12 +26,24 @@ object SpacerRenderer {
 object DividerRenderer {
     @Composable
     fun Render(node: NativeUINode, modifier: Modifier) {
-        val borderArgb = node.style?.borderColor ?: 0
-        // no border colour → the theme's hairline
-        // (`outline-variant`), which dims in dark mode like iOS's separator.
-        // The vendor's fixed #E0E0E0 drew a white line on dark surfaces.
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
-        val color = if (borderArgb != 0) argbToComposeColor(borderArgb) else theme.outlineVariant
+        val isDark = isSystemInDarkTheme()
+        // `border-*` colours the rule (`dark:border-*` in dark mode). Without
+        // one, a `bg-*` colour is the rule: the node modifier already paints
+        // the background (and its `dark:bg-*` variant) under the divider, so
+        // the line stays transparent instead of covering it.
+        // Neither → the theme's hairline (`outline-variant`), which dims in
+        // dark mode like iOS's separator. The vendor's fixed #E0E0E0 drew a
+        // white line on dark surfaces.
+        val darkBorder = if (isDark) node.props.getColor("dark_border_color", 0) else 0
+        val borderArgb = if (darkBorder != 0) darkBorder else (node.style?.borderColor ?: 0)
+        val darkBg = if (isDark) node.props.getColor("dark_bg_color", 0) else 0
+        val hasBackground = darkBg != 0 || (node.style?.bgColor ?: 0) != 0
+        val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
+        val color = when {
+            borderArgb != 0 -> argbToComposeColor(borderArgb)
+            hasBackground -> Color.Transparent
+            else -> theme.outlineVariant
+        }
         HorizontalDivider(modifier = modifier, color = color)
     }
 }
