@@ -53,7 +53,7 @@ jobs:
       # which 4.6.0 doesn't accept. It turns green once ^4.7 is required.
       - name: Install nativephp/mobile
         env:
-          MOBILE: ${{ inputs.mobile || 'dev-main' }}
+          MOBILE: ${{ inputs.mobile }}
         run: |
           if [ -n "$MOBILE" ]; then
             composer require "nativephp/mobile:$MOBILE" --no-update --no-interaction
