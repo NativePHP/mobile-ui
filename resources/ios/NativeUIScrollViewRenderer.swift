@@ -460,34 +460,6 @@ struct NativeUIScrollViewRenderer: View {
     }
 }
 
-/// backport of https://github.com/NativePHP/mobile-ui/pull/77
-/// A `ScrollView` is laid out inside the safe area, so its background stops
-/// short of the home indicator and the window color shows through as a band
-/// behind the tab bar. `List` doesn't have the problem because it uses
-/// `.scrollContentBackground(.hidden).background(...)` and extends through
-/// the inset. Text content still sits inside the safe area — only the
-/// background reaches edge-to-edge, and only when the scroll view actually
-/// declared a background color.
-///
-/// Not `private`: NativeUIRefreshableRenderer applies the same modifier.
-struct ScrollViewBackgroundModifier: ViewModifier {
-    let node: NativeUINode
-    @Environment(\.colorScheme) private var colorScheme
-
-    func body(content: Content) -> some View {
-        let darkBg = colorScheme == .dark ? node.props.getColor("dark_bg_color", default: 0) : 0
-        let argb = darkBg != 0 ? darkBg : (node.style?.bgColor ?? 0)
-
-        if argb != 0 {
-            content
-                .scrollContentBackground(.hidden)
-                .background(Color(argb: argb).ignoresSafeArea())
-        } else {
-            content
-        }
-    }
-}
-
 /// Where a bottom-anchored scroll view is: its offset, and whether that's at
 /// the bottom of its content.
 private struct BottomProbe: Equatable {
@@ -539,7 +511,9 @@ extension EnvironmentValues {
 /// Give the scroll view the same reach — but only when the node actually
 /// declares a background, so a screen that never asked for one is untouched
 /// and keeps the system default.
-private struct ScrollViewBackgroundModifier: ViewModifier {
+///
+/// Not `private`: NativeUIRefreshableRenderer applies the same modifier.
+struct ScrollViewBackgroundModifier: ViewModifier {
     let node: NativeUINode
     @Environment(\.colorScheme) private var colorScheme
 
