@@ -58,12 +58,19 @@ struct NativeUITextRenderer: View {
             let styledText: Text = {
                 var t = Text(text)
                 if isItalic { t = t.italic() }
-                if isUnderline { t = t.underline() }
-                if isStrikethrough { t = t.strikethrough() }
+                // In the text colour explicitly, because outlined text (below)
+                // draws its glyphs see-through.
+                if isUnderline { t = t.underline(color: Color(argb: color)) }
+                if isStrikethrough { t = t.strikethrough(color: Color(argb: color)) }
                 if letterSpacingEm != 0, #available(iOS 16.0, *) {
                     t = t.kerning(CGFloat(letterSpacingEm) * CGFloat(fontSize))
                 }
                 if outlineWidth > 0, #available(iOS 18.0, *) {
+                    // NUIOutlineTextRenderer strokes the glyphs over the Text
+                    // drawn with see-through glyphs, so any underline or
+                    // strikethrough stays solid, as on Android.
+                    t = t.foregroundStyle(Color.clear)
+
                     // A single-style custom font's italic is a skew of the
                     // whole view (nuiScaledFont), which slants the outline too.
                     let name = effectiveFontName(fontName, family: p.getInt("font_family"))
@@ -232,10 +239,19 @@ struct NativeUITextRenderer: View {
 
         let ownText = p.getString("text")
         if !ownText.isEmpty {
-            let run = makeRun(ownText, node: node, ctx: ctx)
+            var run = makeRun(ownText, node: node, ctx: ctx)
 
             if ctx.outlineWidth > 0 {
                 let fg = (colorScheme == .dark && ctx.darkColorArgb != 0) ? ctx.darkColorArgb : ctx.colorArgb
+                if #available(iOS 18.0, *) {
+                    // As in the leaf path: see-through glyphs under the
+                    // stroke, so the background chip, underline and
+                    // strikethrough stay solid, as on Android.
+                    run.foregroundColor = Color.clear
+                    if p.getInt("underline") == 1 { run.underlineStyle = Text.LineStyle(color: Color(argb: fg)) }
+                    if p.getInt("line_through") == 1 { run.strikethroughStyle = Text.LineStyle(color: Color(argb: fg)) }
+                }
+
                 let outline = NUITextOutline(
                     width: CGFloat(ctx.outlineWidth),
                     color: Color(argb: fg),
@@ -480,6 +496,11 @@ struct NUIOutlineTextRenderer: TextRenderer {
                     continue
                 }
 
+                // The run's glyphs are see-through, so this draws just its
+                // background, underline and strikethrough. The stroke goes on
+                // top.
+                ctx.draw(run)
+
                 let glyphs = glyphSets[outline] ?? OutlineGlyphs(outline)
                 glyphSets[outline] = glyphs
                 stroke(run, outline: outline, glyphs: glyphs, start: start, in: &ctx)
@@ -492,14 +513,17 @@ struct NUIOutlineTextRenderer: TextRenderer {
 
         for slice in run {
             guard let index = slice.characterIndices.min(),
-                  let glyph = glyphs[glyphs.first + start.distance(to: index)],
-                  let shape = glyph.path(ascent: run.typographicBounds.ascent, at: slice.typographicBounds.origin) else {
-                // No outline to draw (an emoji, say): draw the glyph as it is.
-                ctx.draw(slice)
-                continue
-            }
+                  let glyph = glyphs[glyphs.first + start.distance(to: index)] else { continue }
 
-            path.addPath(shape)
+            let font = glyph.font(ascent: run.typographicBounds.ascent)
+            let origin = slice.typographicBounds.origin
+            if let shape = glyph.path(in: font, at: origin) {
+                path.addPath(shape)
+            } else {
+                // No outline to stroke (an emoji, say): draw the glyph itself,
+                // since see-through text hides it too.
+                glyph.draw(in: font, at: origin, in: ctx)
+            }
         }
 
         ctx.stroke(
@@ -518,17 +542,32 @@ private struct OutlineGlyphs {
         var id: CGGlyph
         var font: CTFont
 
-        /// The glyph's path at the run's size, on the baseline at `origin`.
-        /// SwiftUI may have sized the font for Dynamic Type, so the size
-        /// comes from the run's ascent. Glyphs can be built from overlapping
-        /// shapes (SF's are), which a stroke would show inside the letter, so
-        /// the overlaps are merged away first.
-        func path(ascent: CGFloat, at origin: CGPoint) -> CGPath? {
+        /// `font` at the run's size. SwiftUI may have sized it for Dynamic
+        /// Type, so the size comes from the run's ascent.
+        func font(ascent: CGFloat) -> CTFont {
             let scale = ascent / CTFontGetAscent(font)
-            let sized = abs(scale - 1) < 0.001 ? font : CTFontCreateCopyWithAttributes(font, CTFontGetSize(font) * scale, nil, nil)
+
+            return abs(scale - 1) < 0.001 ? font : CTFontCreateCopyWithAttributes(font, CTFontGetSize(font) * scale, nil, nil)
+        }
+
+        /// The glyph's path on the baseline at `origin`, or nil when it has
+        /// none (spaces, emoji). Glyphs can be built from overlapping shapes
+        /// (SF's are), which a stroke would show inside the letter, so the
+        /// overlaps are merged away first.
+        func path(in font: CTFont, at origin: CGPoint) -> CGPath? {
             var placement = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: origin.x, ty: origin.y)
 
-            return CTFontCreatePathForGlyph(sized, id, &placement)?.normalized()
+            return CTFontCreatePathForGlyph(font, id, &placement)?.normalized()
+        }
+
+        func draw(in font: CTFont, at origin: CGPoint, in ctx: GraphicsContext) {
+            ctx.withCGContext { cg in
+                cg.translateBy(x: origin.x, y: origin.y)
+                cg.scaleBy(x: 1, y: -1)
+                var glyph = id
+                var position = CGPoint.zero
+                CTFontDrawGlyphs(font, &glyph, &position, 1, cg)
+            }
         }
     }
 
