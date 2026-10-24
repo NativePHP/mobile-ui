@@ -42,12 +42,12 @@ struct NativeUIButtonGroupRenderer: View {
         )
     }
 
-    /// The app font when one is set, else the system font, medium like the
-    /// rest of the plugin's controls.
+    /// The app font's medium face when one is set, else the system font at
+    /// medium, like the rest of the plugin's controls.
     private static func labelFont(family: String, size: CGFloat) -> UIFont {
         let scaled = UIFontMetrics(forTextStyle: .body).scaledValue(for: size)
         if family != "System", !family.isEmpty,
-           let name = NativeUIFontResolver.postScriptName(for: family),
+           let name = NativeUIFontResolver.postScriptName(for: family, weight: .medium),
            let custom = UIFont(name: name, size: scaled) {
             return custom
         }

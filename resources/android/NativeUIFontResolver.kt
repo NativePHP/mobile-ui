@@ -2,15 +2,20 @@ package com.nativephp.plugins.native_ui.ui
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.os.Build
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.nativephp.plugins.native_ui.NativeUITheme
+import java.io.DataInputStream
+import java.io.EOFException
+import java.io.InputStream
 
 // Tailwind `leading`: line_height_px is an absolute sp target; line_height is a
 // unitless multiplier of the font size. Unspecified leaves Compose's default.
@@ -124,20 +129,21 @@ object NativeUIFontResolver {
     }
 
     private fun build(assets: AssetManager, token: String): FontFamily? {
-        for (ext in extensions) {
-            val path = "fonts/$token.$ext"
-            if (!assetExists(assets, path)) {
-                continue
-            }
+        val path = assetPath(assets, token) ?: return buildWeighted(assets, token)
 
-            return try {
-                FontFamily(Font(path = path, assetManager = assets))
-            } catch (e: Exception) {
-                null
+        // A family's Regular file follows `font-*` weights like a bare family
+        // name does: its bundled siblings join it ("Inter-Regular" +
+        // `font-bold` draws Inter-Bold, not a faked bold). Any other face
+        // ("Inter-Bold") names its weight and stays a single file.
+        if (token.endsWith("-Regular")) {
+            val siblings = weightedFonts(assets, token.removeSuffix("-Regular"))
+            if (siblings.size > 1) {
+                return fontFamilyOf(siblings.map { (siblingPath, weight) -> Font(path = siblingPath, assetManager = assets, weight = weight) })
             }
         }
 
-        return buildWeighted(assets, token)
+        return variableFamily(assets, path)
+            ?: fontFamilyOf(listOf(Font(path = path, assetManager = assets)))
     }
 
     /**
@@ -147,19 +153,65 @@ object NativeUIFontResolver {
      * faking bold from a single regular file.
      */
     private fun buildWeighted(assets: AssetManager, family: String): FontFamily? {
-        val fonts = weightSuffixes.flatMap { (suffix, weight) ->
-            extensions.mapNotNull { ext ->
-                val path = "fonts/$family-$suffix.$ext"
-                if (assetExists(assets, path)) Font(path = path, assetManager = assets, weight = weight) else null
-            }.take(1)
+        val fonts = weightedFonts(assets, family)
+        if (fonts.isEmpty()) {
+            return null
         }
 
-        return if (fonts.isEmpty()) null else try {
-            FontFamily(fonts)
+        if (fonts.size == 1) {
+            variableFamily(assets, fonts[0].first)?.let { return it }
+        }
+
+        return fontFamilyOf(fonts.map { (path, weight) -> Font(path = path, assetManager = assets, weight = weight) })
+    }
+
+    /** Bundled `<family>-<Weight>` files, lightest first. */
+    private fun weightedFonts(assets: AssetManager, family: String): List<Pair<String, FontWeight>> =
+        weightSuffixes.mapNotNull { (suffix, weight) ->
+            assetPath(assets, "$family-$suffix")?.let { it to weight }
+        }
+
+    /**
+     * A variable font (one file with a `wght` axis) as one face per weight,
+     * each drawn at that point on the axis — so `font-*` classes move along
+     * the axis instead of Compose faking bold from the default instance.
+     * Regular keeps the font's own default instance, like iOS.
+     */
+    private fun variableFamily(assets: AssetManager, path: String): FontFamily? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return null
+        }
+
+        val axis = try {
+            assets.open(path).use { readWeightAxis(it) }
         } catch (e: Exception) {
             null
-        }
+        } ?: return null
+
+        return fontFamilyOf((1..9).map { step ->
+            val weight = FontWeight(step * 100)
+            if (weight == FontWeight.Normal) {
+                Font(path = path, assetManager = assets, weight = weight)
+            } else {
+                val value = (step * 100f).coerceIn(axis.start, axis.endInclusive)
+                Font(
+                    path = path,
+                    assetManager = assets,
+                    weight = weight,
+                    variationSettings = FontVariation.Settings(FontVariation.weight(value.toInt())),
+                )
+            }
+        })
     }
+
+    private fun fontFamilyOf(fonts: List<Font>): FontFamily? = try {
+        FontFamily(fonts)
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun assetPath(assets: AssetManager, token: String): String? =
+        extensions.map { "fonts/$token.$it" }.firstOrNull { assetExists(assets, it) }
 
     private val weightSuffixes = listOf(
         "Thin" to FontWeight.Thin,
@@ -182,3 +234,81 @@ object NativeUIFontResolver {
         }
     }
 }
+
+/**
+ * The `wght` axis range of a variable font, or null for a static font (no
+ * `fvar` table), a collection (`.ttc`), or a font without a weight axis.
+ * Reads only the sfnt table directory and the `fvar` axis records.
+ */
+internal fun readWeightAxis(input: InputStream): ClosedFloatingPointRange<Float>? {
+    val data = DataInputStream(input.buffered())
+    try {
+        if (data.readInt() == TAG_TTCF) {
+            return null
+        }
+
+        val numTables = data.readUnsignedShort()
+        data.skipFully(6)
+
+        var fvarOffset = -1L
+        repeat(numTables) {
+            val tag = data.readInt()
+            data.skipFully(4)
+            val offset = data.readInt().toLong() and 0xFFFFFFFFL
+            data.skipFully(4)
+            if (tag == TAG_FVAR) {
+                fvarOffset = offset
+            }
+        }
+
+        val directoryEnd = 12L + 16L * numTables
+        if (fvarOffset < directoryEnd) {
+            return null
+        }
+        data.skipFully(fvarOffset - directoryEnd)
+
+        data.skipFully(4) // major + minor version
+        val axesArrayOffset = data.readUnsignedShort()
+        data.skipFully(2) // reserved
+        val axisCount = data.readUnsignedShort()
+        val axisSize = data.readUnsignedShort()
+        if (axesArrayOffset < 12 || axisSize < 16) {
+            return null
+        }
+        data.skipFully(axesArrayOffset - 12L)
+
+        repeat(axisCount) {
+            val tag = data.readInt()
+            val min = data.readInt() / 65536f
+            data.skipFully(4) // default
+            val max = data.readInt() / 65536f
+            data.skipFully(axisSize - 16L)
+            if (tag == TAG_WGHT && min <= max) {
+                return min..max
+            }
+        }
+    } catch (e: EOFException) {
+        return null
+    }
+
+    return null
+}
+
+private const val TAG_TTCF = 0x74746366 // 'ttcf'
+private const val TAG_FVAR = 0x66766172 // 'fvar'
+private const val TAG_WGHT = 0x77676874 // 'wght'
+
+private fun DataInputStream.skipFully(count: Long) {
+    var remaining = count
+    while (remaining > 0) {
+        val skipped = skip(remaining)
+        if (skipped <= 0) {
+            if (read() < 0) throw EOFException()
+            remaining--
+        } else {
+            remaining -= skipped
+        }
+    }
+}
+
+private fun DataInputStream.skipFully(count: Int) = skipFully(count.toLong())

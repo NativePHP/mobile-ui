@@ -213,8 +213,10 @@ struct NativeUITextRenderer: View {
 
         var font: Font
         if !runFontName.isEmpty,
-           let custom = NativeUIFontResolver.font(runFontName, size: CGFloat(ctx.fontSize), italic: ctx.italic) {
-            font = custom.weight(runWeight)
+           let custom = NativeUIFontResolver.font(runFontName, size: CGFloat(ctx.fontSize), italic: ctx.italic, weight: runWeight) {
+            // The resolver already picked the face for `runWeight`; chaining
+            // `.weight()` would drop a static custom face for the system font.
+            font = custom
         } else {
             font = Font.system(
                 size: CGFloat(ctx.fontSize),
