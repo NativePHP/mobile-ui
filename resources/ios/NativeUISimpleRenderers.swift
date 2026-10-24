@@ -158,7 +158,7 @@ struct NativeUIImageRenderer: View {
         case .local(let path):
             // Local device file — camera capture, gallery selection, or an
             // asset shipped in the app's `public/` directory.
-            // `AsyncImage`/`URLSession` can't load `file://` or bare
+            // `URLSession` can't load `file://` or bare
             // filesystem paths, so decode with UIImage (cached, off the main
             // thread, at the size it's drawn, and HEIC/HEIF handled
             // transparently — UIImage decodes them natively). Until it
@@ -171,18 +171,18 @@ struct NativeUIImageRenderer: View {
                 Color.clear
             }
         case .remote(let url):
-            // Remote URL (http/https) — load asynchronously.
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    tinted(image, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
-                case .failure:
+            // Remote URL (http/https) — downloaded through
+            // NativeUIRemoteImageCache, so a re-render mid-download doesn't
+            // lose the image and a failed download is tried again. A spinner
+            // until it arrives, nothing if it can't.
+            NativeUIRemoteImage(url: url) { uiImage in
+                tinted(Image(uiImage: uiImage), fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+            } placeholder: { failed in
+                if failed {
                     Color.clear
-                case .empty:
+                } else {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                @unknown default:
-                    Color.clear
                 }
             }
         case .unresolvable:

@@ -352,9 +352,9 @@ private struct PagerBody: View {
     @ViewBuilder
     private func placeholder(_ index: Int) -> some View {
         if index < placeholders.count, !placeholders[index].isEmpty, let url = URL(string: placeholders[index]) {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
+            NativeUIRemoteImage(url: url) { uiImage in
+                Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fill)
+            } placeholder: { _ in
                 Color.clear
             }
             .accessibilityHidden(true)
