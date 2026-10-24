@@ -1,22 +1,37 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
 import com.nativephp.mobile.ui.nativerender.SharedValueStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
@@ -60,6 +75,16 @@ import kotlin.math.abs
  *                                TEXT_CHANGE format).
  *   - `swipe-fingers`  (int)   — touches required for the swipe
  *                                (default 1; Jump-style is 3).
+ *   - `bounded`        (bool)  — keep the zoomed content inside the
+ *                                area (see PanBounds): pan stops at the
+ *                                content's edges, an axis the content
+ *                                fits on stays centred, a drag past an
+ *                                edge meets resistance, and the content
+ *                                springs back into place on release. A
+ *                                pinch zooms around the fingers.
+ *   - `content-ratio`  (float) — the content's width over height,
+ *                                fitted inside the area, for `bounded`
+ *                                (0 = the content fills the area).
  *
  * Per-frame value updates happen on the Compose render thread; PHP is
  * only involved on the discrete events.
@@ -80,6 +105,18 @@ object GestureAreaRenderer {
         val onSwipe = node.props.getInt("on_swipe", 0)
         val swipeFingers = node.props.getInt("swipe-fingers", 1)
 
+        // `bounded` only: the area's size in dp (pan values are dp), and the
+        // two-finger state and spring back the drag and pinch share.
+        val density = LocalDensity.current
+        var areaSize by remember { mutableStateOf(Size.Zero) }
+        val bounds = PanBounds(
+            enabled = node.props.getBool("bounded"),
+            area = areaSize,
+            contentRatio = node.props.getFloat("content-ratio", 0f),
+        )
+        val scope = rememberCoroutineScope()
+        val settle = remember { BoundedPan() }
+
         // Seed during COMPOSITION (inline, before children compose) rather
         // than in a LaunchedEffect: effects run after children have
         // composed, and a child's `evaluate()` read materializes the store
@@ -99,8 +136,50 @@ object GestureAreaRenderer {
         Box(
             modifier = modifier
                 .nuiA11y(node.props.getString("a11y_label"), node.props.getString("a11y_hint"))
-                .pointerInput(panXId, panYId, onDragEnd) {
+                .onSizeChanged { size ->
+                    areaSize = with(density) { Size(size.width.toDp().value, size.height.toDp().value) }
+                }
+                .pointerInput(panXId, panYId, onDragEnd, bounds) {
                     if (panXId == 0 && panYId == 0 && onDragEnd == 0) return@pointerInput
+                    if (bounds.enabled) {
+                        // The undamped pan the finger asked for, and what was
+                        // last written, per axis: a pinch or the spring back
+                        // moving the pan between steps is picked up again.
+                        var rawX = 0f
+                        var rawY = 0f
+                        var writtenX = 0f
+                        var writtenY = 0f
+                        detectDragGestures(
+                            onDragEnd = {
+                                val (x, y) = settle.into(bounds, scope, panXId, panYId, pinchId)
+                                if (onDragEnd != 0) {
+                                    NativeUIBridge.sendTextChangeEvent(onDragEnd, node.id, "$x,$y")
+                                }
+                            },
+                            onDragCancel = { settle.into(bounds, scope, panXId, panYId, pinchId) },
+                        ) { _, dragAmount ->
+                            // Two fingers down: the pinch moves the pan with
+                            // both of them, so the first finger alone mustn't.
+                            if (settle.pinching) return@detectDragGestures
+                            settle.stop()
+                            val scale = if (pinchId != 0) SharedValueStore.valueOf(pinchId) else 1f
+                            if (panXId != 0) {
+                                val current = SharedValueStore.valueOf(panXId)
+                                if (current != writtenX) rawX = current
+                                rawX += dragAmount.x.toDp().value
+                                writtenX = bounds.resisted(rawX, horizontal = true, scale = scale)
+                                SharedValueStore.set(panXId, writtenX)
+                            }
+                            if (panYId != 0) {
+                                val current = SharedValueStore.valueOf(panYId)
+                                if (current != writtenY) rawY = current
+                                rawY += dragAmount.y.toDp().value
+                                writtenY = bounds.resisted(rawY, horizontal = false, scale = scale)
+                                SharedValueStore.set(panYId, writtenY)
+                            }
+                        }
+                        return@pointerInput
+                    }
                     // Raw gesture translation for this drag, in dp — what
                     // `on_drag_end` reports for an axis with no SharedValue.
                     var gestureX = 0f
@@ -155,7 +234,7 @@ object GestureAreaRenderer {
                         ) { _, dragAmount -> onDrag(dragAmount, dragAmount) }
                     }
                 }
-                .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax) {
+                .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax, bounds) {
                     if (pinchId == 0 && onPinchEnd == 0) return@pointerInput
                     awaitEachGesture {
                         // The zoom factor is dimensionless — no px/dp
@@ -167,12 +246,15 @@ object GestureAreaRenderer {
                         // reversals respond on the first frame.
                         var scale = if (pinchId != 0) SharedValueStore.valueOf(pinchId) else 1f
                         var zoomed = false
+                        var moved = false
                         awaitFirstDown(requireUnconsumed = false)
                         var pressed = true
                         while (pressed) {
                             val event = awaitPointerEvent()
-                            if (event.changes.count { it.pressed } >= 2) {
+                            val fingers = event.changes.count { it.pressed }
+                            if (fingers >= 2) {
                                 val zoom = event.calculateZoom()
+                                val previous = scale
                                 if (zoom != 1f) {
                                     zoomed = true
                                     scale *= zoom
@@ -182,8 +264,42 @@ object GestureAreaRenderer {
                                         SharedValueStore.set(pinchId, scale)
                                     }
                                 }
+                                if (bounds.enabled && pinchId != 0 && previous > 0f) {
+                                    settle.pinching = true
+                                    settle.stop()
+                                    // Zoom around the fingers and move with them:
+                                    // a point at c from the centre maps to
+                                    // scale * p + pan, so keeping the point that
+                                    // was under the fingers' last centre (c - its
+                                    // move) under the new one gives
+                                    // pan' = c - r * (c - move - pan).
+                                    val applied = scale / previous
+                                    val centroid = event.calculateCentroid(useCurrent = true)
+                                    val move = event.calculatePan()
+                                    if (centroid != Offset.Unspecified) {
+                                        if (move != Offset.Zero) moved = true
+                                        val cx = centroid.x.toDp().value - bounds.area.width / 2
+                                        val cy = centroid.y.toDp().value - bounds.area.height / 2
+                                        val lastX = cx - move.x.toDp().value
+                                        val lastY = cy - move.y.toDp().value
+                                        if (panXId != 0) {
+                                            val pan = SharedValueStore.valueOf(panXId)
+                                            SharedValueStore.set(panXId, cx - applied * (lastX - pan))
+                                        }
+                                        if (panYId != 0) {
+                                            val pan = SharedValueStore.valueOf(panYId)
+                                            SharedValueStore.set(panYId, cy - applied * (lastY - pan))
+                                        }
+                                    }
+                                }
+                            } else {
+                                settle.pinching = false
                             }
                             pressed = event.changes.any { it.pressed }
+                        }
+                        settle.pinching = false
+                        if ((zoomed || moved) && bounds.enabled) {
+                            settle.into(bounds, scope, panXId, panYId, pinchId)
                         }
                         if (zoomed && onPinchEnd != 0) {
                             NativeUIBridge.sendSliderChangeEvent(onPinchEnd, node.id, scale)
@@ -267,5 +383,100 @@ object GestureAreaRenderer {
 
     private class BindingHolder {
         var pair: Pair<Int, Float>? = null
+    }
+
+    /**
+     * Where `bounded` lets the pan go, in dp. The content is the area, or
+     * `content-ratio` fitted inside it (where `fit="contain"` draws an
+     * image). Zoomed by `scale` about the centre, it may move until its
+     * edges meet the area's: `(scale * content - area) / 2` each way, or
+     * not at all on an axis it fits on, which keeps it centred there.
+     */
+    private data class PanBounds(val enabled: Boolean, val area: Size, val contentRatio: Float) {
+        private val content: Size
+            get() {
+                if (contentRatio <= 0f || area.width <= 0f || area.height <= 0f) return area
+                return if (area.width / area.height > contentRatio) {
+                    Size(area.height * contentRatio, area.height)
+                } else {
+                    Size(area.width, area.width / contentRatio)
+                }
+            }
+
+        fun limit(horizontal: Boolean, scale: Float): Float {
+            val content = content
+            return if (horizontal) {
+                maxOf(0f, (scale * content.width - area.width) / 2)
+            } else {
+                maxOf(0f, (scale * content.height - area.height) / 2)
+            }
+        }
+
+        /** Where a pan comes to rest: inside the limit. */
+        fun settled(pan: Float, horizontal: Boolean, scale: Float): Float {
+            if (!enabled) return pan
+            val limit = limit(horizontal, scale)
+            return pan.coerceIn(-limit, limit)
+        }
+
+        /**
+         * What the finger's undamped pan shows: itself inside the limit,
+         * and past it an overshoot that grows ever slower, never more than
+         * the area's own size (iOS's rubber band, so both feel the same).
+         */
+        fun resisted(pan: Float, horizontal: Boolean, scale: Float): Float {
+            val limit = limit(horizontal, scale)
+            val overshoot = abs(pan) - limit
+            if (overshoot <= 0f) return pan
+            val extent = maxOf(1f, if (horizontal) area.width else area.height)
+            val damped = (1 - 1 / (overshoot * 0.55f / extent + 1)) * extent
+            return (if (pan < 0) -1 else 1) * (limit + damped)
+        }
+    }
+
+    /**
+     * What a bounded area's drag and pinch share: whether two fingers are
+     * down (the pinch then moves the pan, not the drag), and the spring
+     * back inside the bounds.
+     */
+    private class BoundedPan {
+        var pinching = false
+
+        private var job: Job? = null
+
+        fun stop() {
+            job?.cancel()
+            job = null
+        }
+
+        /**
+         * Moves each bound axis back inside the bounds at the current zoom,
+         * and returns where they'll rest (x, y) for `on_drag_end`.
+         */
+        fun into(bounds: PanBounds, scope: CoroutineScope, panXId: Int, panYId: Int, pinchId: Int): Pair<Float, Float> {
+            stop()
+            val scale = if (pinchId != 0) SharedValueStore.valueOf(pinchId) else 1f
+            val moves = listOf(panXId to true, panYId to false)
+                .filter { (id, _) -> id != 0 }
+                .map { (id, horizontal) ->
+                    val from = SharedValueStore.valueOf(id)
+                    Triple(id, from, bounds.settled(from, horizontal, scale))
+                }
+            if (moves.any { (_, from, to) -> abs(to - from) > 0.01f }) {
+                job = scope.launch {
+                    animate(0f, 1f, animationSpec = tween(350, easing = EaseOutCubic)) { progress, _ ->
+                        moves.forEach { (id, from, to) -> SharedValueStore.set(id, from + (to - from) * progress) }
+                    }
+                }
+            }
+            val x = moves.firstOrNull { it.first == panXId }?.third ?: 0f
+            val y = moves.firstOrNull { it.first == panYId }?.third ?: 0f
+            return x to y
+        }
+
+        private companion object {
+            /** Fast away from the edge, slowing into place. */
+            val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
+        }
     }
 }
