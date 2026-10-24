@@ -434,13 +434,13 @@ abstract class BaseTextInput extends Element
      * on iOS and the IME action on Android.
      *
      * Leave it unset and each platform keeps its current default (iOS shows
-     * Done when `@submit` is wired, Return otherwise; Android leaves the IME
-     * action to the platform). The label is purely cosmetic — pressing the
+     * Done when `@submit` is wired, Return otherwise; Android shows Done on a
+     * single-line field). The label is purely cosmetic — pressing the
      * key still fires `@submit` and commits per `sync_mode`, whatever face
      * it shows.
      *
      * "return" is iOS vocabulary (a plain Return key); Android has no exact
-     * equivalent and renders its IME default for it.
+     * equivalent and shows Done for it.
      *
      * IGNORED on a `multiline()` field natively, on both platforms: there
      * the return key must keep inserting newlines, and a non-return submit
