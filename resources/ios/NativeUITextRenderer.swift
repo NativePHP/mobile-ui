@@ -64,7 +64,17 @@ struct NativeUITextRenderer: View {
                     t = t.kerning(CGFloat(letterSpacingEm) * CGFloat(fontSize))
                 }
                 if outlineWidth > 0, #available(iOS 18.0, *) {
-                    t = t.customAttribute(NUITextOutline(width: outlineWidth))
+                    // A single-style custom font's italic is a skew of the
+                    // whole view (nuiScaledFont), which slants the outline too.
+                    let name = effectiveFontName(fontName, family: p.getInt("font_family"))
+                    let italic = isItalic && (name.isEmpty || !NativeUIFontResolver.needsSyntheticOblique(name))
+                    t = t.customAttribute(NUITextOutline(
+                        width: outlineWidth,
+                        color: Color(argb: color),
+                        text: text,
+                        font: outlineFont(name: name, size: fontSize, weight: p.getInt("font_weight"), family: p.getInt("font_family"), italic: italic),
+                        kern: CGFloat(letterSpacingEm) * CGFloat(fontSize)
+                    ))
                 }
                 return t
             }()
@@ -123,11 +133,10 @@ struct NativeUITextRenderer: View {
         )
     }
 
-    /// A stretch of the composed string whose runs share an outline width
-    /// (0 = drawn filled, as usual).
+    /// A stretch of the composed string: filled runs, or one outlined run.
     private struct ComposedStretch {
         var text = AttributedString()
-        var outlineWidth: CGFloat = 0
+        var outline: NUITextOutline?
     }
 
     @ViewBuilder
@@ -135,7 +144,7 @@ struct NativeUITextRenderer: View {
         let p = node.props
         let maxLines = p.getInt("max_lines")
         let stretches = buildComposed()
-        let outlineWidth = stretches.map(\.outlineWidth).max() ?? 0
+        let outlineWidth = stretches.compactMap(\.outline?.width).max() ?? 0
         // Leading applies uniformly to the whole composed string; base it on
         // the node's own font size (the root run's size).
         let lineSpacingValue = NativeUIFontResolver.lineSpacing(
@@ -185,14 +194,12 @@ struct NativeUITextRenderer: View {
     /// NUIOutlineTextRenderer, which only reads a Text attribute, so then the
     /// stretches join as Texts instead.
     private func composedText(_ stretches: [ComposedStretch]) -> Text {
-        guard #available(iOS 18.0, *), stretches.contains(where: { $0.outlineWidth > 0 }) else {
+        guard #available(iOS 18.0, *), stretches.contains(where: { $0.outline != nil }) else {
             return Text(stretches.reduce(into: AttributedString()) { $0 += $1.text })
         }
 
         return stretches.reduce(Text(verbatim: "")) { composed, stretch in
-            let piece = stretch.outlineWidth > 0
-                ? Text(stretch.text).customAttribute(NUITextOutline(width: stretch.outlineWidth))
-                : Text(stretch.text)
+            let piece = stretch.outline.map { Text(stretch.text).customAttribute($0) } ?? Text(stretch.text)
 
             return Text("\(composed)\(piece)")
         }
@@ -226,12 +233,25 @@ struct NativeUITextRenderer: View {
         let ownText = p.getString("text")
         if !ownText.isEmpty {
             let run = makeRun(ownText, node: node, ctx: ctx)
-            let outlineWidth = CGFloat(max(ctx.outlineWidth, 0))
 
-            if result.last?.outlineWidth == outlineWidth {
-                result[result.count - 1].text += run
+            if ctx.outlineWidth > 0 {
+                let fg = (colorScheme == .dark && ctx.darkColorArgb != 0) ? ctx.darkColorArgb : ctx.colorArgb
+                let outline = NUITextOutline(
+                    width: CGFloat(ctx.outlineWidth),
+                    color: Color(argb: fg),
+                    text: String(run.characters),
+                    font: outlineFont(
+                        name: effectiveFontName(ctx.fontName, family: ctx.fontFamilyInt),
+                        size: ctx.fontSize, weight: ctx.fontWeightInt, family: ctx.fontFamilyInt, italic: ctx.italic
+                    ),
+                    kern: CGFloat(ctx.letterSpacingEm) * CGFloat(ctx.fontSize),
+                    id: result.count
+                )
+                result.append(ComposedStretch(text: run, outline: outline))
+            } else if let last = result.indices.last, result[last].outline == nil {
+                result[last].text += run
             } else {
-                result.append(ComposedStretch(text: run, outlineWidth: outlineWidth))
+                result.append(ComposedStretch(text: run))
             }
         }
         for child in node.children where child.type == "text" {
@@ -243,14 +263,7 @@ struct NativeUITextRenderer: View {
         var run = AttributedString(applyTransform(text, ctx.textTransform))
 
         let runWeight = resolveFontWeight(ctx.fontWeightInt)
-        // Explicit run font first, then the app-wide theme default (only for
-        // the default design — font-serif/font-mono win over the default),
-        // then the system font. Mirrors NUIScaledFontModifier's resolution.
-        var runFontName = ctx.fontName
-        if runFontName.isEmpty, ctx.fontFamilyInt == 0 {
-            let family = themeStore.resolve(for: colorScheme).fontFamily
-            if !family.isEmpty, family != "System" { runFontName = family }
-        }
+        let runFontName = effectiveFontName(ctx.fontName, family: ctx.fontFamilyInt)
 
         var font: Font
         if !runFontName.isEmpty,
@@ -302,7 +315,49 @@ struct NativeUITextRenderer: View {
         return run
     }
 
+    /// Explicit font first, then the app-wide theme default (only for the
+    /// default design — font-serif/font-mono win over the default). Empty
+    /// means the system font. Mirrors NUIScaledFontModifier's resolution.
+    private func effectiveFontName(_ name: String, family: Int) -> String {
+        guard name.isEmpty, family == 0 else { return name }
+
+        let themeFamily = themeStore.resolve(for: colorScheme).fontFamily
+        return themeFamily == "System" ? "" : themeFamily
+    }
+
+    /// The Core Text font an outlined run's glyphs are stroked in, picked the
+    /// way its SwiftUI font is: the bundled font when `name` resolves, else
+    /// the system font. SwiftUI doesn't say which font it laid a run out in,
+    /// so the renderer needs its own. `size` is the design size; the renderer
+    /// scales to the run's laid-out size, which takes in Dynamic Type.
+    private func outlineFont(name: String, size: Float, weight: Int, family: Int, italic: Bool) -> CTFont {
+        if !name.isEmpty, let custom = NativeUIFontResolver.ctFont(name, size: CGFloat(size), italic: italic) {
+            return custom
+        }
+
+        var descriptor = UIFont.systemFont(ofSize: CGFloat(size), weight: resolveSystemFontWeight(weight)).fontDescriptor
+        if family == 1 { descriptor = descriptor.withDesign(.serif) ?? descriptor }
+        if family == 2 { descriptor = descriptor.withDesign(.monospaced) ?? descriptor }
+        if italic { descriptor = descriptor.withSymbolicTraits(descriptor.symbolicTraits.union(.traitItalic)) ?? descriptor }
+
+        return UIFont(descriptor: descriptor, size: CGFloat(size)) as CTFont
+    }
+
     private func resolveFontWeight(_ weight: Int) -> Font.Weight {
+        switch weight {
+        case 1: return .thin
+        case 2: return .light
+        case 3: return .regular
+        case 4: return .medium
+        case 5: return .semibold
+        case 6: return .bold
+        case 7: return .heavy
+        default: return .regular
+        }
+    }
+
+    /// resolveFontWeight's weights, for UIKit.
+    private func resolveSystemFontWeight(_ weight: Int) -> UIFont.Weight {
         switch weight {
         case 1: return .thin
         case 2: return .light
@@ -370,70 +425,143 @@ private struct TruncateIfLimited: ViewModifier {
 // MARK: - Outlined text (`text-outline`)
 
 /// Marks text to draw hollow: the outline of its glyphs, `width` points wide
-/// and centred on their edges like a CSS text stroke, in the text's colour.
-@available(iOS 18.0, *)
-struct NUITextOutline: TextAttribute {
+/// and centred on their edges like a CSS text stroke, in `color`.
+/// NUIOutlineTextRenderer strokes the glyphs Core Text sets `text` in with
+/// `font`, so the two have to be the text and font the run shows.
+struct NUITextOutline: Hashable {
     var width: CGFloat
+    var color: Color
+    var text: String
+    var font: CTFont
+    var kern: CGFloat = 0
+    /// Tells apart two outlined runs that are otherwise the same.
+    var id = 0
 }
 
+@available(iOS 18.0, *)
+extension NUITextOutline: TextAttribute {}
+
 /// Draws text marked with NUITextOutline as outlines, and everything else as
-/// usual. SwiftUI can't stroke glyphs, so the outline is made of the glyphs
-/// themselves: copies nudged half the width out in every direction make its
-/// outer edge, and the part every copy nudged half the width in still covers,
-/// cut out of that, makes its inner edge.
+/// usual. SwiftUI can't stroke text, and its layout doesn't say which glyphs
+/// it placed, so each outlined run's text is set again with Core Text to get
+/// the glyphs' paths. Those are stroked where SwiftUI placed each glyph, with
+/// mitred corners like Android and the web.
 @available(iOS 18.0, *)
 struct NUIOutlineTextRenderer: TextRenderer {
     var width: CGFloat
 
-    /// The outline reaches half its width past the glyphs.
+    /// Android's and the web's default.
+    private static let miterLimit: CGFloat = 4
+
+    /// A sharp corner's miter can reach `miterLimit` half-widths past the glyph.
     var displayPadding: EdgeInsets {
-        EdgeInsets(top: width / 2, leading: width / 2, bottom: width / 2, trailing: width / 2)
-    }
+        let reach = width / 2 * Self.miterLimit
 
-    private static let directions: [CGVector] = (0..<16).map { step in
-        let angle = Double(step) / 16 * 2 * .pi
-
-        return CGVector(dx: cos(angle), dy: sin(angle))
+        return EdgeInsets(top: reach, leading: reach, bottom: reach, trailing: reach)
     }
 
     func draw(layout: Text.Layout, in ctx: inout GraphicsContext) {
+        // Where each outlined run's text starts in the layout. A run that
+        // wraps is split over lines, and this finds its first character.
+        var starts: [NUITextOutline: Text.Layout.CharacterIndex] = [:]
         for line in layout {
             for run in line {
-                if let outline = run[NUITextOutline.self], outline.width > 0 {
-                    drawOutline(of: run, width: outline.width, in: &ctx)
-                } else {
-                    ctx.draw(run)
+                if let outline = run[NUITextOutline.self], let first = run.characterIndices.min() {
+                    starts[outline] = min(starts[outline] ?? first, first)
                 }
+            }
+        }
+
+        var glyphSets: [NUITextOutline: OutlineGlyphs] = [:]
+        for line in layout {
+            for run in line {
+                guard let outline = run[NUITextOutline.self], let start = starts[outline] else {
+                    ctx.draw(run)
+                    continue
+                }
+
+                let glyphs = glyphSets[outline] ?? OutlineGlyphs(outline)
+                glyphSets[outline] = glyphs
+                stroke(run, outline: outline, glyphs: glyphs, start: start, in: &ctx)
             }
         }
     }
 
-    private func drawOutline(of run: Text.Layout.Run, width: CGFloat, in ctx: inout GraphicsContext) {
-        let radius = width / 2
+    private func stroke(_ run: Text.Layout.Run, outline: NUITextOutline, glyphs: OutlineGlyphs, start: Text.Layout.CharacterIndex, in ctx: inout GraphicsContext) {
+        let path = CGMutablePath()
 
-        ctx.drawLayer { outline in
-            outline.draw(run)
-
-            for direction in Self.directions {
-                for distance in [radius / 2, radius] {
-                    var nudged = outline
-                    nudged.translateBy(x: direction.dx * distance, y: direction.dy * distance)
-                    nudged.draw(run)
-                }
+        for slice in run {
+            guard let index = slice.characterIndices.min(),
+                  let glyph = glyphs[glyphs.first + start.distance(to: index)],
+                  let shape = glyph.path(ascent: run.typographicBounds.ascent, at: slice.typographicBounds.origin) else {
+                // No outline to draw (an emoji, say): draw the glyph as it is.
+                ctx.draw(slice)
+                continue
             }
 
-            outline.blendMode = .destinationOut
-            outline.drawLayer { inside in
-                inside.draw(run)
-                inside.blendMode = .destinationIn
+            path.addPath(shape)
+        }
 
-                for direction in Self.directions {
-                    var nudged = inside
-                    nudged.translateBy(x: direction.dx * radius, y: direction.dy * radius)
-                    nudged.draw(run)
-                }
+        ctx.stroke(
+            Path(path),
+            with: .color(outline.color),
+            style: StrokeStyle(lineWidth: outline.width, lineJoin: .miter, miterLimit: Self.miterLimit)
+        )
+    }
+}
+
+/// The glyphs Core Text sets an outlined run's text in, by the UTF-16 offset
+/// of the character each one starts at, as SwiftUI's character indices count.
+@available(iOS 18.0, *)
+private struct OutlineGlyphs {
+    struct Glyph {
+        var id: CGGlyph
+        var font: CTFont
+
+        /// The glyph's path at the run's size, on the baseline at `origin`.
+        /// SwiftUI may have sized the font for Dynamic Type, so the size
+        /// comes from the run's ascent. Glyphs can be built from overlapping
+        /// shapes (SF's are), which a stroke would show inside the letter, so
+        /// the overlaps are merged away first.
+        func path(ascent: CGFloat, at origin: CGPoint) -> CGPath? {
+            let scale = ascent / CTFontGetAscent(font)
+            let sized = abs(scale - 1) < 0.001 ? font : CTFontCreateCopyWithAttributes(font, CTFontGetSize(font) * scale, nil, nil)
+            var placement = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: origin.x, ty: origin.y)
+
+            return CTFontCreatePathForGlyph(sized, id, &placement)?.normalized()
+        }
+    }
+
+    private var glyphs: [Int: Glyph] = [:]
+    /// The first offset with a glyph, which lines up with the run's first
+    /// character index in SwiftUI's layout.
+    private(set) var first = 0
+
+    init(_ outline: NUITextOutline) {
+        var attributes: [NSAttributedString.Key: Any] = [.font: outline.font]
+        if outline.kern != 0 { attributes[.kern] = outline.kern }
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: outline.text, attributes: attributes))
+
+        for run in CTLineGetGlyphRuns(line) as? [CTRun] ?? [] {
+            let count = CTRunGetGlyphCount(run)
+            var ids = [CGGlyph](repeating: 0, count: count)
+            var offsets = [CFIndex](repeating: 0, count: count)
+            CTRunGetGlyphs(run, CFRange(), &ids)
+            CTRunGetStringIndices(run, CFRange(), &offsets)
+            // Fallback fonts (for characters `font` lacks) are per run.
+            let runFont = (CTRunGetAttributes(run) as? [NSAttributedString.Key: Any])?[.font]
+            let font = runFont.map { $0 as! CTFont } ?? outline.font
+
+            for (id, offset) in zip(ids, offsets) where glyphs[offset] == nil {
+                glyphs[offset] = Glyph(id: id, font: font)
             }
         }
+
+        first = glyphs.keys.min() ?? 0
+    }
+
+    subscript(offset: Int) -> Glyph? {
+        glyphs[offset]
     }
 }
 

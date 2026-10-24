@@ -70,6 +70,25 @@ enum NativeUIFontResolver {
         return Font.custom(name, fixedSize: size)
     }
 
+    /// The Core Text font for a bundled token at `size`, or nil to fall
+    /// back, for drawing glyph outlines (`text-outline`). With `italic` it's
+    /// the family's italic face, or for a single-style font the same
+    /// synthesized oblique `font` gives.
+    static func ctFont(_ token: String, size: CGFloat, italic: Bool = false) -> CTFont? {
+        guard let name = postScriptName(for: token) else { return nil }
+
+        let upright = CTFontCreateWithName(name as CFString, size, nil)
+        guard italic else { return upright }
+
+        if supportsItalicTrait(name),
+           let face = CTFontCreateCopyWithSymbolicTraits(upright, size, nil, .italicTrait, .italicTrait) {
+            return face
+        }
+
+        var matrix = CGAffineTransform(a: 1, b: 0, c: obliqueSkew, d: 1, tx: 0, ty: 0)
+        return CTFontCreateWithName(name as CFString, size, &matrix)
+    }
+
     /// Whether an italic request for this token needs a synthesized oblique
     /// (custom font resolves, but its family has no real italic face).
     static func needsSyntheticOblique(_ token: String) -> Bool {
