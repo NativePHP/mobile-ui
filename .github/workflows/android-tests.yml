@@ -85,6 +85,19 @@ jobs:
             -p tests/android -PmobileRoot="$PWD/vendor/nativephp/mobile" \
             testDebugUnitTest --console=plain
 
+      # Gradle prints nothing for passing tests, so count them here.
+      - name: Summarise test results
+        if: always()
+        run: |
+          shopt -s nullglob
+          results=(tests/android/build/test-results/testDebugUnitTest/*.xml)
+          if [ ${#results[@]} -eq 0 ]; then
+            echo "No test results: the module didn't compile or the tests didn't run." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          sed -n 's/.*<testsuite name="\([^"]*\)" tests="\([0-9]*\)" skipped="\([0-9]*\)" failures="\([0-9]*\)" errors="\([0-9]*\)".*/\1: \2 tests, \4 failed, \5 errors, \3 skipped/p' \
+            "${results[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Upload test report
         if: failure()
         uses: actions/upload-artifact@v4
