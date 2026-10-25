@@ -25,8 +25,9 @@ import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.plugins.native_ui.NativeUITheme
 
 /**
- * Material3 PrimaryTabRow — horizontal tab strip with an indicator under the
- * active tab. Echo-prevention (plan K), theme-sourced colors (Model 3).
+ * Material3 PrimaryScrollableTabRow — horizontal tab strip with an indicator
+ * under the active tab. Echo-prevention (plan K), theme-sourced colors
+ * (Model 3).
  */
 object TabRowRenderer {
     @Composable

@@ -64,7 +64,7 @@ final class NativeUIReturnKeyProxy: NSObject, UITextFieldDelegate {
     }
 }
 
-/// Invisible zero-size anchor placed in the field's `.background` —
+/// Invisible anchor placed in the field's `.background` —
 /// the standard introspection seam between a SwiftUI view and its UIKit
 /// backing.
 struct ReturnKeyInterceptorAnchor: UIViewRepresentable {
@@ -114,30 +114,51 @@ struct ReturnKeyInterceptorAnchor: UIViewRepresentable {
             proxy = p
             p.box = box
             if tf.delegate !== p {
-                p.original = tf.delegate
+                // Never wrap another anchor's proxy. Two proxies holding
+                // each other as `original` forward `responds(to:)` back
+                // and forth until the stack overflows, the first time UIKit
+                // asks the field's delegate anything.
+                let current = tf.delegate
+                p.original = (current as? NativeUIReturnKeyProxy)?.original ?? current
                 tf.delegate = p
             }
             hooked = tf
         }
 
-        /// The anchor sits in the field's `.background`, so the nearest
-        /// UITextField above/beside us IS our field. Climb a few
-        /// ancestors, searching each level's subtree; the first (i.e.
-        /// closest) match wins, which keeps sibling rows out of reach.
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // findTextField() matches by frame, so a hook that ran before
+            // layout found nothing. Try again once there's a frame.
+            if hooked == nil {
+                DispatchQueue.main.async { [weak self] in self?.hook() }
+            }
+        }
+
+        /// The anchor sits in the field's `.background`, so it has the
+        /// field's frame, and our field is the UITextField under its
+        /// centre. Climb a few ancestors, searching each level's subtree.
+        /// Matching by frame keeps other fields out of reach, even when
+        /// SwiftUI hosts them all in the same view: a multiline field is a
+        /// UITextView, so without it the nearest UITextField would be some
+        /// other input's.
         private func findTextField() -> UITextField? {
+            let frame = convert(bounds, to: nil)
+            let centre = CGPoint(x: frame.midX, y: frame.midY)
             var ancestor = superview
             for _ in 0..<6 {
                 guard let a = ancestor else { return nil }
-                if let tf = Self.firstTextField(in: a) { return tf }
+                if let tf = Self.textField(in: a, under: centre) { return tf }
                 ancestor = a.superview
             }
             return nil
         }
 
-        private static func firstTextField(in view: UIView) -> UITextField? {
-            if let tf = view as? UITextField { return tf }
+        private static func textField(in view: UIView, under point: CGPoint) -> UITextField? {
+            if let tf = view as? UITextField {
+                return tf.convert(tf.bounds, to: nil).insetBy(dx: -1, dy: -1).contains(point) ? tf : nil
+            }
             for sub in view.subviews {
-                if let tf = firstTextField(in: sub) { return tf }
+                if let tf = textField(in: sub, under: point) { return tf }
             }
             return nil
         }

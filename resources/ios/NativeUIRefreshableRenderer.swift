@@ -46,5 +46,6 @@ struct NativeUIRefreshableRenderer: View {
             // publish appears just after the spinner hides.
             try? await Task.sleep(nanoseconds: 800_000_000)
         }
+        .modifier(ScrollViewBackgroundModifier(node: node))
     }
 }

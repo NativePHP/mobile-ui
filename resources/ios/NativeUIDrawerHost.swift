@@ -33,7 +33,9 @@ func registerNativeUIChrome() {
     // the root sentinels) for core's chrome renderers — bundle lookup +
     // CoreText registration + PostScript naming is this plugin's knowledge.
     NativeChromeFontResolver.resolvePostScriptName = { token in
-        NativeUIFontResolver.postScriptName(for: token)
+        // `.regular` lets a bare family name ("Inter") resolve to its
+        // Regular face; a specific face token resolves to itself.
+        NativeUIFontResolver.postScriptName(for: token, weight: .regular)
     }
 }
 
@@ -206,7 +208,7 @@ struct NativeDrawerHost<Content: View>: View {
                 }
 
                 // ☰ affordance, top-leading, shown while the drawer is closed.
-                if !state.isOpen {
+                if !state.isOpen, drawerNode != nil {
                     Button {
                         withAnimation(drawerAnimation) { state.isOpen = true }
                     } label: {

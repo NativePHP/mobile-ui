@@ -10,6 +10,11 @@ import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -49,15 +54,27 @@ object BottomSheetRenderer {
         // `sheet_pane` is for.
         val permanent = p.getBool("permanent")
 
-        if (!visible) return
-
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
-
         val skipPartial = !hasPartialDetent(detentsStr)
         val sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = skipPartial,
             confirmValueChange = { value -> !(permanent && value == SheetValue.Hidden) },
         )
+
+        // Leaving composition the moment `visible` turns false would skip the
+        // slide-down, so the sheet stays until hide() has played it out.
+        var shown by remember { mutableStateOf(visible) }
+        LaunchedEffect(visible) {
+            if (visible) {
+                shown = true
+            } else if (shown) {
+                if (!permanent) sheetState.hide()
+                shown = false
+            }
+        }
+
+        if (!shown) return
+
+        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
 
         val sheetModifier = modifier
             .let { m -> if (a11yLabel.isNotEmpty()) m.semantics { contentDescription = a11yLabel } else m }

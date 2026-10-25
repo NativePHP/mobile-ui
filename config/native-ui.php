@@ -159,6 +159,13 @@ return [
     | with `php artisan native:font Inter --default`. Per-element `font`
     | attributes and font-serif / font-mono classes still win over the default.
     |
+    | Weights: a family's `-Regular` token (or its bare family name, e.g.
+    | 'Inter') follows the font-medium / font-semibold / font-bold classes by
+    | drawing the sibling file bundled for that weight — Inter-Medium,
+    | Inter-SemiBold, Inter-Bold — the names `native:font` downloads. A missing
+    | weight uses the nearest bundled one; a variable font moves along its
+    | weight axis instead. Any other face ('Inter-Bold') is drawn as named.
+    |
     |   'fonts' => [
     |       'default' => 'Inter-Regular',
     |       'accent'  => 'DynaPuff-Regular',

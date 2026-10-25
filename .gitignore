@@ -3,3 +3,6 @@ composer.lock
 .phpunit.result.cache
 .phpunit.cache/
 .DS_Store
+/tests/android/.gradle/
+/tests/android/build/
+/tests/android/local.properties
