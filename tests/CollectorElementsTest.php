@@ -287,6 +287,17 @@ it('applies virtual list scroll-indicator props', function () {
     expect($tree['props']['shows_indicators'])->toBeFalse();
 });
 
+it('passes a virtual list the row to open at', function () {
+    NativeElementCollector::leaf('virtual_list', [
+        'count' => 5000,
+        'auto-scroll-to' => 4200,
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['auto_scroll_to'])->toBe(4200);
+});
+
 it('applies checkbox props', function () {
     NativeElementCollector::leaf('checkbox', [
         'value' => true,

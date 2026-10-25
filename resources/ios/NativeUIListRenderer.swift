@@ -78,6 +78,15 @@ struct NativeUIListRenderer: View {
                                     step: max(1, node.props.getInt("visible_range_step", default: 10)),
                                     leafIndex: leafIndex)
 
+        // `auto_scroll_to` counts rows as end-reached does; the row's node id
+        // is what its ForEach identifies it by.
+        let autoScrollTo = node.props.getInt("auto_scroll_to", default: -1)
+        let autoScrollTarget: Int? = {
+            guard autoScrollTo >= 0 else { return nil }
+            if horizontal { return autoScrollTo < children.count ? children[autoScrollTo].id : nil }
+            return leafIndex.first { $0.value == autoScrollTo }?.key
+        }()
+
         if horizontal {
             ScrollView(.horizontal, showsIndicators: showsIndicators) {
                 LazyHStack(spacing: 0) {
@@ -87,6 +96,7 @@ struct NativeUIListRenderer: View {
                     }
                 }
             }
+            .modifier(ListAutoScrollModifier(request: autoScrollTo, targetID: autoScrollTarget, anchor: .leading))
         } else {
             List {
                 if let pagerHeader {
@@ -186,6 +196,7 @@ struct NativeUIListRenderer: View {
             .modifier(NativeUIPagerHeaderListModifier(header: pagerHeader))
             // Only this list draws the header, not one in its rows.
             .environment(\.nativeUIPagerHeader, nil)
+            .modifier(ListAutoScrollModifier(request: autoScrollTo, targetID: autoScrollTarget, anchor: .top))
         }
     }
 
@@ -754,5 +765,47 @@ extension EnvironmentValues {
     var nativeUIListRowMargin: CGFloat {
         get { self[NativeUIListRowMarginKey.self] }
         set { self[NativeUIListRowMarginKey.self] = newValue }
+    }
+}
+
+/// Scrolls a list to the row with `targetID` for its `auto_scroll_to`
+/// `request`: a jump when the list opens, an animated scroll when PHP asks
+/// for another row later. A request is applied once, so re-renders carrying
+/// the same one leave the list where the reader scrolled it, and so does
+/// coming back to the screen: NavigationStack keeps a level below the top
+/// alive, with this state and the list's position.
+///
+/// A row that isn't there yet (a page still loading) is scrolled to when it
+/// arrives.
+struct ListAutoScrollModifier: ViewModifier {
+    let request: Int
+    let targetID: Int?
+    let anchor: UnitPoint
+
+    @State private var applied = -1
+
+    func body(content: Content) -> some View {
+        ScrollViewReader { proxy in
+            content
+                .onAppear { apply(proxy) }
+                .onChange(of: request) { _, _ in apply(proxy) }
+                .onChange(of: targetID) { _, _ in apply(proxy) }
+        }
+    }
+
+    private func apply(_ proxy: ScrollViewProxy) {
+        guard request >= 0, request != applied, let targetID else { return }
+
+        let opening = applied < 0
+        applied = request
+        // Lazy rows aren't laid out inside onAppear yet, so an immediate
+        // scrollTo does nothing; the ScrollView renderer defers the same way.
+        DispatchQueue.main.async {
+            if opening {
+                proxy.scrollTo(targetID, anchor: anchor)
+            } else {
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(targetID, anchor: anchor) }
+            }
+        }
     }
 }

@@ -92,6 +92,42 @@ NativeList::make()
     ->onEndReached('loadMore');
 ```
 
+### Opening a list at a row
+
+`auto-scroll-to` opens a `native:list` or `native:virtual-list` with that row at the top: a screen restored after a relaunch, a deep link to a record, or the row just added. Rows count from `0`, the way `on-visible-range` counts them, with a section's rows in their place.
+
+```blade
+<native:list :auto-scroll-to="$openAt">
+    @foreach ($posts as $post)
+        <native:list-item native:key="post-{{ $post->id }}" :headline="$post->title" />
+    @endforeach
+</native:list>
+```
+
+The list scrolls when it is created and again when the index changes, never while it stays the same, so re-renders don't pull it away from where the reader scrolled. A row that hasn't loaded yet is scrolled to when it arrives. You don't need it to keep a list in place across a pushed screen: going back already does.
+
+A virtual list only draws the rows inside its window, so the window has to hold the row. `scrollVirtualListTo()` on the `HasVirtualListWindow` screen moves the window there and sets `$virtualScrollTo` for the list:
+
+```php
+public function mount(int $contact): void
+{
+    $this->scrollVirtualListTo($contact);
+}
+```
+
+```blade
+<native:virtual-list
+    :count="$total"
+    :from="$virtualWindowFrom"
+    :to="$virtualWindowTo"
+    :auto-scroll-to="$virtualScrollTo"
+    item="rows.contact"
+    on-window-change="setVirtualWindow"
+/>
+```
+
+Both elements take it through the fluent API too: `NativeList::make()->autoScrollTo(12)`.
+
 ### Sticky headers
 
 A `native:sticky-header` in a list is a row that pins to the top of the list once you scroll it there, while the rows after it scroll underneath, like CSS `position: sticky`. The next sticky header pushes it off. It lays its children out like a column, so give it a background or the rows will show through.

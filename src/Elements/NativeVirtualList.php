@@ -53,6 +53,10 @@ class NativeVirtualList extends Element
         if (isset($attrs['showsIndicators']) || isset($attrs['shows-indicators'])) {
             $this->showsIndicators((bool) ($attrs['showsIndicators'] ?? $attrs['shows-indicators']));
         }
+        $autoScrollTo = $attrs['auto-scroll-to'] ?? $attrs['autoScrollTo'] ?? $attrs['auto_scroll_to'] ?? null;
+        if ($autoScrollTo !== null && $autoScrollTo !== '') {
+            $this->autoScrollTo((int) $autoScrollTo);
+        }
         $cb = $attrs['on_window_change'] ?? $attrs['onWindowChange'] ?? $attrs['on-window-change'] ?? null;
         if ($cb !== null) {
             $this->windowCallback = $cb;
@@ -68,6 +72,22 @@ class NativeVirtualList extends Element
     public function showsIndicators(bool $value = true): static
     {
         $this->listProps['shows_indicators'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Open the list with absolute row $index at the top. The list scrolls
+     * when it is created and again when the index changes, never while it
+     * stays the same, so re-renders don't fight the reader's scrolling.
+     *
+     * The window has to hold the row or native draws a placeholder there
+     * until it asks for one that does: HasVirtualListWindow's
+     * scrollVirtualListTo() moves the window and sets the index together.
+     */
+    public function autoScrollTo(int $index): static
+    {
+        $this->listProps['auto_scroll_to'] = max(0, $index);
 
         return $this;
     }
