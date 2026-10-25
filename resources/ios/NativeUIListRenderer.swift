@@ -687,7 +687,10 @@ private struct GroupedOrPlainListStyle: ViewModifier {
 ///   - `transparent` — the list sits directly on the screen's background
 ///     (a gradient, an image, the background layer). `bg-transparent`
 ///     can't express this: it packs to the same 0 as "no colour".
-private struct ListBackgroundModifier: ViewModifier {
+///
+/// Shared with `NativeUIVirtualListRenderer`, so both lists follow one set
+/// of background rules.
+struct ListBackgroundModifier: ViewModifier {
     let node: NativeUINode
     @Environment(\.colorScheme) private var colorScheme
 
