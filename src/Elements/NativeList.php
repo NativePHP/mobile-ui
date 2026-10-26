@@ -20,6 +20,8 @@ class NativeList extends Element
 
     protected ?string $visibleRangeCallback = null;
 
+    protected ?string $scrollEndCallback = null;
+
     public static function make(Element ...$children): static
     {
         $el = new static;
@@ -63,6 +65,9 @@ class NativeList extends Element
         }
         if (isset($attrs['visible-range-step']) || isset($attrs['visibleRangeStep'])) {
             $this->visibleRangeStep((int) ($attrs['visible-range-step'] ?? $attrs['visibleRangeStep']));
+        }
+        if (isset($attrs['on-scroll-end']) || isset($attrs['onScrollEnd'])) {
+            $this->onScrollEnd($attrs['on-scroll-end'] ?? $attrs['onScrollEnd']);
         }
 
         $this->applyA11yAttributes($attrs);
@@ -178,6 +183,25 @@ class NativeList extends Element
         return $this;
     }
 
+    /**
+     * Calls $method(int $first, int $last) when a scroll comes to rest, with
+     * the positions of the first and last rows on screen then, counted as
+     * {@see onVisibleRange()} counts them. A drag, a fling and a scroll to the
+     * top all end in one call once the list has stopped moving. A tap that
+     * doesn't move the list isn't a scroll.
+     *
+     * A list reporting its visible range as well sends the range at rest here
+     * instead, and counts it as a visible range report. So a screen can let
+     * the reports while scrolling do only what can't wait, and do the rest
+     * here, when a frame can't make the scrolling stutter.
+     */
+    public function onScrollEnd(string $method): static
+    {
+        $this->scrollEndCallback = $method;
+
+        return $this;
+    }
+
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->listProps;
@@ -193,6 +217,11 @@ class NativeList extends Element
         if ($this->visibleRangeCallback !== null) {
             // The virtual list's "from,to" payload, which dispatch hands the method as two ints.
             $props['on_visible_range'] = $registry->register($this->visibleRangeCallback, 'virtual_window');
+        }
+
+        if ($this->scrollEndCallback !== null) {
+            // "first,last" too, decoded the same way.
+            $props['on_scroll_end'] = $registry->register($this->scrollEndCallback, 'virtual_window');
         }
 
         return $props;
