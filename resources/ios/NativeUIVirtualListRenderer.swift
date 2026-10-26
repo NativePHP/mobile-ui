@@ -3,9 +3,13 @@ import Combine
 
 /// Windowed list. The native side renders `count` logical slots in a
 /// lazy `List`; PHP only ships the rows inside `window_from..window_to`.
-/// Slots outside the window display a fixed-height skeleton so SwiftUI's
+/// Slots outside the window display a fixed-height placeholder so SwiftUI's
 /// lazy machinery can compute total scroll extent without allocating a
 /// real subtree per row.
+///
+/// The background follows `native:list`'s rules (`ListBackgroundModifier`):
+/// a `bg-*` colour, a gradient or `transparent` replaces the system
+/// background, and rows are clear so it shows through them.
 ///
 /// As the visible range moves, the tracker debounces onAppear/onDisappear
 /// events and (with hysteresis) fires `on_window_change(from, to)` to
@@ -47,6 +51,7 @@ struct NativeUIVirtualListRenderer: View {
             nodeId: nodeId,
             rowByIndex: rowByIndex
         )
+        .modifier(ListBackgroundModifier(node: node))
         // Environment-propagating, so it reaches the List inside the body
         // without threading another property through it.
         .scrollIndicators(node.props.getBool("shows_indicators", default: true) ? .automatic : .hidden)
@@ -79,13 +84,19 @@ private struct VirtualListBody: View {
                     if let child = rowByIndex[index] {
                         NodeView(node: child).equatable()
                     } else {
-                        // Placeholder skeleton — meaningless to VoiceOver.
-                        Color(.systemGray6)
+                        // Clear, like `native:list`'s placeholder rows: the
+                        // list's own background shows through, so a fast
+                        // scroll past the window never flashes a fill that
+                        // isn't the screen's. Meaningless to VoiceOver.
+                        Color.clear
                             .frame(height: estimatedRowHeight)
                             .accessibilityHidden(true)
                     }
                 }
                 .listRowInsets(EdgeInsets())
+                // Clear, as in a plain `native:list`: SwiftUI's opaque
+                // system row fill would paint over the list's background.
+                .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .onAppear { tracker.markVisible(index) }
                 .onDisappear { tracker.markHidden(index) }

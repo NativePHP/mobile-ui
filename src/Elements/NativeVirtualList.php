@@ -53,6 +53,9 @@ class NativeVirtualList extends Element
         if (isset($attrs['showsIndicators']) || isset($attrs['shows-indicators'])) {
             $this->showsIndicators((bool) ($attrs['showsIndicators'] ?? $attrs['shows-indicators']));
         }
+        if (! empty($attrs['transparent'])) {
+            $this->transparent();
+        }
         $cb = $attrs['on_window_change'] ?? $attrs['onWindowChange'] ?? $attrs['on-window-change'] ?? null;
         if ($cb !== null) {
             $this->windowCallback = $cb;
@@ -68,6 +71,19 @@ class NativeVirtualList extends Element
     public function showsIndicators(bool $value = true): static
     {
         $this->listProps['shows_indicators'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Let the screen behind the list show through, as on `native:list`:
+     * SwiftUI's `List` paints the system background, and `bg-transparent`
+     * packs to the same value as "no colour". iOS-only in effect:
+     * Compose's LazyColumn draws no background of its own.
+     */
+    public function transparent(bool $value = true): static
+    {
+        $this->listProps['transparent'] = $value;
 
         return $this;
     }
