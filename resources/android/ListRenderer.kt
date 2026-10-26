@@ -2,6 +2,7 @@ package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -69,6 +70,7 @@ object ListRenderer {
         val endReachedBuffer = node.props.getInt("end_reached_buffer", 3).coerceAtLeast(1)
         val onVisibleRangeCb = node.props.getCallbackId("on_visible_range")
         val visibleRangeStep = node.props.getInt("visible_range_step", 10).coerceAtLeast(1)
+        val onScrollEndCb = node.props.getCallbackId("on_scroll_end")
 
         val scrollState = rememberLazyListState()
         // Set when this list is a page of a pager with a header, which the
@@ -112,32 +114,48 @@ object ListRenderer {
             }
         }
 
-        if (onVisibleRangeCb != 0) {
+        if (onVisibleRangeCb != 0 || onScrollEndCb != 0) {
             // Positions count rows as iOS does: a section's rows in its place,
             // headers and footers not at all. Read from the frame showing when
             // it reports, so a row inserted above the screen doesn't leave them stale.
             val leafIndex = rememberUpdatedState(remember(node) { leafRowIndex(node.children) })
-            LaunchedEffect(scrollState, onVisibleRangeCb, visibleRangeStep) {
-                fun currentRange(): Pair<Int, Int>? {
-                    val indexes = scrollState.layoutInfo.visibleItemsInfo.mapNotNull { leafIndex.value[it.key] }
-                    val first = indexes.minOrNull() ?: return null
-                    return first to (indexes.maxOrNull() ?: first)
+            val reported = remember { ReportedRange() }
+            if (onVisibleRangeCb != 0) {
+                LaunchedEffect(scrollState, onVisibleRangeCb, visibleRangeStep) {
+                    snapshotFlow { visibleLeafRange(scrollState, leafIndex.value) }.collect { range ->
+                        if (range == null) return@collect
+                        val moved = kotlin.math.abs(range.first - reported.range.first) >= visibleRangeStep ||
+                            kotlin.math.abs(range.second - reported.range.second) >= visibleRangeStep
+                        if (!moved) return@collect
+                        // No more than every 150ms while scrolling, with the latest range at the end of it.
+                        val wait = reported.at + VISIBLE_RANGE_INTERVAL_MS - System.currentTimeMillis()
+                        if (wait > 0) delay(wait)
+                        val latest = visibleLeafRange(scrollState, leafIndex.value) ?: return@collect
+                        // A scroll that came to rest in the wait has reported it already.
+                        if (latest == reported.range) return@collect
+                        reported.range = latest
+                        reported.at = System.currentTimeMillis()
+                        NativeElementBridge.sendTextChangeEvent(onVisibleRangeCb, node.id, "${latest.first},${latest.second}")
+                    }
                 }
-                // The list starts at the top, so a range near it isn't reported until it moves a step.
-                var reported = 0 to 0
-                var reportedAt = 0L
-                snapshotFlow { currentRange() }.collect { range ->
-                    if (range == null) return@collect
-                    val moved = kotlin.math.abs(range.first - reported.first) >= visibleRangeStep ||
-                        kotlin.math.abs(range.second - reported.second) >= visibleRangeStep
-                    if (!moved) return@collect
-                    // No more than every 150ms while scrolling, with the latest range at the end of it.
-                    val wait = reportedAt + VISIBLE_RANGE_INTERVAL_MS - System.currentTimeMillis()
-                    if (wait > 0) delay(wait)
-                    val latest = currentRange() ?: return@collect
-                    reported = latest
-                    reportedAt = System.currentTimeMillis()
-                    NativeElementBridge.sendTextChangeEvent(onVisibleRangeCb, node.id, "${latest.first},${latest.second}")
+            }
+            if (onScrollEndCb != 0) {
+                // A scroll ends when the list stops moving: a drag, a fling, or
+                // a scroll to a row. A tap that never moved the list isn't one.
+                LaunchedEffect(scrollState, onScrollEndCb) {
+                    var moved = false
+                    snapshotFlow { scrollState.isScrollInProgress }.collect { scrolling ->
+                        if (scrolling) {
+                            moved = true
+                            return@collect
+                        }
+                        if (!moved) return@collect
+                        moved = false
+                        val range = visibleLeafRange(scrollState, leafIndex.value) ?: return@collect
+                        reported.range = range
+                        reported.at = System.currentTimeMillis()
+                        NativeElementBridge.sendTextChangeEvent(onScrollEndCb, node.id, "${range.first},${range.second}")
+                    }
                 }
             }
         }
@@ -291,6 +309,24 @@ private class ListRowHeights {
         total += height - (heights[rowId] ?: 0)
         heights[rowId] = height
     }
+}
+
+/**
+ * The range a list last reported, to `on_visible_range` or `on_scroll_end`,
+ * and when. A scroll come to rest reports in place of a visible range report
+ * still to come. The list starts at the top, so a range near it isn't
+ * reported until it moves a step.
+ */
+private class ReportedRange {
+    var range = 0 to 0
+    var at = 0L
+}
+
+/** The positions of the first and last rows on screen, or null when none are. */
+private fun visibleLeafRange(state: LazyListState, leafIndex: Map<Any, Int>): Pair<Int, Int>? {
+    val indexes = state.layoutInfo.visibleItemsInfo.mapNotNull { leafIndex[it.key] }
+    val first = indexes.minOrNull() ?: return null
+    return first to (indexes.maxOrNull() ?: first)
 }
 
 /** Each leaf row's position: a section's rows in its place, counted as on iOS. */

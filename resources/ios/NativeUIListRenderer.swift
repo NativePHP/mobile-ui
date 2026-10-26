@@ -37,7 +37,7 @@ struct NativeUIListRenderer: View {
     /// The height of each row this list has drawn, for a placeholder drawn in its place.
     @State private var rowHeights = ListRowHeights()
 
-    /// The rows on screen, for `on_visible_range`.
+    /// The rows on screen, for `on_visible_range` and `on_scroll_end`.
     @State private var visibleRange = ListVisibleRange()
 
     var body: some View {
@@ -49,6 +49,7 @@ struct NativeUIListRenderer: View {
         let onEndReachedCb = node.props.getCallbackId("on_end_reached")
         let endReachedBuffer = max(1, node.props.getInt("end_reached_buffer", default: 3))
         let onVisibleRangeCb = node.props.getCallbackId("on_visible_range")
+        let onScrollEndCb = node.props.getCallbackId("on_scroll_end")
         let nodeId = node.id
         let children = node.children
 
@@ -69,12 +70,13 @@ struct NativeUIListRenderer: View {
         let (leafIndex, leafCount) = Self.leafRowIndex(children)
         // Rows are measured while the list reports its visible range: that's
         // what a list putting placeholders in rows' places goes by.
+        let tracksRows = onVisibleRangeCb != 0 || onScrollEndCb != 0
         let rowStyle = ListRowStyle(separator: separator, rowColor: rowColor, grouped: grouped, minHeight: minRowHeight,
                                     heights: onVisibleRangeCb != 0 ? rowHeights : nil,
-                                    visibleRange: onVisibleRangeCb != 0 ? visibleRange : nil)
+                                    visibleRange: tracksRows ? visibleRange : nil)
         // The tracker reads positions from the frame showing now. It isn't
         // observed, so this doesn't draw the list again.
-        let _ = visibleRange.update(callbackId: onVisibleRangeCb, nodeId: nodeId,
+        let _ = visibleRange.update(callbackId: onVisibleRangeCb, scrollEndCallbackId: onScrollEndCb, nodeId: nodeId,
                                     step: max(1, node.props.getInt("visible_range_step", default: 10)),
                                     leafIndex: leafIndex)
 
@@ -183,6 +185,7 @@ struct NativeUIListRenderer: View {
             // static settings/forms where it does nothing. Android's renderer
             // already gates its PullToRefreshBox the same way.
             .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId))
+            .modifier(ListScrollPhaseModifier(tracker: onScrollEndCb != 0 ? visibleRange : nil))
             .modifier(NativeUIPagerHeaderListModifier(header: pagerHeader))
             // Only this list draws the header, not one in its rows.
             .environment(\.nativeUIPagerHeader, nil)
@@ -584,6 +587,24 @@ private struct VisibleRowModifier: ViewModifier {
     }
 }
 
+/// Tells the list's tracker where a scroll is, for `on_scroll_end`.
+private struct ListScrollPhaseModifier: ViewModifier {
+    let tracker: ListVisibleRange?
+
+    func body(content: Content) -> some View {
+        if let tracker {
+            content.onScrollPhaseChange(Self.phaseChanged(in: tracker))
+        } else {
+            content
+        }
+    }
+
+    /// Built from the list's tracker alone, like ListRow.endReachedAction.
+    private static func phaseChanged(in tracker: ListVisibleRange) -> (ScrollPhase, ScrollPhase) -> Void {
+        { _, phase in tracker.scrollPhaseChanged(to: phase) }
+    }
+}
+
 /// The rows of a list on screen. Sends `on_visible_range` the positions of
 /// the first and last, as "first,last", once either has moved by the step
 /// since the last report. Positions count rows as end-reached does, and come
@@ -593,8 +614,12 @@ private struct VisibleRowModifier: ViewModifier {
 /// A new frame takes every row on screen off it and puts it back, so the
 /// range is read a moment after it moves, when that has settled, and no more
 /// than every 150ms while scrolling.
+///
+/// When a scroll comes to rest, `on_scroll_end` gets the range instead, read
+/// the same way, and a visible range report still to come is dropped for it.
 private final class ListVisibleRange {
     private var callbackId = 0
+    private var scrollEndCallbackId = 0
     private var nodeId = 0
     private var step = 10
     private var leafIndex: [Int: Int] = [:]
@@ -608,12 +633,17 @@ private final class ListVisibleRange {
     private var reported = (first: 0, last: 0)
     private var reportedAt: CFAbsoluteTime = 0
     private var pending: DispatchWorkItem?
+    /// The list has moved since it was last at rest.
+    private var moved = false
+    /// The report of a scroll come to rest, waiting for the rows to settle.
+    private var pendingEnd: DispatchWorkItem?
 
     private static let settle: CFAbsoluteTime = 0.05
     private static let interval: CFAbsoluteTime = 0.15
 
-    func update(callbackId: Int, nodeId: Int, step: Int, leafIndex: [Int: Int]) {
+    func update(callbackId: Int, scrollEndCallbackId: Int, nodeId: Int, step: Int, leafIndex: [Int: Int]) {
         self.callbackId = callbackId
+        self.scrollEndCallbackId = scrollEndCallbackId
         self.nodeId = nodeId
         self.step = step
         self.leafIndex = leafIndex
@@ -630,8 +660,42 @@ private final class ListVisibleRange {
         changed()
     }
 
+    /// A scroll ends when the list is idle again after moving. A finger that
+    /// stops a fling and lifts without dragging ends it too; a tap that never
+    /// moved the list doesn't.
+    func scrollPhaseChanged(to phase: ScrollPhase) {
+        if phase.isScrolling {
+            moved = true
+            pendingEnd?.cancel()
+            pendingEnd = nil
+        } else if phase == .idle, moved {
+            moved = false
+            scrollEnded()
+        }
+    }
+
+    private func scrollEnded() {
+        guard scrollEndCallbackId != 0 else { return }
+
+        pending?.cancel()
+        pending = nil
+        let task = DispatchWorkItem { [weak self] in
+            self?.pendingEnd = nil
+            self?.reportScrollEnd()
+        }
+        pendingEnd = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settle, execute: task)
+    }
+
+    private func reportScrollEnd() {
+        guard scrollEndCallbackId != 0, let range = currentRange() else { return }
+        reported = range
+        reportedAt = CFAbsoluteTimeGetCurrent()
+        NativeElementBridge.sendTextChangeEvent(scrollEndCallbackId, nodeId: nodeId, text: "\(range.first),\(range.last)")
+    }
+
     private func changed() {
-        guard callbackId != 0, pending == nil, let range = currentRange(),
+        guard callbackId != 0, pending == nil, pendingEnd == nil, let range = currentRange(),
               abs(range.first - reported.first) >= step || abs(range.last - reported.last) >= step else { return }
 
         let wait = max(Self.settle, reportedAt + Self.interval - CFAbsoluteTimeGetCurrent())
