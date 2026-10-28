@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -15,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
@@ -73,8 +75,10 @@ object WebviewRenderer {
             "$src$html$jsEnabled$domStorage"
         }
 
+        val webViewRef = remember { WebViewRef() }
+
         AndroidView(
-            modifier = modifier.clipToBounds(),
+            modifier = modifier.clipToBounds().viewportHeight(webViewRef),
             factory = { ctx ->
                 @SuppressLint("SetJavaScriptEnabled")
                 val webView = WebView(ctx).apply {
@@ -94,6 +98,7 @@ object WebviewRenderer {
                 }
 
                 webView.loadContent(src, html)
+                webViewRef.view = webView
                 webView
             },
             update = { webView ->
@@ -112,6 +117,7 @@ object WebviewRenderer {
                 }
             },
             onRelease = { webView ->
+                webViewRef.view = null
                 webView.stopLoading()
                 webView.webViewClient = WebViewClient()
                 webView.webChromeClient = null
@@ -149,14 +155,15 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
     val src = node.props.getString("src", "")
     val onNavigatedCb = node.props.getCallbackId("on_navigated")
     val nodeId = node.id
+    val webViewRef = remember { WebViewRef() }
 
     AndroidView(
-        modifier = modifier.clipToBounds(),
+        modifier = modifier.clipToBounds().viewportHeight(webViewRef),
         factory = { ctx ->
             val activity = (ctx as? MainActivity) ?: MainActivity.instance
             if (activity == null) {
                 // No shell activity — bare view, nothing to serve
-                WebView(ctx)
+                WebView(ctx).also { webViewRef.view = it }
             } else {
                 val webView = WebView(activity)
 
@@ -193,6 +200,7 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
                 val path = phpPath(src, activity)
                 webView.tag = path
                 webView.loadUrl("http://127.0.0.1$path")
+                webViewRef.view = webView
                 webView
             }
         },
@@ -213,6 +221,7 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
         onRelease = { webView ->
             // Stop this webview's dedicated PHP thread the moment the
             // webview leaves the view hierarchy.
+            webViewRef.view = null
             (webView.webViewClient as? PhpEmbedClient)?.phpRuntime?.release()
             webView.stopLoading()
             webView.webViewClient = WebViewClient()
@@ -220,6 +229,33 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
             webView.destroy()
         }
     )
+}
+
+/** The WebView an `AndroidView` created, for [viewportHeight]. */
+private class WebViewRef {
+    var view: WebView? = null
+}
+
+/**
+ * Chromium lays out a WebView whose layout-params height is WRAP_CONTENT at
+ * zero height so it can grow to its content
+ * (`AwLayoutSizer.setForceZeroLayoutHeight`), and every viewport unit (`vh`,
+ * `dvh`, `svh`, `lvh`) then resolves to 0. `AndroidView` adds the WebView
+ * with ViewGroup's default WRAP_CONTENT params, so that happened even when
+ * the layout fixes the height (`fullscreen`, `h-*`). A fixed height is
+ * measured exactly whatever the params say, so there the height becomes
+ * MATCH_PARENT; a webview without one keeps sizing to its content.
+ */
+private fun Modifier.viewportHeight(ref: WebViewRef): Modifier = layout { measurable, constraints ->
+    ref.view?.let { webView ->
+        val height = if (constraints.hasFixedHeight) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+        val params = webView.layoutParams
+        if (params?.height != height) {
+            webView.layoutParams = ViewGroup.LayoutParams(params?.width ?: ViewGroup.LayoutParams.WRAP_CONTENT, height)
+        }
+    }
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
 private fun phpPath(src: String, context: android.content.Context): String =
