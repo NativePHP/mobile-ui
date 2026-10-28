@@ -5,10 +5,10 @@ plugins {
 }
 val stageSources = tasks.register<Sync>("stageSources") {
     from(layout.projectDirectory.dir("../../resources/android")) {
-        include("FilledTextInputRenderer.kt", "OutlinedTextInputRenderer.kt", "TextInputShared.kt", "NativeUIFontResolver.kt", "NativeUITheme.kt", "ButtonRenderer.kt")
+        include("FilledTextInputRenderer.kt", "OutlinedTextInputRenderer.kt", "TextInputShared.kt", "NativeUIFontResolver.kt", "NativeUITheme.kt", "ButtonRenderer.kt", "GestureAreaRenderer.kt")
     }
     from(providers.gradleProperty("mobileRoot").map { "$it/resources/androidstudio/app/src/main/java/com/nativephp/mobile/ui/nativerender" }) {
-        include("KeyboardFocusPolicy.kt", "NativeUINode.kt")
+        include("KeyboardFocusPolicy.kt", "NativeUINode.kt", "SharedValueStore.kt")
     }
     into(layout.buildDirectory.dir("generated/upstream"))
 }

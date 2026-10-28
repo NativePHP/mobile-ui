@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -72,7 +73,10 @@ import kotlin.math.abs
  *   - `on_swipe`       (int)   — callback fired on a directional
  *                                swipe, carrying "left" / "right" /
  *                                "up" / "down" as text (rides the
- *                                TEXT_CHANGE format).
+ *                                TEXT_CHANGE format). Once it passes
+ *                                touch slop the drag is the swipe's,
+ *                                so a pressable inside or around the
+ *                                area doesn't also fire.
  *   - `swipe-fingers`  (int)   — touches required for the swipe
  *                                (default 1; Jump-style is 3).
  *   - `bounded`        (bool)  — keep the zoomed content inside the
@@ -309,6 +313,7 @@ object GestureAreaRenderer {
                 .pointerInput(onSwipe, swipeFingers) {
                     if (onSwipe == 0) return@pointerInput
                     val threshold = 60.dp.toPx()
+                    val slop = viewConfiguration.touchSlop
                     awaitEachGesture {
                         // Accumulate the centroid pan while exactly the
                         // required finger count is down; resolve to a
@@ -317,6 +322,10 @@ object GestureAreaRenderer {
                         // swipe from also triggering 1-finger handlers.
                         var maxPointers = 0
                         var pan = Offset.Zero
+                        // Whether the pan has passed touch slop yet, and
+                        // whether this swipe then took the drag for itself.
+                        var pastSlop = false
+                        var claimed = false
                         awaitFirstDown(requireUnconsumed = false)
                         var pressed = true
                         while (pressed) {
@@ -338,6 +347,35 @@ object GestureAreaRenderer {
                                 pan += delta / count.toFloat()
                             }
                             pressed = event.changes.any { it.pressed }
+                            // Past touch slop the gesture is a swipe, not a
+                            // tap, as it is on iOS where a tap fails once the
+                            // touch moves. Compose's clickable only cancels
+                            // when the pointer leaves it or a change is
+                            // consumed, so consume the rest of the gesture: a
+                            // pressable inside the area or around it then
+                            // doesn't also fire on release. Leave the drag to
+                            // anything that took it first in the Main pass,
+                            // such as an enclosing scroll container or the
+                            // area's own pan, so a vertical drag through a
+                            // list of swipeable rows still scrolls the list.
+                            if (claimed) {
+                                if (maxPointers == swipeFingers) {
+                                    event.changes.forEach { it.consume() }
+                                }
+                            } else if (!pastSlop && count == swipeFingers &&
+                                maxOf(abs(pan.x), abs(pan.y)) >= slop
+                            ) {
+                                pastSlop = true
+                                // The Final pass of this same event: every
+                                // handler has had its Main pass by now, and a
+                                // pressable inside checks this pass for a
+                                // consumed change.
+                                val final = awaitPointerEvent(PointerEventPass.Final)
+                                if (final.changes.none { it.isConsumed }) {
+                                    claimed = true
+                                    final.changes.forEach { it.consume() }
+                                }
+                            }
                         }
                         if (maxPointers == swipeFingers) {
                             val direction = when {
