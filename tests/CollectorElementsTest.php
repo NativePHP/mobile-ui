@@ -287,6 +287,16 @@ it('applies virtual list scroll-indicator props', function () {
     expect($tree['props']['shows_indicators'])->toBeFalse();
 });
 
+it('marks a virtual list transparent like a list', function () {
+    NativeElementCollector::leaf('virtual_list', ['count' => 100]);
+    expect(NativeElementCollector::collect()->toArray(new CallbackRegistry)['props'])->not->toHaveKey('transparent');
+
+    NativeElementCollector::reset();
+    NativeElementCollector::leaf('virtual_list', ['count' => 100, 'transparent' => true]);
+    expect(NativeElementCollector::collect()->toArray(new CallbackRegistry)['props']['transparent'])->toBeTrue()
+        ->and(NativeVirtualList::make()->transparent()->toArray(new CallbackRegistry)['props']['transparent'])->toBeTrue();
+});
+
 it('applies checkbox props', function () {
     NativeElementCollector::leaf('checkbox', [
         'value' => true,
