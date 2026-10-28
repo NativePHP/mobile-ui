@@ -14,6 +14,16 @@ test('keeps the Android bottom sheet composed until hiding it has slid it away',
         ->toMatch('/if \(!shown\) return/');
 });
 
+test('wraps an Android fit sheet around its content, opened in full', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/android/BottomSheetRenderer.kt');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/val skipPartial = fits \|\| !hasPartialDetent\(detentsStr\)/')
+        ->toMatch('/Column\(modifier = if \(fits\) sheetModifier else sheetModifier\.fillMaxHeight\(\)\)/')
+        ->toMatch('/private fun hasDetent\(str: String, detent: String\): Boolean/');
+});
+
 test('sizes an iOS fit sheet to the height its content measures', function () {
     $renderer = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIBottomSheetRenderer.swift');
 
