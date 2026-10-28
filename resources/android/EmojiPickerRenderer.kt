@@ -1,5 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
+import android.view.ContextThemeWrapper
 import android.view.ViewGroup
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -67,7 +69,8 @@ object EmojiPickerRenderer {
 
         if (!shown) return
 
-        val theme = if (isSystemInDarkTheme()) NativeUITheme.dark else NativeUITheme.light
+        val dark = isSystemInDarkTheme()
+        val theme = if (dark) NativeUITheme.dark else NativeUITheme.light
         // EmojiPickerView fills the rows it's given; about half the screen
         // shows five or six rows and leaves the thread in view above.
         val pickerHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp
@@ -84,29 +87,38 @@ object EmojiPickerRenderer {
             contentColor = theme.onSurface,
             scrimColor = BottomSheetDefaults.ScrimColor,
         ) {
-            AndroidView(
-                factory = { context ->
-                    EmojiPickerView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
+            // The picker's headings take textColorPrimary from the context's
+            // theme, which the app's activity doesn't set for this surface.
+            // Built again when the appearance changes.
+            key(dark) {
+                AndroidView(
+                    factory = { context ->
+                        val themed = ContextThemeWrapper(
+                            context,
+                            if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light,
                         )
-                        setOnEmojiPickedListener { item ->
-                            if (onChangeCb != 0) {
-                                NativeUIBridge.sendSelectChangeEvent(onChangeCb, node.id, item.emoji)
+                        EmojiPickerView(themed).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
+                            setOnEmojiPickedListener { item ->
+                                if (onChangeCb != 0) {
+                                    NativeUIBridge.sendSelectChangeEvent(onChangeCb, node.id, item.emoji)
+                                }
                             }
                         }
-                    }
-                },
-                // Not the node's own modifier: the element has no place in
-                // the layout, only this sheet.
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(pickerHeight)
-                    // Lets the picker's grid scroll before the sheet drags.
-                    .nestedScroll(rememberNestedScrollInteropConnection())
-                    .let { m -> if (a11yLabel.isNotEmpty()) m.semantics { contentDescription = a11yLabel } else m },
-            )
+                    },
+                    // Not the node's own modifier: the element has no place in
+                    // the layout, only this sheet.
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(pickerHeight)
+                        // Lets the picker's grid scroll before the sheet drags.
+                        .nestedScroll(rememberNestedScrollInteropConnection())
+                        .let { m -> if (a11yLabel.isNotEmpty()) m.semantics { contentDescription = a11yLabel } else m },
+                )
+            }
         }
     }
 }
