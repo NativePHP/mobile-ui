@@ -1,5 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -84,6 +85,8 @@ object PopoverRenderer {
                         color = theme.surface,
                         contentColor = theme.onSurface,
                         shadowElevation = 6.dp,
+                        // The shadow all but vanishes on a dark screen.
+                        border = BorderStroke(1.dp, theme.outlineVariant),
                     ) {
                         Column(
                             modifier = if (a11yLabel.isNotEmpty()) Modifier.semantics { contentDescription = a11yLabel } else Modifier,
