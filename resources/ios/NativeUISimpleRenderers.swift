@@ -19,6 +19,18 @@ struct NativeUIPressableRenderer: View {
                 NativeUIColumnRenderer(node: node)
                     .contentShape(Rectangle())
             }
+        } else if node.props.getBool("has_context_menu") {
+            // `:context-menu` attached — the same items, opened by a long
+            // press. The tap stays core's `@press`. SwiftUI's context menu
+            // lifts the pressable out of the screen and plays the haptic,
+            // as a long press on a row does anywhere in iOS.
+            let items = node.children.filter { $0.type == "top_bar_action" }
+            NativeUIColumnRenderer(node: node)
+                .contextMenu {
+                    ForEach(items) { item in
+                        pressableMenuItem(item)
+                    }
+                }
         } else {
             NativeUIColumnRenderer(node: node)
         }
