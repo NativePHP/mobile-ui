@@ -162,6 +162,9 @@ final class NativeUIEmojiTextField: UITextField {
         inlinePredictionType = .no
         // Genmoji and stickers are images, not text a server can store.
         supportsAdaptiveImageGlyph = false
+        // The emoji keyboard doesn't insert through insertText(_:), so watch
+        // the text itself.
+        addTarget(self, action: #selector(textChanged), for: .editingChanged)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -175,9 +178,16 @@ final class NativeUIEmojiTextField: UITextField {
 
     override var textInputContextIdentifier: String? { "" }
 
-    override func insertText(_ text: String) {
-        guard let first = text.first, first.nativeUIIsEmoji else { return }
-        coordinator?.picked(String(first))
+    /// Hands on the emoji just typed and empties the field again. Text that
+    /// isn't an emoji (another keyboard) is dropped; text still being
+    /// composed (an IME) is left alone until it's committed.
+    @objc private func textChanged() {
+        guard markedTextRange == nil else { return }
+        let typed = text ?? ""
+        text = ""
+        if let emoji = typed.last(where: { $0.nativeUIIsEmoji }) {
+            coordinator?.picked(String(emoji))
+        }
     }
 
     override func resignFirstResponder() -> Bool {
@@ -187,9 +197,6 @@ final class NativeUIEmojiTextField: UITextField {
         }
         return resigned
     }
-
-    // Nothing to edit: no caret menu, no paste.
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool { false }
 }
 
 private extension Character {
