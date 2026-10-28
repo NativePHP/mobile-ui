@@ -54,8 +54,15 @@ struct NativeUIPopoverRenderer: View {
                 .presentationBackground(theme.surface)
                 .modifier(A11yLabelModifier(label: a11yLabel))
             }
-            .onAppear { isPresented = visible }
-            .onChange(of: visible) { _, shown in isPresented = shown }
+            // A popover asked for before its anchor has reached the window
+            // never shows, which is every time one is laid in already
+            // visible, so the anchor gets a moment first.
+            .task(id: visible) {
+                if visible {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                isPresented = visible
+            }
             .onChange(of: isPresented) { _, presented in
                 // Closed by the system while PHP still has it open: the
                 // person tapped outside it.
