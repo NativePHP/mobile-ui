@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import android.annotation.SuppressLint
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.WebResourceRequest
@@ -15,6 +16,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.nativephp.mobile.bridge.LaravelEnvironment
 import com.nativephp.mobile.bridge.PHPBridge
 import com.nativephp.mobile.bridge.WebviewPHPRuntime
@@ -172,7 +179,16 @@ private fun PhpWebView(node: NativeUINode, modifier: Modifier) {
                 WebViewManager(activity, webView, bridge, embedded = true).setup()
                 WebViewManager.shared = previousShared
 
-                webView.webViewClient = PhpEmbedClient(webView.webViewClient, onNavigatedCb, nodeId, phpRuntime)
+                val safeArea = if (node.props.getBool("fullscreen", false)) PhpWebViewSafeArea(webView) else null
+                webView.webViewClient = PhpEmbedClient(webView.webViewClient, onNavigatedCb, nodeId, phpRuntime, safeArea)
+                safeArea?.let { area ->
+                    // Rotation and window resizes change the insets.
+                    webView.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                        if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                            area.inject()
+                        }
+                    }
+                }
 
                 val path = phpPath(src, activity)
                 webView.tag = path
@@ -213,7 +229,8 @@ private class PhpEmbedClient(
     private val inner: WebViewClient,
     var navigatedCallbackId: Int,
     var nodeId: Int,
-    val phpRuntime: WebviewPHPRuntime? = null
+    val phpRuntime: WebviewPHPRuntime? = null,
+    private val safeArea: PhpWebViewSafeArea? = null
 ) : WebViewClient() {
 
     override fun shouldInterceptRequest(
@@ -230,10 +247,12 @@ private class PhpEmbedClient(
         // The stock client skips the switch to web mode for an embedded
         // webview, so the native tree around this one stays mounted.
         inner.onPageStarted(view, url, favicon)
+        safeArea?.inject(force = true)
     }
 
     override fun onPageFinished(view: WebView, url: String?) {
         inner.onPageFinished(view, url)
+        safeArea?.inject(force = true)
     }
 
     override fun onPageCommitVisible(view: WebView?, url: String?) {
@@ -245,6 +264,93 @@ private class PhpEmbedClient(
         if (navigatedCallbackId != 0 && resolved.isNotEmpty()) {
             NativeUIBridge.sendTextChangeEvent(navigatedCallbackId, nodeId, resolved)
         }
+    }
+}
+
+/**
+ * `MainActivity.injectSafeAreaInsets` for a fullscreen php webview. The shell
+ * only injects into the root webview, so pages here get no `--inset-*` at all.
+ *
+ * The insets come from this webview's own window. Script evaluated from a page
+ * callback can land after the page has rendered, so the same script also runs
+ * at document start of every later page, like the shell's request body shim.
+ */
+private class PhpWebViewSafeArea(private val webView: WebView) {
+    private var injected: Insets? = null
+    private var startScript: ScriptHandler? = null
+
+    /** `force` re-injects unchanged insets, for a page that's loading. */
+    fun inject(force: Boolean = false) {
+        val insets = ViewCompat.getRootWindowInsets(webView)
+            ?.getInsets(WindowInsetsCompat.Type.systemBars()) ?: return
+        val changed = insets != injected
+        if (!changed && !force) return
+        injected = insets
+
+        val js = script(insets)
+        if (changed && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            startScript?.remove()
+            startScript = WebViewCompat.addDocumentStartJavaScript(webView, js, setOf("http://127.0.0.1"))
+        }
+        webView.evaluateJavascript(js, null)
+    }
+
+    private fun script(insets: Insets): String {
+        val density = webView.resources.displayMetrics.density
+        val leftPx = (insets.left / density).toInt()
+        val topPx = (insets.top / density).toInt()
+        val rightPx = (insets.right / density).toInt()
+        val bottomPx = (insets.bottom / density).toInt()
+        val isPortrait = webView.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+
+        return """
+        (function() {
+            function injectSafeAreaStyles() {
+                const existingStyle = document.getElementById('nativephp-safe-area-style');
+                if (existingStyle) {
+                    existingStyle.remove();
+                }
+
+                const style = document.createElement('style');
+                style.id = 'nativephp-safe-area-style';
+                style.setAttribute('data-nativephp-persist', 'true');
+                style.textContent = ':root { --inset-top: ${topPx}px; --inset-right: ${rightPx}px; --inset-bottom: ${bottomPx}px; --inset-left: ${leftPx}px; } .nativephp-safe-area { ${if (isPortrait) "padding-top: var(--inset-top); padding-bottom: var(--inset-bottom);" else "padding-right: var(--inset-right); padding-left: var(--inset-left);"} }';
+
+                if (!document.head) {
+                    const head = document.createElement('head');
+                    if (document.documentElement) {
+                        document.documentElement.insertBefore(head, document.documentElement.firstChild);
+                    }
+                }
+
+                if (document.head) {
+                    if (document.head.firstChild) {
+                        document.head.insertBefore(style, document.head.firstChild);
+                    } else {
+                        document.head.appendChild(style);
+                    }
+                }
+
+                if (document.documentElement) {
+                    document.documentElement.style.setProperty('--inset-top', '${topPx}px');
+                    document.documentElement.style.setProperty('--inset-right', '${rightPx}px');
+                    document.documentElement.style.setProperty('--inset-bottom', '${bottomPx}px');
+                    document.documentElement.style.setProperty('--inset-left', '${leftPx}px');
+
+                    document.documentElement.classList.remove('portrait', 'landscape');
+                    document.documentElement.classList.add('${if (isPortrait) "portrait" else "landscape"}');
+                }
+            }
+
+            injectSafeAreaStyles();
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', injectSafeAreaStyles);
+            }
+
+            document.addEventListener('livewire:navigated', injectSafeAreaStyles);
+        })();
+        """
     }
 }
 
