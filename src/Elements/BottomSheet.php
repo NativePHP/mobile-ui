@@ -59,6 +59,13 @@ class BottomSheet extends Element
      * Accepts: "small", "medium", "large", "full", or comma-separated
      * ("medium,large"). Also accepts a numeric fraction (0.0–1.0) for a
      * custom height (e.g. "0.4" for 40% of screen).
+     *
+     * "fit" makes the sheet exactly as tall as its content, measured on
+     * the device and capped at "large". On iOS it combines with the
+     * others ("fit,large" opens at the content's height and drags up to
+     * large). Android's sheet only has a fixed half-screen partial stop,
+     * so there a fit sheet opens at its content's height and ignores the
+     * other detents listed beside it.
      */
     public function detents(string $detents): static
     {
