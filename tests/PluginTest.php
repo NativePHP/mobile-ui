@@ -22,6 +22,14 @@ describe('Plugin Manifest', function () {
         expect($manifest['namespace'])->toBe('NativeUI');
     });
 
+    it('declares manages_native_sources and the native_sources hook', function () {
+        $manifest = json_decode(file_get_contents($this->manifestPath), true);
+
+        expect($manifest['manages_native_sources'] ?? null)->toBeTrue()
+            ->and($manifest['hooks']['copy_assets'] ?? null)->toBe('nativephp:native-ui:copy-fonts')
+            ->and($manifest['hooks']['native_sources'] ?? null)->toBe('nativephp:native-ui:native-sources');
+    });
+
     it('has valid components', function () {
         $manifest = json_decode(file_get_contents($this->manifestPath), true);
 
