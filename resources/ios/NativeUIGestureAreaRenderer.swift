@@ -581,7 +581,9 @@ private struct SwipeRecognizer: UIGestureRecognizerRepresentable {
         // Recognize alongside everything else (the sibling direction
         // recognizers, an enclosing ScrollView's pan, SwiftUI gestures
         // bridged by the host) — without this, whichever recognizer
-        // claims the touch first silently kills the swipe.
+        // claims the touch first silently kills the swipe. iOS 26's
+        // swipe back from mid-screen is the one exception (see the
+        // Coordinator).
         recognizer.delegate = context.coordinator
         return recognizer
     }
@@ -600,6 +602,31 @@ private struct SwipeRecognizer: UIGestureRecognizerRepresentable {
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
             true
+        }
+
+        /// iOS 26 pops a pushed screen on a swipe from anywhere in it, not
+        /// just the edge. Running alongside that, a right swipe here would
+        /// fire `@swipe` and start popping the screen too. Make the content
+        /// pop wait for this area's horizontal swipes to fail instead, so a
+        /// swipe that starts here is the area's. The edge pop is a separate
+        /// recognizer and still works over the area.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard #available(iOS 26, *),
+                  let swipe = gestureRecognizer as? UISwipeGestureRecognizer,
+                  !swipe.direction.isDisjoint(with: [.left, .right])
+            else { return false }
+            var responder: UIResponder? = gestureRecognizer.view
+            while let current = responder {
+                if let navigation = current as? UINavigationController,
+                   navigation.interactiveContentPopGestureRecognizer === otherGestureRecognizer {
+                    return true
+                }
+                responder = current.next
+            }
+            return false
         }
     }
 }
