@@ -375,6 +375,56 @@ Macros register only under a test runner, and only on a core whose
 `TestableComponent` is macroable — the same `method_exists` gate the camera
 plugin uses for its `FakeBridge` macros.
 
+## Emoji Picker
+
+`<native:emoji-picker>` shows the platform's own emoji chooser, so people get
+search, recents and skin tones without the app drawing a grid of its own.
+It takes no space in the layout; put it anywhere in the screen.
+
+```blade
+<native:emoji-picker
+    :visible="$picking"
+    @change="react"
+    @dismiss="closePicker"
+/>
+```
+
+```php
+public bool $picking = false;
+
+public function react(string $emoji): void
+{
+    $this->picking = false;
+    // ...
+}
+
+public function closePicker(): void
+{
+    $this->picking = false;
+}
+```
+
+- **iOS** has no public emoji picker view, so the element raises the system
+  emoji keyboard on a hidden field, with a Done bar above it (`done-label`
+  renames it). This is the same keyboard Messages opens for an emoji Tapback.
+  If someone has removed the emoji keyboard in Settings they get their
+  default keyboard, and anything that isn't an emoji is ignored.
+- **Android** shows Jetpack's `EmojiPickerView` (androidx.emoji2) in a
+  Material 3 bottom sheet: categories, recently used, and skin-tone, gender
+  and direction variants on a long press.
+
+`@change` gets each picked emoji as a string. The picker stays open until you
+set `visible` to false, so close it in that handler for a single pick or leave
+it open to collect several. `@dismiss` fires when the person closes it
+themselves, never when PHP does.
+
+The emoji is whatever the platform hands over: it can carry a skin-tone
+modifier or a variation selector, or be a sequence newer than your server
+accepts. Check it before you store or send it.
+
+In tests, pick with `->select('react', '👍')` and close with
+`->dismissSheet('closePicker')`.
+
 ## Testing
 
 Theme normalization and config write-back are pure PHP — no device, emulator,

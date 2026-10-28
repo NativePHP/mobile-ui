@@ -65,6 +65,14 @@ paths serialize to the same wire tree.
 - In tests, drive pickers with the `pickDate()` / `pickTime()` /
   `pickDateTime()` / `clearPicker()` macros and assert with
   `assertPicker()` / `assertPickerValue()` / `assertPickerEmpty()`.
+- `<native:emoji-picker :visible="$open" @change="react" @dismiss="close" />`
+  opens the platform's own emoji chooser (the emoji keyboard on iOS,
+  Jetpack's `EmojiPickerView` in a sheet on Android) instead of a hand-drawn
+  grid. `@change` gets each emoji as a string; it stays open until PHP sets
+  `visible` false, so close it there for a one-off pick. Check the emoji
+  before you send it on: it can carry skin tones or be newer than your
+  server knows. In tests, `->select('react', '👍')` picks and
+  `->dismissSheet('close')` closes it.
 
 @verbatim
 <code-snippet name="Declaring native elements in Blade" lang="blade">
