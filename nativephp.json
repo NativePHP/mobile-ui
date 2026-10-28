@@ -230,6 +230,14 @@
             "self_closing": false
         },
         {
+            "type": "popover",
+            "element": "Native\\Mobile\\UI\\Elements\\Popover",
+            "blade": "Native\\Mobile\\UI\\Components\\Popover",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.PopoverRenderer",
+            "ios_renderer": "NativeUIPopoverRenderer",
+            "self_closing": false
+        },
+        {
             "type": "button",
             "element": "Native\\Mobile\\UI\\Elements\\Button",
             "blade": "Native\\Mobile\\UI\\Components\\Button",
