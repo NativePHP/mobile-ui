@@ -29,6 +29,7 @@ dropped without an error.
 | `list-item` | see below |
 | `icon` | `name` (`star.fill`, `trash`, `plus`), or per platform `ios="checkmark.circle.fill" android="check_circle"`, `:size="20"`, `class="text-theme-primary"` |
 | `top-bar` | `title`, `subtitle`, `back`. Put it at the top level of the view |
+| `emoji-picker` | `:visible`, `@change` (gets the emoji), `@dismiss`, `done-label`. The system picker: iOS emoji keyboard, Android `EmojiPickerView` in a sheet. Stays open until `visible` is false |
 | also | `toggle`, `checkbox`, `slider`, `select`, `radio-group`, `chip`, `badge`, `date-picker`, `modal`, `bottom-sheet`, `tab-row`, `progress-bar`, `activity-indicator` |
 
 There is no `text-input` element. It throws "Unknown native element type: text_input".
