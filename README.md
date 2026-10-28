@@ -120,6 +120,41 @@ use Native\Mobile\UI\Elements\StickyHeader;
 StickyHeader::make($newPostsButton);
 ```
 
+## Popovers
+
+`<native:popover>` floats its children in a small bubble beside the spot it
+is laid over, while `visible` is true. It draws nothing itself and takes no
+touches, so put it over the view it points at, in a stack, beside that view
+rather than inside a pressable:
+
+```blade
+<native:stack :width="30" :height="30">
+    <native:pressable @press="openReactions({{ $id }})" a11y-label="React">
+        <native:icon name="face.smiling" />
+    </native:pressable>
+    <native:popover
+        class="absolute top-0 bottom-0 left-0 right-0"
+        :visible="$reactingTo === $id"
+        @dismiss="closeReactions"
+    >
+        <native:row class="gap-2 p-2">
+            <native:button @press="react('👍')">👍</native:button>
+            <native:button @press="react('🎉')">🎉</native:button>
+        </native:row>
+    </native:popover>
+</native:stack>
+```
+
+The bubble opens above the spot, or below it with `placement="bottom"`, and
+takes the other side when it wouldn't fit between the spot and the system
+bars. iOS draws a system popover with its arrow, kept a popover on iPhone;
+Android draws a raised surface in a popup, centred on the spot. Both take
+their colour from `theme.surface`.
+
+A tap outside it (or back, on Android) fires `@dismiss`. Close it from PHP
+by setting `visible` to false, for instance once something in it is chosen;
+that never fires `@dismiss`.
+
 ## Accessibility
 
 Every element accepts a screen-reader label and an optional hint, via Blade
