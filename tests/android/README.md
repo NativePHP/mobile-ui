@@ -15,6 +15,21 @@ Requires JDK 21, Android SDK 36 and a Mobile checkout with the Android
   -p tests/android -PmobileRoot=/absolute/path/to/mobile testDebugUnitTest
 ```
 
+The Composer-installed copy works as the Mobile checkout, which is what CI
+uses (`.github/workflows/android-tests.yml`):
+
+```bash
+composer update
+vendor/nativephp/mobile/resources/androidstudio/gradlew \
+  -p tests/android -PmobileRoot="$PWD/vendor/nativephp/mobile" testDebugUnitTest
+```
+
+Mobile 4.6.0 doesn't have the flush hook, so against it the module fails to
+compile. Until `composer.json` requires 4.7, test against Mobile's main branch
+with `composer require nativephp/mobile:dev-main --no-update && composer update`
+(don't commit that), or run the workflow by hand with `mobile` set to
+`dev-main`.
+
 The twelve cases exercise both editors with live, blur and debounce models,
 with and without keep-focus-on-submit. They edit while focused, replace the
 change callback during composition, then invoke the separate Button's semantic
