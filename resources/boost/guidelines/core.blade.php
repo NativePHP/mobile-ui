@@ -49,6 +49,13 @@ paths serialize to the same wire tree.
 - Each `@selectionChange` event carries the FULL current text and costs a
   component re-render, independent of the `native:model` sync mode — don't
   reach for it when plain `@change` would do.
+- To put the caret somewhere when PHP rewrites a field's text (say after
+  swapping an "@query" for a picked "@handle "), bind `:selection="$caret"`
+  (or `[$start, $end]`) in the same code-point offsets. The field only reads
+  it when it takes a new value from PHP, so it never fights the user's
+  typing; without it the caret goes to the end. Keep the attribute on the
+  field and pass null when there's nothing to place, or iOS rebuilds the
+  field and drops the keyboard.
 - Add `revealable` alongside `secure` for the in-field eye that lets the user
   check what they typed. It is native-only — tapping it never round-trips to
   PHP and never touches the bound value — so don't hand-roll a Show / Hide

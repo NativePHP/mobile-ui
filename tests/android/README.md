@@ -28,6 +28,13 @@ scroll container, and a bound pan still follows the finger. `NodeView` here
 stands in for core's: each child is a fixed-size box, clickable like a core
 `pressable` when it has a press handler.
 
+`TextInputCaretTest` pushes a new value into the outlined, filled and bare
+editors and checks where the caret lands: where the `selection` props say
+(code points, clamped), at the end when they don't, never on an echo of what
+was typed or in a secure field, and that the placed caret is what
+`@selectionChange` reports. It also presses a separate Button straight after
+typing and checks the caret's last move reaches PHP before the press does.
+
 `ListAutoScrollTest` exercises both list renderers through Compose semantics.
 It checks that an out-of-range request waits for its row, shrinking or emptying
 the list doesn't repeat an applied request, disabling then restoring an index

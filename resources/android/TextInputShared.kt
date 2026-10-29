@@ -86,6 +86,9 @@ internal data class TextInputProps(
     val debounceMs: Int,
     val autofocus: Boolean,
     val selectionDebounceMs: Int,
+    /** Where a value PHP pushes puts the caret, in code points; -1 when PHP doesn't say. */
+    val selectionStart: Int,
+    val selectionEnd: Int,
 ) {
     val enabled: Boolean get() = !disabled && !loading
 
@@ -177,7 +180,24 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         debounceMs   = p.getInt("debounce_ms").let { if (it > 0) it else 300 },
         autofocus    = p.getBool("autofocus"),
         selectionDebounceMs = resolveSelectionDebounceMs(p.getInt("selection_debounce_ms")),
+        selectionStart = p.getInt("selection_start", -1),
+        selectionEnd = p.getInt("selection_end", -1),
     )
+}
+
+/**
+ * The caret for a value PHP has just pushed into the field: the `selection`
+ * prop when PHP set one, its code-point offsets clamped to [text] and turned
+ * into UTF-16, otherwise the end of the text as always. A secure field always
+ * gets the end. iOS places the same prop (`NativeUITextInputCore.swift`) —
+ * keep the two in sync.
+ */
+internal fun TextInputProps.pushedSelection(text: String): TextRange {
+    if (secure || selectionStart < 0) return TextRange(text.length)
+    val points = text.codePointCount(0, text.length)
+    val start = selectionStart.coerceIn(0, points)
+    val end = selectionEnd.coerceIn(start, points)
+    return TextRange(text.offsetByCodePoints(0, start), text.offsetByCodePoints(0, end))
 }
 
 /**

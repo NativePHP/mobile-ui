@@ -86,10 +86,11 @@ object FilledTextInputRenderer {
             // has typed since, so check the whole in-flight queue, not just
             // the newest value sent.
             if (echoes.receive(props.serverValue) && props.serverValue != lastSentValue) {
-                // Programmatic server push: replace text, caret to the end, and
-                // flush a single end-caret selection event (deduped) rather
-                // than emitting stale pre-push offsets.
-                val pushed = TextFieldValue(props.serverValue, TextRange(props.serverValue.length))
+                // Programmatic server push: replace text, caret where PHP's
+                // `selection` says or at the end, and flush a single selection
+                // event for it (deduped) rather than emitting stale pre-push
+                // offsets.
+                val pushed = TextFieldValue(props.serverValue, props.pushedSelection(props.serverValue))
                 value = pushed
                 lastSentValue = props.serverValue
                 selectionReporter.flush(pushed)
