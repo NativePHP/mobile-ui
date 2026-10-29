@@ -20,6 +20,8 @@ class NativeList extends Element
 
     protected ?string $visibleRangeCallback = null;
 
+    protected ?string $scrollTarget = null;
+
     protected ?string $scrollEndCallback = null;
 
     public static function make(Element ...$children): static
@@ -65,6 +67,9 @@ class NativeList extends Element
         }
         if (isset($attrs['visible-range-step']) || isset($attrs['visibleRangeStep'])) {
             $this->visibleRangeStep((int) ($attrs['visible-range-step'] ?? $attrs['visibleRangeStep']));
+        }
+        if (isset($attrs['scroll-target']) || isset($attrs['scrollTarget'])) {
+            $this->scrollTarget((string) ($attrs['scroll-target'] ?? $attrs['scrollTarget']));
         }
         $autoScrollTo = $attrs['auto-scroll-to'] ?? $attrs['autoScrollTo'] ?? null;
         if ($autoScrollTo !== null && $autoScrollTo !== '') {
@@ -188,6 +193,28 @@ class NativeList extends Element
     }
 
     /**
+     * Publish this list under $key in the bottom-tab reselect scroll
+     * seam (Android only — iOS ignores the prop): while the list is on
+     * screen its scroll state is registered under the key, so a
+     * `Tab::onReselect($method, $key)` naming the same key scrolls this
+     * list back to its top when the tab is re-tapped mid-scroll, or
+     * fires $method once the list already sits at exact top. "Top" is
+     * the start of the list, whichever way it scrolls.
+     *
+     * A pager keeps the pages beside the one showing composed, so give
+     * every simultaneously-composed list its own key and point the
+     * tab's reselect at the currently selected one (a Log pager's
+     * `log-feed-following` / `log-feed-latest` pages, say) — the newest
+     * list registered under a key is the one a reselect scrolls.
+     */
+    public function scrollTarget(string $key): static
+    {
+        $this->scrollTarget = $key;
+
+        return $this;
+    }
+
+    /**
      * Open the list with row $index at the top: a screen restored after a
      * relaunch, a deep link to a record, or the row just added. Rows count
      * as end-reached and visible-range count them (a section's rows in its
@@ -241,6 +268,12 @@ class NativeList extends Element
         if ($this->visibleRangeCallback !== null) {
             // The virtual list's "from,to" payload, which dispatch hands the method as two ints.
             $props['on_visible_range'] = $registry->register($this->visibleRangeCallback, 'virtual_window');
+        }
+
+        if ($this->scrollTarget !== null) {
+            // Not a callback id: the literal key the renderer registers its
+            // scroll state under for the bottom-tab reselect seam.
+            $props['scroll_target'] = $this->scrollTarget;
         }
 
         if ($this->scrollEndCallback !== null) {
