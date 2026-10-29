@@ -160,6 +160,17 @@ struct NativeUITextInputCore: View {
         // keep the two in sync.
         let selDebounceMs = Self.resolveSelectionDebounceMs(p.getInt("selection_debounce_ms"))
         let selectionEnabled = onSelectionCb != 0 && !secure
+        // `selection`: where the caret goes when PHP pushes a new value, in
+        // code points (-1: PHP didn't say). The element serializes the pair
+        // whenever the attribute is declared, null included, so whether the
+        // field can be told where its caret goes never flips between renders.
+        let placesSelection = p.has("selection_start") && !secure
+        let placedStart   = p.getInt("selection_start", default: -1)
+        let placedEnd     = p.getInt("selection_end", default: -1)
+        // The field binds `selection` when it reports it or PHP places it.
+        // Decided by props that hold still, because flipping it swaps the
+        // field for a new one and drops the keyboard.
+        let selectionBound = selectionEnabled || placesSelection
         let fontName      = p.getString("font_name")
         let lineSpacing   = NativeUIFontResolver.lineSpacing(
             px: p.getFloat("line_height_px"),
@@ -292,7 +303,7 @@ struct NativeUITextInputCore: View {
                             // The iOS 18 `selection:` binding exists on
                             // TextEditor too. Parallel branches so the
                             // feature-off path carries no selection state.
-                            if selectionEnabled {
+                            if selectionBound {
                                 TextEditor(text: $text, selection: $selection)
                             } else {
                                 TextEditor(text: $text)
@@ -320,7 +331,7 @@ struct NativeUITextInputCore: View {
                         }
                     }
             } else {
-                if selectionEnabled {
+                if selectionBound {
                     TextField(placeholder, text: $text, selection: $selection, prompt: prompt)
                         .foregroundColor(contentColor)
                         .focused($isFocused)
@@ -397,16 +408,23 @@ struct NativeUITextInputCore: View {
                 text = newServerValue
                 lastSentValue = newServerValue
                 // A programmatic push replaces the field wholesale and drops
-                // the caret at the end. Report that immediately, regardless of
-                // focus — matching the Android renderers, which flush the same
-                // end-caret event from their value-sync effect. Without this,
-                // a handler that rewrites the bound model (the mention-
-                // typeahead case) sees a follow-up event on Android and
-                // nothing on iOS. Emitting here also beats letting the
-                // `.onChange(of: text)` path below fire with the STALE cached
-                // offsets clamped to the new length.
+                // the caret at the end, unless PHP said where it goes
+                // (`selection`), in which case it goes there.
+                let scalarCount = newServerValue.unicodeScalars.count
+                var placed = (scalarCount, scalarCount)
+                if placesSelection && placedStart >= 0 {
+                    placed = placeSelection(start: placedStart, end: placedEnd, in: newServerValue)
+                }
+                // Report the new caret immediately, regardless of focus —
+                // matching the Android renderers, which flush the same event
+                // from their value-sync effect. Without this, a handler that
+                // rewrites the bound model (the mention-typeahead case) sees
+                // a follow-up event on Android and nothing on iOS. Emitting
+                // here also beats letting the `.onChange(of: text)` path
+                // below fire with the STALE cached offsets clamped to the new
+                // length.
                 if selectionEnabled {
-                    emitServerPushSelection(text: newServerValue, cb: onSelectionCb)
+                    emitServerPushSelection(text: newServerValue, start: placed.0, end: placed.1, cb: onSelectionCb)
                 }
                 // Send-BUTTON path (no `onSubmit`): a send clears the draft to
                 // empty. Keep the keyboard up by re-asserting focus. Opt-in via
@@ -445,9 +463,15 @@ struct NativeUITextInputCore: View {
             // Lets interactive taps elsewhere honor this field's
             // keep-focus-on-submit, and gives press dispatch a
             // flush hook so a tap-committed autocorrection's
-            // change reaches PHP first (mobile-air #335).
+            // change, and the caret's last move, reach PHP first
+            // (mobile-air #335).
             if focused {
                 KeyboardFocusPolicy.fieldFocused(focusToken, keepsFocus: keepFocus) {
+                    // The caret goes first, as on Android, so a press that
+                    // reads it (picking a mention) sees where it is now.
+                    if selectionEnabled {
+                        flushSelection(cb: onSelectionCb)
+                    }
                     flushPending(onChangeCb: onChangeCb)
                 }
                 if wantsAccessory {
@@ -682,16 +706,46 @@ struct NativeUITextInputCore: View {
         raw > 0 ? max(raw, selectionDebounceFloorMs) : selectionDebounceDefaultMs
     }
 
-    /// Report an end-of-text caret for a programmatic value push, bypassing
-    /// the debounce. Sets the cached offsets first so the `.onChange(of: text)`
+    /// Report the caret a programmatic value push left, bypassing the
+    /// debounce. Sets the cached offsets first so the `.onChange(of: text)`
     /// pass that follows recomputes the identical payload and is dropped by
     /// the dedupe rather than emitting stale offsets.
-    private func emitServerPushSelection(text pushedText: String, cb: Int) {
-        let count = pushedText.unicodeScalars.count
-        selStart = count
-        selEnd = count
-        pendingSelection = NativeUISelectionPayload(text: pushedText, start: count, end: count)
+    private func emitServerPushSelection(text pushedText: String, start: Int, end: Int, cb: Int) {
+        selStart = start
+        selEnd = end
+        pendingSelection = NativeUISelectionPayload(text: pushedText, start: start, end: end)
         flushSelection(cb: cb)
+    }
+
+    /// Put the caret (or a selection) where PHP's `selection` prop says, in
+    /// the value PHP just pushed. Offsets are code points, clamped to the
+    /// text and rounded down to a character boundary, since a caret can't sit
+    /// inside a flag or a skin-toned emoji. Returns the offsets it used.
+    ///
+    /// Set again on the next runloop turn: the field takes the pushed text in
+    /// the same update, and UIKit moves the caret to the end when its text is
+    /// replaced, which can land after this selection did.
+    private func placeSelection(start: Int, end: Int, in value: String) -> (Int, Int) {
+        let count = value.unicodeScalars.count
+        let lower = characterIndex(atScalarOffset: min(max(start, 0), count), in: value)
+        let upper = characterIndex(atScalarOffset: min(max(end, start, 0), count), in: value)
+        let placed = TextSelection(range: lower..<max(lower, upper))
+        selection = placed
+        DispatchQueue.main.async {
+            if text == value { selection = placed }
+        }
+        return (scalarOffset(of: lower, in: value), scalarOffset(of: max(lower, upper), in: value))
+    }
+
+    /// The `String.Index` for a code-point offset into `string`, moved back to
+    /// the start of the character it falls inside.
+    private func characterIndex(atScalarOffset offset: Int, in string: String) -> String.Index {
+        let scalars = string.unicodeScalars
+        var index = scalars.index(scalars.startIndex, offsetBy: offset)
+        while index > string.startIndex && String.Index(index, within: string) == nil {
+            index = scalars.index(before: index)
+        }
+        return index
     }
 
     /// (Re)arm the trailing-edge debounce. Recomputes the payload from the

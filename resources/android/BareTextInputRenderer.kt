@@ -13,6 +13,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -106,15 +107,22 @@ object BareTextInputRenderer {
             SelectionReporter(scope = scope, props = props, nodeId = node.id)
         }
 
+        // Bare sends every edit as it happens, so only the caret can be
+        // pending when a press elsewhere is dispatched. The policy runs this
+        // first, so a press that reads the caret (picking a mention) sees
+        // where it is now, as the outlined and filled variants do.
+        val flushSelection by rememberUpdatedState<() -> Unit>({ selectionReporter.flush(value) })
+
         LaunchedEffect(props.serverValue) {
             // An echo of an earlier keystroke must not overwrite what the user
             // has typed since, so check the whole in-flight queue, not just
             // the newest value sent.
             if (echoes.receive(props.serverValue) && props.serverValue != lastSentValue) {
-                // Programmatic server push: replace text, caret to the end, and
-                // flush a single end-caret selection event (deduped) rather
-                // than emitting stale pre-push offsets.
-                val pushed = TextFieldValue(props.serverValue, TextRange(props.serverValue.length))
+                // Programmatic server push: replace text, caret where PHP's
+                // `selection` says or at the end, and flush a single selection
+                // event for it (deduped) rather than emitting stale pre-push
+                // offsets.
+                val pushed = TextFieldValue(props.serverValue, props.pushedSelection(props.serverValue))
                 value = pushed
                 lastSentValue = props.serverValue
                 selectionReporter.flush(pushed)
@@ -159,7 +167,7 @@ object BareTextInputRenderer {
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
                     if (state.isFocused) {
-                        KeyboardFocusPolicy.fieldFocused(focusToken, props.keepFocusOnSubmit)
+                        KeyboardFocusPolicy.fieldFocused(focusToken, props.keepFocusOnSubmit) { flushSelection() }
                     } else {
                         KeyboardFocusPolicy.fieldBlurred(focusToken)
                     }

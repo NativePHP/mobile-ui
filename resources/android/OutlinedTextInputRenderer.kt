@@ -97,12 +97,12 @@ object OutlinedTextInputRenderer {
             // has typed since, so check the whole in-flight queue, not just
             // the newest value sent.
             if (echoes.receive(props.serverValue) && props.serverValue != lastSentValue) {
-                // Programmatic server push: replace the text and drop the caret
-                // at the very end (parity with the pre-migration String sync,
-                // which reset the field wholesale). We do NOT emit stale
-                // pre-push offsets; instead we flush a single end-caret
-                // selection event (deduped) so PHP mirrors the new caret.
-                val pushed = TextFieldValue(props.serverValue, TextRange(props.serverValue.length))
+                // Programmatic server push: replace the text and put the caret
+                // where PHP's `selection` says, or at the very end (parity with
+                // the pre-migration String sync, which reset the field wholesale).
+                // We do NOT emit stale pre-push offsets; instead we flush a single
+                // selection event for the new caret (deduped) so PHP mirrors it.
+                val pushed = TextFieldValue(props.serverValue, props.pushedSelection(props.serverValue))
                 value = pushed
                 lastSentValue = props.serverValue
                 selectionReporter.flush(pushed)
