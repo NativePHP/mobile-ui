@@ -14,9 +14,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -167,6 +169,15 @@ object ListRenderer {
                 }
             }
         }
+
+        // The row's place among the lazy items depends on whether section
+        // headers become items, so this follows the layout's grouped rule.
+        val autoScrollTo = node.props.getInt("auto_scroll_to", -1)
+        val grouped = node.children.any { it.type == "list_section" } && !node.props.getBool("plain")
+        val itemIndex = remember(node, autoScrollTo, pagerHeader) {
+            lazyItemIndexOfRow(node.children, autoScrollTo, horizontal, grouped, pagerHeader) ?: -1
+        }
+        ListAutoScrollEffect(autoScrollTo, itemIndex, scrollState)
 
         val keyboardController = LocalSoftwareKeyboardController.current
         val dismissKeyboardModifier = Modifier.pointerInput(Unit) {
@@ -389,6 +400,83 @@ private class ListRowHeights {
         total += height - (heights[rowId] ?: 0)
         heights[rowId] = height
     }
+}
+
+/**
+ * Scrolls [state] to [itemIndex] for the list's `auto_scroll_to` [request]:
+ * a jump when the list opens, an animated scroll when PHP asks for another
+ * row later. A request is applied once, so re-renders carrying the same one
+ * leave the list where the reader scrolled it.
+ *
+ * Armed only when the request changes, not when rows disappear and return.
+ * Kept composed even with no target, so disabling then setting the same
+ * index re-arms it without treating an empty list as a fresh request.
+ *
+ * The applied state is saved with the list's own position. A list
+ * restored by its screen's saved state (going back to it) already sits
+ * where it was left, and applying the same request again would undo that.
+ */
+@Composable
+internal fun ListAutoScrollEffect(request: Int, itemIndex: Int, state: LazyListState) {
+    val didInitialScroll = rememberSaveable { mutableStateOf(false) }
+    val lastRequest = rememberSaveable { mutableIntStateOf(-1) }
+    val armed = rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(request, itemIndex) {
+        if (request != lastRequest.intValue) {
+            lastRequest.intValue = request
+            armed.value = request >= 0
+        }
+        if (!armed.value || itemIndex < 0) return@LaunchedEffect
+
+        armed.value = false
+        val opening = !didInitialScroll.value
+        didInitialScroll.value = true
+        if (opening) state.scrollToItem(itemIndex) else state.animateScrollToItem(itemIndex)
+    }
+}
+
+/**
+ * Where leaf row [row] sits among the list's lazy items, which also hold
+ * section headers, gaps and footers, sticky headers and a pager header.
+ * Mirrors how [ListRenderer] lays the items out; null when there's no such row.
+ */
+private fun lazyItemIndexOfRow(
+    children: List<NativeUINode>,
+    row: Int,
+    horizontal: Boolean,
+    grouped: Boolean,
+    pagerHeader: PagerHeader?,
+): Int? {
+    if (row < 0) return null
+    if (horizontal) return row.takeIf { it < children.size }
+
+    var item = 0
+    var leaf = 0
+    if (pagerHeader != null) {
+        item += if (pagerHeader.hasTabs) 2 else 1
+        for (child in children.flatMap { if (it.type == "list_section") it.children else listOf(it) }) {
+            if (child.type != "sticky_header" && leaf++ == row) return item
+            item++
+        }
+        return null
+    }
+    for (child in children) {
+        if (child.type == "list_section") {
+            if (child.props.getString("header", "").isNotEmpty() || grouped) item++
+            for (sectionRow in child.children) {
+                if (leaf++ == row) return item
+                item++
+            }
+            if (child.props.getString("footer", "").isNotEmpty()) item++
+        } else if (child.type == "sticky_header") {
+            item++
+        } else {
+            if (leaf++ == row) return item
+            item++
+        }
+    }
+    return null
 }
 
 /**

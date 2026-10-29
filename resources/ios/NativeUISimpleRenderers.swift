@@ -4,6 +4,10 @@ import UIKit
 struct NativeUIPressableRenderer: View {
     let node: NativeUINode
     var body: some View {
+        // `:menu` and `:context-menu` items ride along as `top_bar_action`
+        // children. They're for the menu only: laid out with the content,
+        // each would take a share of the pressable's gap.
+        let content = node.children.filter { $0.type != "top_bar_action" }
         if node.props.getBool("has_menu") {
             // `:menu` attribute attached — wrap the pressable's content
             // as a SwiftUI Menu's label. SwiftUI's Menu absorbs taps to
@@ -16,7 +20,7 @@ struct NativeUIPressableRenderer: View {
                     pressableMenuItem(item)
                 }
             } label: {
-                NativeUIColumnRenderer(node: node)
+                NativeUIColumnRenderer(node: node, children: content)
                     .contentShape(Rectangle())
             }
         } else if node.props.getBool("has_context_menu") {
@@ -25,14 +29,14 @@ struct NativeUIPressableRenderer: View {
             // lifts the pressable out of the screen and plays the haptic,
             // as a long press on a row does anywhere in iOS.
             let items = node.children.filter { $0.type == "top_bar_action" }
-            NativeUIColumnRenderer(node: node)
+            NativeUIColumnRenderer(node: node, children: content)
                 .contextMenu {
                     ForEach(items) { item in
                         pressableMenuItem(item)
                     }
                 }
         } else {
-            NativeUIColumnRenderer(node: node)
+            NativeUIColumnRenderer(node: node, children: content)
         }
     }
 }

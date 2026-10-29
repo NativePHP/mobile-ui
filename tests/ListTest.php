@@ -170,3 +170,20 @@ it('serializes a placeholder estimated height from attributes', function () {
 
     expect($placeholder['props']['estimated_height'])->toBe(120.0);
 });
+
+it('opens a list at a row with auto-scroll-to', function () {
+    $tree = collectList(['auto-scroll-to' => '12', 'scroll-target' => 'log-following']);
+
+    expect($tree['props']['auto_scroll_to'])->toBe(12)
+        ->and($tree['props']['scroll_target'])->toBe('log-following');
+});
+
+it('sends no row to scroll to unless one is asked for', function () {
+    expect(collectList([])['props'] ?? [])->not->toHaveKey('auto_scroll_to')
+        ->and(collectList(['auto-scroll-to' => null])['props'] ?? [])->not->toHaveKey('auto_scroll_to');
+});
+
+it('preserves the requested row including negative indices that disable auto-scroll', function (int $index) {
+    expect(collectList(['autoScrollTo' => $index])['props']['auto_scroll_to'])->toBe($index)
+        ->and(NativeList::make()->autoScrollTo($index)->toArray(new CallbackRegistry)['props']['auto_scroll_to'])->toBe($index);
+})->with([0, 12, -3]);

@@ -92,6 +92,44 @@ NativeList::make()
     ->onEndReached('loadMore');
 ```
 
+### Opening a list at a row
+
+`auto-scroll-to` opens a `native:list` or `native:virtual-list` with that row at the top: a screen restored after a relaunch, a deep link to a record, or the row just added. Rows count from `0`, the way `on-visible-range` counts them, with a section's rows in their place.
+
+```blade
+<native:list :auto-scroll-to="$openAt">
+    @foreach ($posts as $post)
+        <native:list-item native:key="post-{{ $post->id }}" :headline="$post->title" />
+    @endforeach
+</native:list>
+```
+
+The list scrolls when it is created and again when the index changes, never while it stays the same, so re-renders don't pull it away from where the reader scrolled. A row that hasn't loaded yet is scrolled to when it arrives. You don't need it to keep a list in place across a pushed screen: going back already does.
+
+Like `ScrollView::autoScrollTo()`, negative indices disable auto-scroll. An index past the end waits for that row instead of clamping to the last row. Once applied, content changes alone don't reapply it, even if the list empties and fills again. To request the same row another time, render with auto-scroll disabled, then set the index in a later render.
+
+A virtual list only draws the rows inside its window, so the window has to hold the row. `scrollVirtualListTo()` on the `HasVirtualListWindow` screen moves the window there and sets `$virtualScrollTo` for the list:
+
+```php
+public function mount(int $contact): void
+{
+    $this->scrollVirtualListTo($contact);
+}
+```
+
+```blade
+<native:virtual-list
+    :count="$total"
+    :from="$virtualWindowFrom"
+    :to="$virtualWindowTo"
+    :auto-scroll-to="$virtualScrollTo"
+    item="rows.contact"
+    on-window-change="setVirtualWindow"
+/>
+```
+
+Both elements take it through the fluent API too: `NativeList::make()->autoScrollTo(12)`.
+
 ### Sticky headers
 
 A `native:sticky-header` in a list is a row that pins to the top of the list once you scroll it there, while the rows after it scroll underneath, like CSS `position: sticky`. The next sticky header pushes it off. It lays its children out like a column, so give it a background or the rows will show through.
@@ -119,6 +157,41 @@ use Native\Mobile\UI\Elements\StickyHeader;
 
 StickyHeader::make($newPostsButton);
 ```
+
+## Popovers
+
+`<native:popover>` floats its children in a small bubble beside the spot it
+is laid over, while `visible` is true. It draws nothing itself and takes no
+touches, so put it over the view it points at, in a stack, beside that view
+rather than inside a pressable:
+
+```blade
+<native:stack :width="30" :height="30">
+    <native:pressable @press="openReactions({{ $id }})" a11y-label="React">
+        <native:icon name="face.smiling" />
+    </native:pressable>
+    <native:popover
+        class="absolute top-0 bottom-0 left-0 right-0"
+        :visible="$reactingTo === $id"
+        @dismiss="closeReactions"
+    >
+        <native:row class="gap-2 p-2">
+            <native:button @press="react('👍')">👍</native:button>
+            <native:button @press="react('🎉')">🎉</native:button>
+        </native:row>
+    </native:popover>
+</native:stack>
+```
+
+The bubble opens above the spot, or below it with `placement="bottom"`, and
+takes the other side when it wouldn't fit between the spot and the system
+bars. iOS draws a system popover with its arrow, kept a popover on iPhone;
+Android draws a raised surface in a popup, centred on the spot. Both take
+their colour from `theme.surface`.
+
+A tap outside it (or back, on Android) fires `@dismiss`. Close it from PHP
+by setting `visible` to false, for instance once something in it is chosen;
+that never fires `@dismiss`.
 
 ## Accessibility
 
@@ -374,6 +447,56 @@ would. `assertPicker*` match on the picker's `label`.
 Macros register only under a test runner, and only on a core whose
 `TestableComponent` is macroable — the same `method_exists` gate the camera
 plugin uses for its `FakeBridge` macros.
+
+## Emoji Picker
+
+`<native:emoji-picker>` shows the platform's own emoji chooser, so people get
+search, recents and skin tones without the app drawing a grid of its own.
+It takes no space in the layout; put it anywhere in the screen.
+
+```blade
+<native:emoji-picker
+    :visible="$picking"
+    @change="react"
+    @dismiss="closePicker"
+/>
+```
+
+```php
+public bool $picking = false;
+
+public function react(string $emoji): void
+{
+    $this->picking = false;
+    // ...
+}
+
+public function closePicker(): void
+{
+    $this->picking = false;
+}
+```
+
+- **iOS** has no public emoji picker view, so the element raises the system
+  emoji keyboard on a hidden field, with a Done bar above it (`done-label`
+  renames it). This is the same keyboard Messages opens for an emoji Tapback.
+  If someone has removed the emoji keyboard in Settings they get their
+  default keyboard, and anything that isn't an emoji is ignored.
+- **Android** shows Jetpack's `EmojiPickerView` (androidx.emoji2) in a
+  Material 3 bottom sheet: categories, recently used, and skin-tone, gender
+  and direction variants on a long press.
+
+`@change` gets each picked emoji as a string. The picker stays open until you
+set `visible` to false, so close it in that handler for a single pick or leave
+it open to collect several. `@dismiss` fires when the person closes it
+themselves, never when PHP does.
+
+The emoji is whatever the platform hands over: it can carry a skin-tone
+modifier or a variation selector, or be a sequence newer than your server
+accepts. Check it before you store or send it.
+
+In tests, pick with `->select('react', '👍')` and close with
+`->dismissSheet('closePicker')`.
 
 ## Testing
 

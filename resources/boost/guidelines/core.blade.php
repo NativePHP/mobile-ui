@@ -25,6 +25,12 @@ paths serialize to the same wire tree.
   Use `.live` / `.blur` / `.debounce.Xms` modifiers to control sync frequency.
 - Wire callbacks with event attributes (`@tap`, `@change`, `@submit`,
   `@dismiss`) pointing at public methods on the component.
+- `<native:popover :visible="$open" @dismiss="close">` floats its children
+  in a bubble beside the spot it's laid over: above by default
+  (`placement="bottom"` for below), on the other side when there's no room.
+  It draws nothing itself, so lay it over its anchor in a stack with
+  `class="absolute top-0 bottom-0 left-0 right-0"`, next to (not inside) a
+  pressable. Close it from PHP after a choice; `@dismiss` is a tap outside.
 - Image sources — `<native:image src>`, and `leadingAvatar` / `leadingImage`
   on `<native:list-item>` — all resolve the same way: a remote URL
   (`https://…`), a device file path (`/var/mobile/…/photo.jpg`, what the
@@ -65,6 +71,14 @@ paths serialize to the same wire tree.
 - In tests, drive pickers with the `pickDate()` / `pickTime()` /
   `pickDateTime()` / `clearPicker()` macros and assert with
   `assertPicker()` / `assertPickerValue()` / `assertPickerEmpty()`.
+- `<native:emoji-picker :visible="$open" @change="react" @dismiss="close" />`
+  opens the platform's own emoji chooser (the emoji keyboard on iOS,
+  Jetpack's `EmojiPickerView` in a sheet on Android) instead of a hand-drawn
+  grid. `@change` gets each emoji as a string; it stays open until PHP sets
+  `visible` false, so close it there for a one-off pick. Check the emoji
+  before you send it on: it can carry skin tones or be newer than your
+  server knows. In tests, `->select('react', '👍')` picks and
+  `->dismissSheet('close')` closes it.
 
 @verbatim
 <code-snippet name="Declaring native elements in Blade" lang="blade">

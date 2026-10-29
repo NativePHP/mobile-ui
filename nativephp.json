@@ -230,6 +230,14 @@
             "self_closing": false
         },
         {
+            "type": "popover",
+            "element": "Native\\Mobile\\UI\\Elements\\Popover",
+            "blade": "Native\\Mobile\\UI\\Components\\Popover",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.PopoverRenderer",
+            "ios_renderer": "NativeUIPopoverRenderer",
+            "self_closing": false
+        },
+        {
             "type": "button",
             "element": "Native\\Mobile\\UI\\Elements\\Button",
             "blade": "Native\\Mobile\\UI\\Components\\Button",
@@ -323,6 +331,14 @@
             "blade": "Native\\Mobile\\UI\\Components\\DatePicker",
             "android_renderer": "com.nativephp.plugins.native_ui.ui.DatePickerRenderer",
             "ios_renderer": "NativeUIDatePickerRenderer",
+            "self_closing": true
+        },
+        {
+            "type": "emoji_picker",
+            "element": "Native\\Mobile\\UI\\Elements\\EmojiPicker",
+            "blade": "Native\\Mobile\\UI\\Components\\EmojiPicker",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.EmojiPickerRenderer",
+            "ios_renderer": "NativeUIEmojiPickerRenderer",
             "self_closing": true
         },
         {
@@ -540,7 +556,8 @@
                 "io.coil-kt.coil3:coil-compose:3.1.0",
                 "io.coil-kt.coil3:coil-network-okhttp:3.1.0",
                 "androidx.compose.material:material-icons-core",
-                "androidx.compose.material:material-icons-extended"
+                "androidx.compose.material:material-icons-extended",
+                "androidx.emoji2:emoji2-emojipicker:1.7.0"
             ]
         }
     },

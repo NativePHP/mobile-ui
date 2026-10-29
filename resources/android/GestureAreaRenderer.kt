@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -49,6 +50,13 @@ import kotlin.math.abs
  *   - `pan-x-id` /
  *     `pan-x-initial`          — same, for the horizontal axis. Bind one
  *                                axis or both.
+ *   - `pan-x-snap` /
+ *     `pan-y-snap`     (string)— comma-separated points a bound axis
+ *                                settles on (see PanSnap): it follows the
+ *                                finger between the lowest and highest
+ *                                with resistance past them, springs to
+ *                                the nearest on release, and springs to a
+ *                                PHP write-back too.
  *   - `on_drag_end`    (int)   — callback fired when a drag ends,
  *                                carrying the final "x,y" translation
  *                                (dp) as text (rides the TEXT_CHANGE
@@ -120,6 +128,9 @@ object GestureAreaRenderer {
         )
         val scope = rememberCoroutineScope()
         val settle = remember { BoundedPan() }
+        val snapX = PanSnap.parse(node.props.getString("pan-x-snap"))
+        val snapY = PanSnap.parse(node.props.getString("pan-y-snap"))
+        val snapping = remember { SnapPan() }
 
         // Seed during COMPOSITION (inline, before children compose) rather
         // than in a LaunchedEffect: effects run after children have
@@ -133,8 +144,8 @@ object GestureAreaRenderer {
         //     on a persistent SharedValue. That is an explicit
         //     write-back: push it into the store even though the id
         //     already has a live value (a reset button, snap-to, etc.).
-        SyncBinding(panXId, panXInitial)
-        SyncBinding(panYId, panYInitial)
+        SyncBinding(panXId, panXInitial, if (snapX.isEmpty) null else { value -> snapping.to(panXId, value, scope) })
+        SyncBinding(panYId, panYInitial, if (snapY.isEmpty) null else { value -> snapping.to(panYId, value, scope) })
         SyncBinding(pinchId, pinchInitial)
 
         Box(
@@ -143,7 +154,7 @@ object GestureAreaRenderer {
                 .onSizeChanged { size ->
                     areaSize = with(density) { Size(size.width.toDp().value, size.height.toDp().value) }
                 }
-                .pointerInput(panXId, panYId, onDragEnd, bounds) {
+                .pointerInput(panXId, panYId, onDragEnd, bounds, snapX, snapY) {
                     if (panXId == 0 && panYId == 0 && onDragEnd == 0) return@pointerInput
                     if (bounds.enabled) {
                         // The undamped pan the finger asked for, and what was
@@ -197,20 +208,37 @@ object GestureAreaRenderer {
                     // axes) it watches and is what moves the SharedValue;
                     // `raw` is the pointer's full movement, kept for both
                     // axes so `on_drag_end` can report an unbound one too.
+                    // A snapping axis follows the finger from where it was
+                    // when the drag began (rawX / rawY), with resistance
+                    // past its outer points, and the tracker's fling picks
+                    // the point it springs to on release.
+                    var rawX = 0f
+                    var rawY = 0f
+                    val velocity = VelocityTracker()
+                    val onStart: (Offset) -> Unit = {
+                        snapping.stop()
+                        rawX = if (panXId != 0) SharedValueStore.valueOf(panXId) else 0f
+                        rawY = if (panYId != 0) SharedValueStore.valueOf(panYId) else 0f
+                        velocity.resetTracking()
+                    }
                     val onDrag: (Offset, Offset) -> Unit = { bound, raw ->
                         gestureX += raw.x.toDp().value
                         gestureY += raw.y.toDp().value
+                        rawX += bound.x.toDp().value
+                        rawY += bound.y.toDp().value
                         if (panXId != 0) {
-                            SharedValueStore.set(panXId, SharedValueStore.valueOf(panXId) + bound.x.toDp().value)
+                            SharedValueStore.set(panXId, if (snapX.isEmpty) SharedValueStore.valueOf(panXId) + bound.x.toDp().value else snapX.resisted(rawX))
                         }
                         if (panYId != 0) {
-                            SharedValueStore.set(panYId, SharedValueStore.valueOf(panYId) + bound.y.toDp().value)
+                            SharedValueStore.set(panYId, if (snapY.isEmpty) SharedValueStore.valueOf(panYId) + bound.y.toDp().value else snapY.resisted(rawY))
                         }
                     }
                     val onEnd: () -> Unit = {
+                        // px per second, into dp like the pan itself.
+                        val fling = velocity.calculateVelocity()
+                        val x = if (panXId != 0) snapping.settle(panXId, snapX, fling.x.toDp().value, scope) else gestureX
+                        val y = if (panYId != 0) snapping.settle(panYId, snapY, fling.y.toDp().value, scope) else gestureY
                         if (onDragEnd != 0) {
-                            val x = if (panXId != 0) SharedValueStore.valueOf(panXId) else gestureX
-                            val y = if (panYId != 0) SharedValueStore.valueOf(panYId) else gestureY
                             NativeUIBridge.sendTextChangeEvent(onDragEnd, node.id, "$x,$y")
                         }
                         gestureX = 0f
@@ -221,21 +249,29 @@ object GestureAreaRenderer {
                         // other direction stays free for an enclosing
                         // scroll container.
                         panXId != 0 && panYId == 0 -> detectHorizontalDragGestures(
+                            onDragStart = onStart,
                             onDragEnd = onEnd,
                             onDragCancel = onEnd,
                         ) { change, dragAmount ->
+                            velocity.addPosition(change.uptimeMillis, change.position)
                             onDrag(Offset(dragAmount, 0f), change.position - change.previousPosition)
                         }
                         panXId == 0 && panYId != 0 -> detectVerticalDragGestures(
+                            onDragStart = onStart,
                             onDragEnd = onEnd,
                             onDragCancel = onEnd,
                         ) { change, dragAmount ->
+                            velocity.addPosition(change.uptimeMillis, change.position)
                             onDrag(Offset(0f, dragAmount), change.position - change.previousPosition)
                         }
                         else -> detectDragGestures(
+                            onDragStart = onStart,
                             onDragEnd = onEnd,
                             onDragCancel = onEnd,
-                        ) { _, dragAmount -> onDrag(dragAmount, dragAmount) }
+                        ) { change, dragAmount ->
+                            velocity.addPosition(change.uptimeMillis, change.position)
+                            onDrag(dragAmount, dragAmount)
+                        }
                     }
                 }
                 .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax, bounds) {
@@ -407,14 +443,16 @@ object GestureAreaRenderer {
      * the last-synced pair, not something composition should observe.
      */
     @Composable
-    private fun SyncBinding(id: Int, initial: Float) {
+    private fun SyncBinding(id: Int, initial: Float, springTo: ((Float) -> Unit)? = null) {
         if (id == 0) return
         val holder = remember { BindingHolder() }
         val prev = holder.pair
         if (prev?.first != id) {
             SharedValueStore.seed(id, initial)
         } else if (prev.second != initial) {
-            SharedValueStore.set(id, initial)
+            // A snapping axis springs to a write-back, as it does on
+            // release, so closing a revealed row from PHP slides it shut.
+            if (springTo != null) springTo(initial) else SharedValueStore.set(id, initial)
         }
         holder.pair = id to initial
     }
@@ -502,7 +540,7 @@ object GestureAreaRenderer {
                 }
             if (moves.any { (_, from, to) -> abs(to - from) > 0.01f }) {
                 job = scope.launch {
-                    animate(0f, 1f, animationSpec = tween(350, easing = EaseOutCubic)) { progress, _ ->
+                    animate(0f, 1f, animationSpec = tween(SettleMillis, easing = EaseOutCubic)) { progress, _ ->
                         moves.forEach { (id, from, to) -> SharedValueStore.set(id, from + (to - from) * progress) }
                     }
                 }
@@ -511,10 +549,80 @@ object GestureAreaRenderer {
             val y = moves.firstOrNull { it.first == panYId }?.third ?: 0f
             return x to y
         }
+    }
 
-        private companion object {
-            /** Fast away from the edge, slowing into place. */
-            val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
+    /**
+     * The points a snapping axis settles on (`pan-x-snap` / `pan-y-snap`),
+     * lowest first. Empty when the axis doesn't snap. A data class, so a
+     * pointerInput keyed on it restarts only when the points change.
+     */
+    private data class PanSnap(val points: List<Float>) {
+        val isEmpty: Boolean get() = points.size < 2
+
+        /** A third of the finger's movement past the outer points, so the edge reads as a stop. */
+        fun resisted(raw: Float): Float {
+            if (isEmpty) return raw
+            val low = points.first()
+            val high = points.last()
+            return when {
+                raw < low -> low - (low - raw) / 3f
+                raw > high -> high + (raw - high) / 3f
+                else -> raw
+            }
+        }
+
+        /**
+         * Where the pan rests: the point nearest where a tenth of a second
+         * more of the fling would carry it, so a quick flick opens a row
+         * the finger only moved part of the way.
+         */
+        fun target(current: Float, velocity: Float): Float {
+            if (isEmpty) return current
+            val projected = current + velocity * 0.1f
+            return points.minByOrNull { abs(it - projected) } ?: current
+        }
+
+        companion object {
+            fun parse(wire: String): PanSnap =
+                PanSnap(wire.split(',').mapNotNull { it.trim().toFloatOrNull() }.distinct().sorted())
         }
     }
+
+    /** Springs a snapping axis to where it rests, on release or a PHP write-back. */
+    private class SnapPan {
+        private var job: Job? = null
+
+        fun stop() {
+            job?.cancel()
+            job = null
+        }
+
+        /** Settles [id] for [snap] after a fling of [velocity] dp/s, and returns where it rests. */
+        fun settle(id: Int, snap: PanSnap, velocity: Float, scope: CoroutineScope): Float {
+            val current = SharedValueStore.valueOf(id)
+            val rest = snap.target(current, velocity)
+            to(id, rest, scope)
+            return rest
+        }
+
+        fun to(id: Int, target: Float, scope: CoroutineScope) {
+            stop()
+            val from = SharedValueStore.valueOf(id)
+            if (abs(target - from) <= 0.01f) {
+                SharedValueStore.set(id, target)
+                return
+            }
+            job = scope.launch {
+                animate(0f, 1f, animationSpec = tween(SettleMillis, easing = EaseOutCubic)) { progress, _ ->
+                    SharedValueStore.set(id, from + (target - from) * progress)
+                }
+            }
+        }
+    }
+
+    /** How long a pan takes to spring back inside its bounds or onto a snap point. */
+    private const val SettleMillis = 350
+
+    /** Fast away from where it was let go, slowing into place. */
+    private val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
 }
