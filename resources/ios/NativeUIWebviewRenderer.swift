@@ -53,12 +53,21 @@ struct NativeUIWebviewRenderer: View {
 /// Unlike the shell's coordinator, ours never toggles `NativeUIBridge`
 /// web/native mode on navigation — this webview lives *inside* the native
 /// tree, so page loads here must not unmount it.
+///
+/// A `fullscreen` webview gets the shell's `injectSafeAreaInsets` treatment
+/// too. The helper scripts only set `--inset-*` to `env(safe-area-inset-*)`,
+/// which is 0 inside the native tree, and unlike the root webview there's no
+/// working `env()` underneath to cover a page before the injection lands.
 private struct PHPWebViewContainer: UIViewRepresentable {
     let node: NativeUINode
 
+    /// Changes on rotation and Split View resizes, when the insets change.
+    @Environment(\.windowWidth) private var windowWidth
+
     func makeCoordinator() -> Coordinator {
         Coordinator(navigatedCallbackId: node.props.getCallbackId("on_navigated"),
-                    nodeId: node.id)
+                    nodeId: node.id,
+                    injectsSafeAreaInsets: node.props.getBool("fullscreen", default: false))
     }
 
     /// Stop this webview's dedicated PHP thread the moment the webview
@@ -106,6 +115,12 @@ private struct PHPWebViewContainer: UIViewRepresentable {
         }
         context.coordinator.navigatedCallbackId = node.props.getCallbackId("on_navigated")
         context.coordinator.nodeId = node.id
+        context.coordinator.injectsSafeAreaInsets = node.props.getBool("fullscreen", default: false)
+
+        if context.coordinator.lastWindowWidth != windowWidth {
+            context.coordinator.lastWindowWidth = windowWidth
+            context.coordinator.injectSafeAreaInsets(webView)
+        }
     }
 
     /// `src` is an app route path in php mode; anything not starting with
@@ -128,11 +143,16 @@ private struct PHPWebViewContainer: UIViewRepresentable {
         var navigatedCallbackId: Int
         var nodeId: Int
         var lastPath: String = ""
+        var lastWindowWidth: CGFloat = 0
         var phpRuntime: WebviewPHPRuntime?
+        private var insetsScript: WKUserScript?
+        private var insetsScriptValues: UIEdgeInsets?
+        var injectsSafeAreaInsets: Bool
 
-        init(navigatedCallbackId: Int, nodeId: Int) {
+        init(navigatedCallbackId: Int, nodeId: Int, injectsSafeAreaInsets: Bool) {
             self.navigatedCallbackId = navigatedCallbackId
             self.nodeId = nodeId
+            self.injectsSafeAreaInsets = injectsSafeAreaInsets
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -186,12 +206,59 @@ private struct PHPWebViewContainer: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             print("[NativePHP] webview(php): did finish — \(webView.url?.absoluteString ?? "nil")")
+            injectSafeAreaInsets(webView)
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            injectSafeAreaInsets(webView)
+
             guard navigatedCallbackId != 0,
                   let url = webView.url?.absoluteString else { return }
             NativeElementBridge.sendTextChangeEvent(navigatedCallbackId, nodeId: nodeId, text: url)
+        }
+
+        /// Mirrors the shell's `injectSafeAreaInsets` for the root webview,
+        /// reading the webview's own window so an external display's scene
+        /// can't supply the insets.
+        ///
+        /// Script evaluated from a navigation callback can land after the new
+        /// page has rendered, so the same script also runs at document start
+        /// of every later page, like `addNativeHelper`'s safe-area CSS.
+        func injectSafeAreaInsets(_ webView: WKWebView) {
+            guard injectsSafeAreaInsets, let window = webView.window else { return }
+
+            let insets = window.safeAreaInsets
+            let colorScheme = window.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
+
+            let js = """
+            (function() {
+                if (document.documentElement) {
+                    document.documentElement.style.setProperty('--inset-top', '\(insets.top)px');
+                    document.documentElement.style.setProperty('--inset-right', '\(insets.right)px');
+                    document.documentElement.style.setProperty('--inset-bottom', '\(insets.bottom)px');
+                    document.documentElement.style.setProperty('--inset-left', '\(insets.left)px');
+                    document.documentElement.style.setProperty('--native-color-scheme', '\(colorScheme)');
+                }
+            })();
+            """
+
+            if insets != insetsScriptValues {
+                insetsScriptValues = insets
+                replaceInsetsScript(with: js, in: webView.configuration.userContentController)
+            }
+
+            webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        /// WebKit can't remove a single user script, so the others are put back.
+        private func replaceInsetsScript(with source: String, in controller: WKUserContentController) {
+            let otherScripts = controller.userScripts.filter { $0 !== insetsScript }
+            let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+
+            controller.removeAllUserScripts()
+            otherScripts.forEach(controller.addUserScript)
+            controller.addUserScript(script)
+            insetsScript = script
         }
     }
 }

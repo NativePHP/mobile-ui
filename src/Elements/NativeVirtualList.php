@@ -57,6 +57,9 @@ class NativeVirtualList extends Element
         if ($autoScrollTo !== null && $autoScrollTo !== '') {
             $this->autoScrollTo((int) $autoScrollTo);
         }
+        if (! empty($attrs['transparent'])) {
+            $this->transparent();
+        }
         $cb = $attrs['on_window_change'] ?? $attrs['onWindowChange'] ?? $attrs['on-window-change'] ?? null;
         if ($cb !== null) {
             $this->windowCallback = $cb;
@@ -88,6 +91,19 @@ class NativeVirtualList extends Element
     public function autoScrollTo(int $index): static
     {
         $this->listProps['auto_scroll_to'] = max(0, $index);
+
+        return $this;
+    }
+
+    /**
+     * Let the screen behind the list show through, as on `native:list`:
+     * SwiftUI's `List` paints the system background, and `bg-transparent`
+     * packs to the same value as "no colour". iOS-only in effect:
+     * Compose's LazyColumn draws no background of its own.
+     */
+    public function transparent(bool $value = true): static
+    {
+        $this->listProps['transparent'] = $value;
 
         return $this;
     }

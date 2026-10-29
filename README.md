@@ -156,6 +156,41 @@ use Native\Mobile\UI\Elements\StickyHeader;
 StickyHeader::make($newPostsButton);
 ```
 
+## Popovers
+
+`<native:popover>` floats its children in a small bubble beside the spot it
+is laid over, while `visible` is true. It draws nothing itself and takes no
+touches, so put it over the view it points at, in a stack, beside that view
+rather than inside a pressable:
+
+```blade
+<native:stack :width="30" :height="30">
+    <native:pressable @press="openReactions({{ $id }})" a11y-label="React">
+        <native:icon name="face.smiling" />
+    </native:pressable>
+    <native:popover
+        class="absolute top-0 bottom-0 left-0 right-0"
+        :visible="$reactingTo === $id"
+        @dismiss="closeReactions"
+    >
+        <native:row class="gap-2 p-2">
+            <native:button @press="react('👍')">👍</native:button>
+            <native:button @press="react('🎉')">🎉</native:button>
+        </native:row>
+    </native:popover>
+</native:stack>
+```
+
+The bubble opens above the spot, or below it with `placement="bottom"`, and
+takes the other side when it wouldn't fit between the spot and the system
+bars. iOS draws a system popover with its arrow, kept a popover on iPhone;
+Android draws a raised surface in a popup, centred on the spot. Both take
+their colour from `theme.surface`.
+
+A tap outside it (or back, on Android) fires `@dismiss`. Close it from PHP
+by setting `visible` to false, for instance once something in it is chosen;
+that never fires `@dismiss`.
+
 ## Accessibility
 
 Every element accepts a screen-reader label and an optional hint, via Blade
@@ -410,6 +445,56 @@ would. `assertPicker*` match on the picker's `label`.
 Macros register only under a test runner, and only on a core whose
 `TestableComponent` is macroable — the same `method_exists` gate the camera
 plugin uses for its `FakeBridge` macros.
+
+## Emoji Picker
+
+`<native:emoji-picker>` shows the platform's own emoji chooser, so people get
+search, recents and skin tones without the app drawing a grid of its own.
+It takes no space in the layout; put it anywhere in the screen.
+
+```blade
+<native:emoji-picker
+    :visible="$picking"
+    @change="react"
+    @dismiss="closePicker"
+/>
+```
+
+```php
+public bool $picking = false;
+
+public function react(string $emoji): void
+{
+    $this->picking = false;
+    // ...
+}
+
+public function closePicker(): void
+{
+    $this->picking = false;
+}
+```
+
+- **iOS** has no public emoji picker view, so the element raises the system
+  emoji keyboard on a hidden field, with a Done bar above it (`done-label`
+  renames it). This is the same keyboard Messages opens for an emoji Tapback.
+  If someone has removed the emoji keyboard in Settings they get their
+  default keyboard, and anything that isn't an emoji is ignored.
+- **Android** shows Jetpack's `EmojiPickerView` (androidx.emoji2) in a
+  Material 3 bottom sheet: categories, recently used, and skin-tone, gender
+  and direction variants on a long press.
+
+`@change` gets each picked emoji as a string. The picker stays open until you
+set `visible` to false, so close it in that handler for a single pick or leave
+it open to collect several. `@dismiss` fires when the person closes it
+themselves, never when PHP does.
+
+The emoji is whatever the platform hands over: it can carry a skin-tone
+modifier or a variation selector, or be a sequence newer than your server
+accepts. Check it before you store or send it.
+
+In tests, pick with `->select('react', '👍')` and close with
+`->dismissSheet('closePicker')`.
 
 ## Testing
 

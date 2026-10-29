@@ -126,6 +126,23 @@ it('leaves the visible range out of a list that does not ask for it', function (
         ->and($props)->not->toHaveKey('visible_range_step');
 });
 
+it('reports a scroll come to rest as two positions, as it reports the visible range', function () {
+    $registry = new CallbackRegistry;
+    NativeElementCollector::open('list', ['on-scroll-end' => 'scrollEnded']);
+    NativeElementCollector::close();
+
+    $props = NativeElementCollector::collect()->toArray($registry)['props'];
+
+    expect($registry->resolve($props['on_scroll_end'])['method'])->toBe('scrollEnded')
+        ->and($registry->kind($props['on_scroll_end']))->toBe('virtual_window');
+});
+
+it('leaves the scroll end out of a list that does not ask for it', function () {
+    $props = NativeList::make()->onVisibleRange('showRows')->toArray(new CallbackRegistry)['props'];
+
+    expect($props)->not->toHaveKey('on_scroll_end');
+});
+
 it('clamps the visible range step to one row', function () {
     $list = NativeList::make()->onVisibleRange('showRows')->visibleRangeStep(0);
 

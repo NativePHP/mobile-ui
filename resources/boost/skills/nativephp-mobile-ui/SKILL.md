@@ -27,8 +27,10 @@ dropped without an error.
 | `outlined-text-input`, `filled-text-input`, `bare-text-input` | `native:model`, `placeholder`, `label`, `@submit`, `@change`, `keyboard` (text\|number\|decimal\|email\|phone\|url\|password), `secure`, `revealable`, `multiline`, `max-length`, `autofocus`, `leading-icon`, `trailing-icon`, `error`, `supporting` |
 | `list` | `separator`, `plain`, `horizontal`, `on-refresh`, `on-end-reached`, `auto-scroll-to` (row to open at). Children: `list-item` or any element |
 | `list-item` | see below |
+| `popover` | `:visible`, `@dismiss`, `placement` top\|bottom. Children are the bubble. Lay it over its anchor in a stack with `absolute top-0 bottom-0 left-0 right-0` |
 | `icon` | `name` (`star.fill`, `trash`, `plus`), or per platform `ios="checkmark.circle.fill" android="check_circle"`, `:size="20"`, `class="text-theme-primary"` |
 | `top-bar` | `title`, `subtitle`, `back`. Put it at the top level of the view |
+| `emoji-picker` | `:visible`, `@change` (gets the emoji), `@dismiss`, `done-label`. The system picker: iOS emoji keyboard, Android `EmojiPickerView` in a sheet. Stays open until `visible` is false |
 | also | `toggle`, `checkbox`, `slider`, `select`, `radio-group`, `chip`, `badge`, `date-picker`, `modal`, `bottom-sheet`, `tab-row`, `progress-bar`, `activity-indicator` |
 
 There is no `text-input` element. It throws "Unknown native element type: text_input".

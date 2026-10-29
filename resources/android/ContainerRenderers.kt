@@ -44,6 +44,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpOffset
 import com.nativephp.mobile.ui.MaterialIcon
 import com.nativephp.mobile.ui.nativerender.*
 
@@ -133,9 +147,112 @@ object PressableRenderer {
                         }
                 }
             }
+        } else if (node.props.getBool("has_context_menu")) {
+            ContextMenuPressable(node, modifier)
         } else {
             DefaultContainerNode(node, modifier)
         }
+    }
+
+    /**
+     * `:context-menu` attached — the same items as `:menu`, opened by a
+     * long press, with the long-press haptic, from where the finger is.
+     * The tap stays core's `@press`: its clickable is already on
+     * `modifier`, and the long press is watched from outside it, so a
+     * tap goes through untouched while a long press takes the rest of
+     * the touch and the clickable never fires.
+     */
+    @Composable
+    private fun ContextMenuPressable(node: NativeUINode, modifier: Modifier) {
+        var expanded by remember { mutableStateOf(false) }
+        var menuOffset by remember { mutableStateOf(DpOffset.Zero) }
+        val anchor = remember { MenuAnchor() }
+        val haptics = LocalHapticFeedback.current
+        val density = LocalDensity.current
+        val open = { offset: DpOffset ->
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            menuOffset = offset
+            expanded = true
+        }
+
+        Box(
+            modifier = Modifier
+                .onGloballyPositioned { anchor.outer = it }
+                .longPress { position -> open(anchor.offsetOf(position, density)) }
+                // Outside core's semantics too, which an `a11y-label`
+                // clears inside, so TalkBack can always open the menu.
+                // Its long press has no finger, so the menu hangs below.
+                .semantics { onLongClick { open(DpOffset.Zero); true } }
+                .then(modifier)
+                .onGloballyPositioned { anchor.inner = it },
+            propagateMinConstraints = true,
+        ) {
+            DefaultContainerNode(node, Modifier)
+            ExpressiveMenu(expanded = expanded, onDismissRequest = { expanded = false }, offset = menuOffset) {
+                node.children
+                    .filter { it.type == "top_bar_action" }
+                    .forEach { item ->
+                        renderAttachedMenuItem(item) { expanded = false }
+                    }
+            }
+        }
+    }
+
+    /**
+     * Calls [onLongPress] once a finger has rested for the long-press
+     * timeout without lifting or moving past the touch slop, then eats
+     * the rest of that touch. It watches the Initial pass, ahead of the
+     * clickable and any scrolling list it's in, and consumes nothing
+     * until then, so taps and scrolls behave as if it weren't there.
+     */
+    private fun Modifier.longPress(onLongPress: (Offset) -> Unit): Modifier =
+        pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val endedEarly = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    while (true) {
+                        val change = awaitPointerEvent(PointerEventPass.Initial).changes
+                            .firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed || change.isConsumed ||
+                            (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+                        ) {
+                            break
+                        }
+                    }
+                    true
+                }
+                if (endedEarly != null) return@awaitEachGesture
+
+                onLongPress(down.position)
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.forEach { it.consume() }
+                } while (event.changes.any { it.pressed })
+            }
+        }
+}
+
+/**
+ * Where a long press landed, for a context menu to open there. A dropdown
+ * hangs from the bottom edge of the bounds it's composed in, which sit
+ * inside the pressable's padding, while the press is measured from the
+ * pressable's outer edge, so the offset goes through both coordinates.
+ */
+private class MenuAnchor {
+    var outer: LayoutCoordinates? = null
+    var inner: LayoutCoordinates? = null
+
+    fun offsetOf(position: Offset, density: Density): DpOffset {
+        val outer = outer
+        val inner = inner
+
+        if (outer == null || inner == null || !outer.isAttached || !inner.isAttached) {
+            return DpOffset.Zero
+        }
+
+        val at = inner.localPositionOf(outer, position)
+
+        return with(density) { DpOffset(at.x.toDp(), (at.y - inner.size.height).toDp()) }
     }
 }
 
@@ -152,11 +269,13 @@ object PressableRenderer {
 internal fun ExpressiveMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
+    offset: DpOffset = DpOffset.Zero,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
+        offset = offset,
         shape = RoundedCornerShape(24.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,

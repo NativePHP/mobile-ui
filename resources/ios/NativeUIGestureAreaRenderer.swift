@@ -10,6 +10,13 @@ import UIKit
 /// Driven by props:
 ///   - `pan-x-id` /
 ///     `pan-x-initial`        — same as pan-y, for the horizontal axis.
+///   - `pan-x-snap` /
+///     `pan-y-snap`     (string)— comma-separated points a bound axis
+///                                settles on (see NativeUIPanSnap): it
+///                                follows the finger between the lowest
+///                                and highest with resistance past them,
+///                                springs to the nearest on release, and
+///                                springs to a PHP write-back too.
 ///   - `on_drag_end`    (int)   — callback fired when a drag ends,
 ///                                carrying the final "x,y" translation
 ///                                (points) as text; an unbound axis
@@ -96,6 +103,17 @@ struct NativeUIGestureAreaRenderer: View {
         )
         let a11yLabel = node.props.getString("a11y_label")
         let a11yHint = node.props.getString("a11y_hint")
+        let snapX = NativeUIPanSnap(node.props.getString("pan-x-snap"))
+        let snapY = NativeUIPanSnap(node.props.getString("pan-y-snap"))
+        // One bound axis and nothing else moving the pan: a UIKit pan that
+        // only takes drags along that axis, so an enclosing scroll view
+        // keeps the other (see AxisPanRecognizer). SwiftUI's drag below
+        // claims every touch from touch-down, which stops a scroll view
+        // scrolling when the drag starts on the area.
+        let axisPan: Axis? = bounds.enabled || pinchId != 0 ? nil
+            : panXId != 0 && panYId == 0 ? .horizontal
+            : panYId != 0 && panXId == 0 ? .vertical
+            : nil
 
         VStack(spacing: 0) {
             ForEach(node.children) { child in
@@ -139,8 +157,37 @@ struct NativeUIGestureAreaRenderer: View {
                     let y = panYId != 0 ? bounds.settled(store.value(for: panYId), axis: .vertical, scale: scale) : value.translation.height
                     NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: "\(x),\(y)")
                 },
-            including: hasPan ? .all : .subviews
+            including: hasPan && axisPan == nil ? .all : .subviews
         )
+        .modifier(AxisPanModifier(
+            axis: axisPan,
+            began: {
+                settle.stop()
+                if axisPan == .horizontal { dragStartX = store.value(for: panXId) } else { dragStart = store.value(for: panYId) }
+            },
+            changed: { translation in
+                if axisPan == .horizontal {
+                    store.set(snapX.resisted(dragStartX + translation), for: panXId)
+                } else {
+                    store.set(snapY.resisted(dragStart + translation), for: panYId)
+                }
+            },
+            ended: { velocity, across in
+                let horizontal = axisPan == .horizontal
+                let id = horizontal ? panXId : panYId
+                let snap = horizontal ? snapX : snapY
+                let current = store.value(for: id)
+                let rest = snap.target(from: current, velocity: velocity)
+                if rest != current {
+                    settle.run([.init(id: id, from: current, to: rest)])
+                }
+                if horizontal { dragStartX = rest } else { dragStart = rest }
+                guard onDragEnd != 0 else { return }
+                // The other axis isn't bound, so it reports the finger's
+                // raw movement across, as the drag above does.
+                NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: horizontal ? "\(rest),\(across)" : "\(across),\(rest)")
+            }
+        ))
         .modifier(PinchModifier(
             nodeId: node.id,
             pinchId: pinchId,
@@ -188,7 +235,7 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .onChange(of: panXInitial) { _, newInitial in
             guard panXId != 0 else { return }
-            store.set(newInitial, for: panXId)
+            writeBack(newInitial, for: panXId, snapping: !snapX.isEmpty)
             dragStartX = newInitial
         }
         .onChange(of: pinchId) { _, newId in
@@ -196,7 +243,7 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .onChange(of: panYInitial) { _, newInitial in
             guard panYId != 0 else { return }
-            store.set(newInitial, for: panYId)
+            writeBack(newInitial, for: panYId, snapping: !snapY.isEmpty)
             dragStart = newInitial
         }
         .onChange(of: pinchInitial) { _, newInitial in
@@ -205,6 +252,17 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .modifier(A11yLabelModifier(label: a11yLabel))
         .modifier(A11yHintModifier(hint: a11yHint))
+    }
+
+    /// PHP set a persistent SharedValue (`setValue()`): a snapping axis
+    /// springs there, as it does on release, so closing a revealed row
+    /// from PHP slides it shut; any other value jumps.
+    private func writeBack(_ value: CGFloat, for id: Int, snapping: Bool) {
+        guard snapping else {
+            store.set(value, for: id)
+            return
+        }
+        settle.run([.init(id: id, from: store.value(for: id), to: value)])
     }
 
     /// A bounded drag step: moves each bound axis by this step's change,
@@ -531,6 +589,155 @@ final class NativeUIPanSettle: NSObject {
     }
 }
 
+// MARK: - Snapping pan
+
+/// The points a snapping axis settles on (`pan-x-snap` / `pan-y-snap`),
+/// lowest first. Empty when the axis doesn't snap.
+struct NativeUIPanSnap {
+    let points: [CGFloat]
+
+    init(_ wire: String) {
+        let points = wire.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }.map { CGFloat($0) }.sorted()
+        self.points = points.count >= 2 ? points : []
+    }
+
+    var isEmpty: Bool { points.isEmpty }
+
+    /// How far past the lowest or highest point a drag gets for each
+    /// point the finger goes: a third, so the edge reads as a stop.
+    private static let resistance: CGFloat = 1 / 3
+
+    /// How long the fling carries on past the release, in seconds, when
+    /// picking the point to settle on: a quick flick opens a row the
+    /// finger only moved part of the way.
+    private static let carry: CGFloat = 0.1
+
+    func resisted(_ raw: CGFloat) -> CGFloat {
+        guard let low = points.first, let high = points.last else { return raw }
+        if raw < low { return low - (low - raw) * Self.resistance }
+        if raw > high { return high + (raw - high) * Self.resistance }
+        return raw
+    }
+
+    /// Where the pan rests: the point nearest where the fling would carry
+    /// it, or where the finger left it when the axis doesn't snap.
+    func target(from current: CGFloat, velocity: CGFloat) -> CGFloat {
+        guard !isEmpty else { return current }
+        let projected = current + velocity * Self.carry
+        return points.min { abs($0 - projected) < abs($1 - projected) } ?? current
+    }
+}
+
+/// Attaches AxisPanRecognizer when the area pans on one axis only.
+private struct AxisPanModifier: ViewModifier {
+    let axis: Axis?
+    let began: () -> Void
+    let changed: (CGFloat) -> Void
+    /// The velocity along the axis, then the translation across it.
+    let ended: (CGFloat, CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if let axis {
+            content.gesture(AxisPanRecognizer(axis: axis, began: began, changed: changed, ended: ended))
+        } else {
+            content
+        }
+    }
+}
+
+/// A one-finger pan that only begins when the finger first moves along
+/// its axis, the way a row's swipe actions or Android's horizontal drag
+/// detector do. A drag across it scrolls an enclosing scroll view, and a
+/// drag along it doesn't: the scroll view waits for this pan to decide,
+/// as does iOS 26's swipe back from mid-screen. The edge swipe back still
+/// wins, since this pan waits for it. A drag that takes the pan cancels
+/// the taps of whatever it started on.
+private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
+    let axis: Axis
+    let began: () -> Void
+    let changed: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(axis: axis)
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        let translation = recognizer.translation(in: recognizer.view)
+        let along = axis == .horizontal ? translation.x : translation.y
+        let across = axis == .horizontal ? translation.y : translation.x
+        switch recognizer.state {
+        case .began:
+            began()
+            changed(along)
+        case .changed:
+            changed(along)
+        case .ended:
+            let velocity = recognizer.velocity(in: recognizer.view)
+            ended(axis == .horizontal ? velocity.x : velocity.y, across)
+        case .cancelled, .failed:
+            ended(0, across)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        let axis: Axis
+
+        init(axis: Axis) {
+            self.axis = axis
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = pan.velocity(in: pan.view)
+            return axis == .horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            if let scrollView = otherGestureRecognizer.view as? UIScrollView,
+               otherGestureRecognizer === scrollView.panGestureRecognizer {
+                return true
+            }
+            if #available(iOS 26.0, *),
+               let navigation = navigationController(of: gestureRecognizer.view),
+               otherGestureRecognizer === navigation.interactiveContentPopGestureRecognizer {
+                return true
+            }
+            return false
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let navigation = navigationController(of: gestureRecognizer.view) else { return false }
+            return otherGestureRecognizer === navigation.interactivePopGestureRecognizer
+        }
+
+        private func navigationController(of view: UIView?) -> UINavigationController? {
+            var responder: UIResponder? = view
+            while let current = responder {
+                if let navigation = current as? UINavigationController { return navigation }
+                if let controller = current as? UIViewController, let navigation = controller.navigationController { return navigation }
+                responder = current.next
+            }
+            return nil
+        }
+    }
+}
+
 // MARK: - Swipe (conditional)
 
 /// Directional swipe with a configurable touch count (`swipe-fingers`,
@@ -581,7 +788,9 @@ private struct SwipeRecognizer: UIGestureRecognizerRepresentable {
         // Recognize alongside everything else (the sibling direction
         // recognizers, an enclosing ScrollView's pan, SwiftUI gestures
         // bridged by the host) — without this, whichever recognizer
-        // claims the touch first silently kills the swipe.
+        // claims the touch first silently kills the swipe. iOS 26's
+        // swipe back from mid-screen is the one exception (see the
+        // Coordinator).
         recognizer.delegate = context.coordinator
         return recognizer
     }
@@ -600,6 +809,31 @@ private struct SwipeRecognizer: UIGestureRecognizerRepresentable {
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
             true
+        }
+
+        /// iOS 26 pops a pushed screen on a swipe from anywhere in it, not
+        /// just the edge. Running alongside that, a right swipe here would
+        /// fire `@swipe` and start popping the screen too. Make the content
+        /// pop wait for this area's horizontal swipes to fail instead, so a
+        /// swipe that starts here is the area's. The edge pop is a separate
+        /// recognizer and still works over the area.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard #available(iOS 26, *),
+                  let swipe = gestureRecognizer as? UISwipeGestureRecognizer,
+                  !swipe.direction.isDisjoint(with: [.left, .right])
+            else { return false }
+            var responder: UIResponder? = gestureRecognizer.view
+            while let current = responder {
+                if let navigation = current as? UINavigationController,
+                   navigation.interactiveContentPopGestureRecognizer === otherGestureRecognizer {
+                    return true
+                }
+                responder = current.next
+            }
+            return false
         }
     }
 }
