@@ -4,6 +4,7 @@ namespace Native\Mobile\UI\Elements;
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\ShowsFieldErrors;
 
 /**
  * RadioGroup — single-choice container holding `<radio>` children.
@@ -15,6 +16,8 @@ use Native\Mobile\Edge\Element;
  */
 class RadioGroup extends Element
 {
+    use ShowsFieldErrors;
+
     protected string $type = 'radio_group';
 
     /** @var array<string, mixed> */
@@ -45,9 +48,7 @@ class RadioGroup extends Element
         if (isset($attrs['supporting'])) {
             $this->supporting($attrs['supporting']);
         }
-        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
-            $this->error();
-        }
+        $this->applyErrorAttributes($attrs);
 
         $this->applyA11yAttributes($attrs);
 

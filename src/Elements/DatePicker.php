@@ -9,6 +9,7 @@ use Exception;
 use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\UI\Concerns\ShowsFieldErrors;
 
 /**
  * DatePicker — native date, time, or date+time selection.
@@ -46,6 +47,8 @@ use Native\Mobile\Edge\Element;
  */
 class DatePicker extends Element
 {
+    use ShowsFieldErrors;
+
     protected string $type = 'date_picker';
 
     /** Selection granularity. `date` is the default. */
@@ -155,9 +158,7 @@ class DatePicker extends Element
         if (isset($attrs['supporting'])) {
             $this->supporting($attrs['supporting']);
         }
-        if (! empty($attrs['error']) || ! empty($attrs['isError']) || ! empty($attrs['is-error'])) {
-            $this->error();
-        }
+        $this->applyErrorAttributes($attrs);
 
         $this->applyA11yAttributes($attrs);
     }
