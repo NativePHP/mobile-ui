@@ -24,7 +24,7 @@ dropped without an error.
 | `column`, `row`, `stack`, `scroll-view`, `spacer`, `divider`, `pressable` | Tailwind `class`: `w-full h-full flex-1 gap-N p-N px-N items-center justify-between rounded-lg bg-theme-*` |
 | `text` (slot is the text) | `class` (`text-lg font-bold line-through underline text-theme-on-surface`), `font` |
 | `button` | label as slot or `label`; `variant` primary\|secondary\|destructive\|success\|ghost; `size` sm\|md\|lg; `icon`, `icon-trailing`, `ios-icon`, `android-icon`, `disabled`, `loading`, `a11y-label` |
-| `outlined-text-input`, `filled-text-input`, `bare-text-input` | `native:model`, `placeholder`, `label`, `@submit`, `@change`, `keyboard` (text\|number\|decimal\|email\|phone\|url\|password), `secure`, `revealable`, `multiline`, `max-length`, `autofocus`, `leading-icon`, `trailing-icon`, `error`, `supporting` |
+| `outlined-text-input`, `filled-text-input`, `bare-text-input` | `native:model`, `placeholder`, `label`, `@submit`, `@change`, `keyboard` (text\|number\|decimal\|email\|phone\|url\|password), `secure`, `revealable`, `multiline`, `max-length`, `autofocus`, `leading-icon`, `trailing-icon`, `error`, `supporting`, `@selectionChange`, `:selection` |
 | `list` | `separator`, `plain`, `horizontal`, `on-refresh`, `on-end-reached`, `auto-scroll-to` (row to open at). Children: `list-item` or any element |
 | `list-item` | see below |
 | `popover` | `:visible`, `@dismiss`, `placement` top\|bottom. Children are the bubble. Lay it over its anchor in a stack with `absolute top-0 bottom-0 left-0 right-0` |
@@ -58,6 +58,10 @@ public function save(?string $submitted = null): void
 ```
 
 - `keep-focus-on-submit` only works on iOS.
+- When PHP rewrites the text (a picked mention, a completed word), say where the caret goes with
+  `:selection="$caret"` (code points, or `[$start, $end]` to select). It applies only when the field takes that new
+  value, and the caret goes to the end without it. Keep the attribute on the field, null when there's nothing to
+  place: on iOS a field that gains or loses it is rebuilt and the keyboard drops.
 
 ## List items
 

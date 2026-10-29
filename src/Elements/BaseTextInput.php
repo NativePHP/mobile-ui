@@ -19,6 +19,7 @@ use Native\Mobile\Icon\IosSymbol;
  *
  * Allowed per-instance:
  *   - `value`, `placeholder`, `label`, `supporting`  (content)
+ *   - `selection`                                     (where the caret goes when PHP sets `value`)
  *   - `disabled`, `readOnly`, `error`, `loading`     (state)
  *   - `keyboard`, `autocapitalization` / `autocapitalize`, `content-type` / `autocomplete`, `secure`, `revealable`, `maxLength`, `multiline`, `maxLines`, `minLines`, `submit-label`, `next-focus` (behavior)
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
@@ -33,6 +34,9 @@ use Native\Mobile\Icon\IosSymbol;
  * via `selection-debounce-ms` / `->selectionDebounceMs()`. Never emitted
  * for `secure` inputs (the callback is not serialized, and the renderers
  * refuse to emit as well).
+ *
+ * `selection` is the other direction: where the caret goes when PHP changes
+ * the field's text, in the same code-point offsets. See `selection()`.
  *
  * Subclasses (`OutlinedTextInput`, `FilledTextInput`) only override `$type`
  * so native renderers can dispatch to the right Material3 / SwiftUI primitive.
@@ -67,6 +71,17 @@ abstract class BaseTextInput extends Element
         }
         if (isset($attrs['supporting'])) {
             $this->supporting($attrs['supporting']);
+        }
+        // `array_key_exists`, not `isset`: `:selection="$caret"` with a null
+        // `$caret` still declares the field as one PHP places the caret in.
+        if (array_key_exists('selection', $attrs)) {
+            $selection = $attrs['selection'];
+
+            if (is_array($selection)) {
+                $this->selection($selection[0] ?? null, $selection[1] ?? null);
+            } else {
+                $this->selection($selection === null || $selection === '' ? null : (int) $selection);
+            }
         }
 
         // State
@@ -240,6 +255,39 @@ abstract class BaseTextInput extends Element
     public function supporting(string $text): static
     {
         $this->inputProps['supporting'] = $text;
+
+        return $this;
+    }
+
+    /**
+     * Where the caret goes when PHP changes the field's text: a caret at
+     * `$start`, or `$start` to `$end` selected. Offsets are Unicode code
+     * points into the new text, as `@selectionChange` reports them, and are
+     * clamped to it.
+     *
+     * The field reads it only at the moment it takes a new value from PHP
+     * (one that isn't an echo of what the user typed), so it never moves the
+     * caret while the user types or moves it, and a value PHP sets without
+     * it leaves the caret at the end as before. A field mounting with a
+     * value isn't PHP changing its text, so the caret starts at the end
+     * there too.
+     *
+     * Keep the attribute on the field and pass null when there's nothing to
+     * place: on iOS the field is built differently when it can be told
+     * where its caret goes, so one that gains or loses the attribute
+     * between renders is rebuilt and drops the keyboard.
+     *
+     * Never applied to a `secure` field.
+     *
+     * Blade: `:selection="$caret"` or `:selection="[$start, $end]"`.
+     */
+    public function selection(?int $start, ?int $end = null): static
+    {
+        $start = $start === null ? -1 : max(0, $start);
+        $end = $start === -1 ? -1 : max($start, $end ?? $start);
+
+        $this->inputProps['selection_start'] = $start;
+        $this->inputProps['selection_end'] = $end;
 
         return $this;
     }
@@ -699,6 +747,10 @@ abstract class BaseTextInput extends Element
         // including any future one. Never serializing the callback id means a
         // secure field cannot leak caret offsets no matter what the native side
         // does with the prop.
+        // A secure field's caret stays the platform's, like its reporting.
+        if (! empty($this->inputProps['secure'])) {
+            unset($props['selection_start'], $props['selection_end']);
+        }
         if ($this->selectionChangeCallback !== null && empty($this->inputProps['secure'])) {
             // 'text_selection' kind tells NativeComponent::dispatch to decode
             // the event's TEXT_CHANGE payload ("{start},{end}\x1F{text}") and
