@@ -106,6 +106,8 @@ NativeList::make()
 
 The list scrolls when it is created and again when the index changes, never while it stays the same, so re-renders don't pull it away from where the reader scrolled. A row that hasn't loaded yet is scrolled to when it arrives. You don't need it to keep a list in place across a pushed screen: going back already does.
 
+Like `ScrollView::autoScrollTo()`, negative indices disable auto-scroll. An index past the end waits for that row instead of clamping to the last row. Once applied, content changes alone don't reapply it, even if the list empties and fills again. To request the same row another time, render with auto-scroll disabled, then set the index in a later render.
+
 A virtual list only draws the rows inside its window, so the window has to hold the row. `scrollVirtualListTo()` on the `HasVirtualListWindow` screen moves the window there and sets `$virtualScrollTo` for the list:
 
 ```php

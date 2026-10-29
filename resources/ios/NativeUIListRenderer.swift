@@ -849,7 +849,9 @@ struct ListAutoScrollModifier: ViewModifier {
     let targetID: Int?
     let anchor: UnitPoint
 
-    @State private var applied = -1
+    @State private var lastRequest = -1
+    @State private var armed = false
+    @State private var didInitialScroll = false
 
     func body(content: Content) -> some View {
         ScrollViewReader { proxy in
@@ -861,10 +863,15 @@ struct ListAutoScrollModifier: ViewModifier {
     }
 
     private func apply(_ proxy: ScrollViewProxy) {
-        guard request >= 0, request != applied, let targetID else { return }
+        if request != lastRequest {
+            lastRequest = request
+            armed = request >= 0
+        }
+        guard armed, let targetID else { return }
 
-        let opening = applied < 0
-        applied = request
+        armed = false
+        let opening = !didInitialScroll
+        didInitialScroll = true
         // Lazy rows aren't laid out inside onAppear yet, so an immediate
         // scrollTo does nothing; the ScrollView renderer defers the same way.
         DispatchQueue.main.async {

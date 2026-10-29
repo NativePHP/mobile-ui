@@ -83,6 +83,8 @@ class NativeVirtualList extends Element
      * Open the list with absolute row $index at the top. The list scrolls
      * when it is created and again when the index changes, never while it
      * stays the same, so re-renders don't fight the reader's scrolling.
+     * Negative indices disable auto-scroll; an index beyond count waits
+     * until that slot exists rather than scrolling to the last one.
      *
      * The window has to hold the row or native draws a placeholder there
      * until it asks for one that does: HasVirtualListWindow's
@@ -90,7 +92,7 @@ class NativeVirtualList extends Element
      */
     public function autoScrollTo(int $index): static
     {
-        $this->listProps['auto_scroll_to'] = max(0, $index);
+        $this->listProps['auto_scroll_to'] = $index;
 
         return $this;
     }

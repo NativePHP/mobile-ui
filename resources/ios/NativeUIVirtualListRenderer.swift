@@ -108,7 +108,7 @@ private struct VirtualListBody: View {
         // Each slot's id is its index, so the row to open at is its own id.
         .modifier(ListAutoScrollModifier(
             request: autoScrollTo,
-            targetID: autoScrollTo >= 0 && count > 0 ? min(autoScrollTo, count - 1) : nil,
+            targetID: autoScrollTo >= 0 && autoScrollTo < count ? autoScrollTo : nil,
             anchor: .top
         ))
         .task(id: "\(count)/\(windowFrom)/\(windowTo)/\(overscan)/\(cbId)/\(nodeId)") {

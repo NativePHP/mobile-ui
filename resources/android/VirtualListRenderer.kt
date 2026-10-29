@@ -91,9 +91,8 @@ object VirtualListRenderer {
 
         // Every slot is an item, so the row's index is its item's.
         val autoScrollTo = node.props.getInt("auto_scroll_to", -1)
-        if (autoScrollTo >= 0 && count > 0) {
-            ListAutoScrollEffect(autoScrollTo, autoScrollTo.coerceAtMost(count - 1), scrollState)
-        }
+        val target = if (autoScrollTo in 0 until count) autoScrollTo else -1
+        ListAutoScrollEffect(autoScrollTo, target, scrollState)
 
         LazyColumn(modifier = modifier, state = scrollState) {
             items(count = count, key = { it }) { index ->

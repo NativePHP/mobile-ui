@@ -196,11 +196,13 @@ class NativeList extends Element
      * Like ScrollView::autoScrollTo(), the list scrolls when it is created
      * and again when the index changes, never while it stays the same, so
      * re-renders don't pull the list away from where the reader scrolled.
+     * Negative indices disable auto-scroll; out-of-range rows wait until
+     * they exist rather than scrolling to a different row.
      * Going back to a screen keeps its list where it was without this.
      */
     public function autoScrollTo(int $index): static
     {
-        $this->listProps['auto_scroll_to'] = max(0, $index);
+        $this->listProps['auto_scroll_to'] = $index;
 
         return $this;
     }

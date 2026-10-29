@@ -165,13 +165,11 @@ object ListRenderer {
         // The row's place among the lazy items depends on whether section
         // headers become items, so this follows the layout's grouped rule.
         val autoScrollTo = node.props.getInt("auto_scroll_to", -1)
-        if (autoScrollTo >= 0) {
-            val grouped = node.children.any { it.type == "list_section" } && !node.props.getBool("plain")
-            val itemIndex = remember(node, autoScrollTo, pagerHeader) {
-                lazyItemIndexOfRow(node.children, autoScrollTo, horizontal, grouped, pagerHeader) ?: -1
-            }
-            ListAutoScrollEffect(autoScrollTo, itemIndex, scrollState)
+        val grouped = node.children.any { it.type == "list_section" } && !node.props.getBool("plain")
+        val itemIndex = remember(node, autoScrollTo, pagerHeader) {
+            lazyItemIndexOfRow(node.children, autoScrollTo, horizontal, grouped, pagerHeader) ?: -1
         }
+        ListAutoScrollEffect(autoScrollTo, itemIndex, scrollState)
 
         val keyboardController = LocalSoftwareKeyboardController.current
         val dismissKeyboardModifier = Modifier.pointerInput(Unit) {
@@ -330,19 +328,30 @@ private class ListRowHeights {
  * row later. A request is applied once, so re-renders carrying the same one
  * leave the list where the reader scrolled it.
  *
- * The request last applied is saved with the list's own position. A list
+ * Armed only when the request changes, not when rows disappear and return.
+ * Kept composed even with no target, so disabling then setting the same
+ * index re-arms it without treating an empty list as a fresh request.
+ *
+ * The applied state is saved with the list's own position. A list
  * restored by its screen's saved state (going back to it) already sits
  * where it was left, and applying the same request again would undo that.
  */
 @Composable
 internal fun ListAutoScrollEffect(request: Int, itemIndex: Int, state: LazyListState) {
-    val applied = rememberSaveable { mutableIntStateOf(-1) }
+    val didInitialScroll = rememberSaveable { mutableStateOf(false) }
+    val lastRequest = rememberSaveable { mutableIntStateOf(-1) }
+    val armed = rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(request, itemIndex) {
-        if (request < 0 || itemIndex < 0 || request == applied.intValue) return@LaunchedEffect
+        if (request != lastRequest.intValue) {
+            lastRequest.intValue = request
+            armed.value = request >= 0
+        }
+        if (!armed.value || itemIndex < 0) return@LaunchedEffect
 
-        val opening = applied.intValue < 0
-        applied.intValue = request
+        armed.value = false
+        val opening = !didInitialScroll.value
+        didInitialScroll.value = true
         if (opening) state.scrollToItem(itemIndex) else state.animateScrollToItem(itemIndex)
     }
 }

@@ -182,7 +182,7 @@ it('sends no row to scroll to unless one is asked for', function () {
         ->and(collectList(['auto-scroll-to' => null])['props'] ?? [])->not->toHaveKey('auto_scroll_to');
 });
 
-it('keeps row zero as a row to scroll to and clamps a negative one to it', function () {
-    expect(collectList(['autoScrollTo' => 0])['props']['auto_scroll_to'])->toBe(0)
-        ->and(NativeList::make()->autoScrollTo(-3)->toArray(new CallbackRegistry)['props']['auto_scroll_to'])->toBe(0);
-});
+it('preserves the requested row including negative indices that disable auto-scroll', function (int $index) {
+    expect(collectList(['autoScrollTo' => $index])['props']['auto_scroll_to'])->toBe($index)
+        ->and(NativeList::make()->autoScrollTo($index)->toArray(new CallbackRegistry)['props']['auto_scroll_to'])->toBe($index);
+})->with([0, 12, -3]);
