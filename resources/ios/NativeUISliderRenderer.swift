@@ -41,17 +41,29 @@ struct NativeUISliderRenderer: View {
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
 
+        // Only the Slider writes through this binding, so only the user's changes
+        // go to PHP. Server values set `value` directly and are not sent back.
+        let userValue = Binding(
+            get: { value },
+            set: { newValue in
+                // A stepped Slider calls this on every move, also with an unchanged value.
+                guard newValue != value else { return }
+                value = newValue
+                handleLocalChange(newValue, mode: syncMode, debounceMs: debounceMs, onChangeCb: onChangeCb)
+            }
+        )
+
         Group {
             if step > 0 {
                 Slider(
-                    value: $value, in: min...max, step: step,
+                    value: userValue, in: min...max, step: step,
                     onEditingChanged: { editing in
                         handleEditingChanged(editing, mode: syncMode, onChangeCb: onChangeCb)
                     }
                 )
             } else {
                 Slider(
-                    value: $value, in: min...max,
+                    value: userValue, in: min...max,
                     onEditingChanged: { editing in
                         handleEditingChanged(editing, mode: syncMode, onChangeCb: onChangeCb)
                     }
@@ -77,12 +89,11 @@ struct NativeUISliderRenderer: View {
             guard !isEditing else { return }
             // Echo-prevention: ignore server pushes that match what we sent.
             if abs(newServerValue - lastSentValue) > 0.0001 {
+                // A debounced value that is not sent yet is older than this one.
+                debounceTask?.cancel()
                 value = newServerValue
                 lastSentValue = newServerValue
             }
-        }
-        .onChange(of: value) { _, newValue in
-            handleLocalChange(newValue, mode: syncMode, debounceMs: debounceMs, onChangeCb: onChangeCb)
         }
         .modifier(A11yLabelModifier(label: a11yLabel))
         .modifier(A11yHintModifier(hint: a11yHint))
@@ -114,7 +125,7 @@ struct NativeUISliderRenderer: View {
 
     private func handleEditingChanged(_ editing: Bool, mode: String, onChangeCb: Int) {
         isEditing = editing
-        // Drag started (editing=true): onChange(of:value) handles ticks, and
+        // Drag started (editing=true): userValue's setter handles ticks, and
         // server values wait (see onChange(of: serverValue)).
         // Drag ended (editing=false): flush any pending / un-sent value.
         guard !editing else { return }

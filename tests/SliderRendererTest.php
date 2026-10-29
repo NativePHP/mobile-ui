@@ -30,6 +30,21 @@ test('the iOS slider applies server values again if it goes away mid-drag', func
         ->toMatch('/\.onDisappear \{\s*(?:\/\/[^\n]*\n\s*)*isEditing = false\s*\}/');
 });
 
+test('the iOS slider sends only the user\'s changes to PHP', function () {
+    $source = iosSliderRenderer();
+
+    expect($source)
+        ->toMatch('/let userValue = Binding\(\s*get: \{ value \},\s*set: \{ newValue in\s*(?:\/\/[^\n]*\n\s*)*guard newValue != value else \{ return \}\s*value = newValue\s*handleLocalChange\(newValue,/')
+        ->not->toContain('value: $value')
+        ->not->toContain('.onChange(of: value)')
+        ->and(preg_match_all('/Slider\(\s*value: userValue, in: min\.\.\.max/', $source))->toBe(2);
+});
+
+test('the iOS slider drops an unsent debounced value when a server value arrives', function () {
+    expect(iosSliderRenderer())
+        ->toMatch('/if abs\(newServerValue - lastSentValue\) > 0\.0001 \{\s*(?:\/\/[^\n]*\n\s*)*debounceTask\?\.cancel\(\)\s*value = newServerValue/');
+});
+
 function androidSliderRenderer(): string
 {
     $rendererPath = dirname(__DIR__).'/resources/android/SliderRenderer.kt';
