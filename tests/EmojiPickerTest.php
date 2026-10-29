@@ -83,3 +83,12 @@ it('ships a renderer for each platform and the Jetpack picker on Android', funct
         ->and($root.'/resources/android/'.class_basename(str_replace('.', '\\', $component['android_renderer'])).'.kt')->toBeFile()
         ->and($manifest['android']['dependencies']['implementation'])->toContain('androidx.emoji2:emoji2-emojipicker:1.7.0');
 });
+
+// The picker brings Guava in at runtime only, which turns CameraX's listenablefuture into Guava's
+// empty stub on the compile classpath. Without Guava there too, plugins that call
+// ProcessCameraProvider.getInstance() can't see ListenableFuture and stop compiling.
+it('keeps Guava on the Android compile classpath alongside the picker', function () {
+    $manifest = json_decode(file_get_contents(dirname(__DIR__).'/nativephp.json'), true);
+
+    expect($manifest['android']['dependencies']['implementation'])->toContain('com.google.guava:guava:32.0.1-android');
+});
