@@ -49,7 +49,8 @@ struct NativeUIVirtualListRenderer: View {
             overscan: overscan,
             cbId: cbId,
             nodeId: nodeId,
-            rowByIndex: rowByIndex
+            rowByIndex: rowByIndex,
+            autoScrollTo: node.props.getInt("auto_scroll_to", default: -1)
         )
         .modifier(ListBackgroundModifier(node: node))
         // Environment-propagating, so it reaches the List inside the body
@@ -69,6 +70,7 @@ private struct VirtualListBody: View {
     let cbId: Int
     let nodeId: Int
     let rowByIndex: [Int: NativeUINode]
+    let autoScrollTo: Int
 
     @StateObject private var tracker = VisibleWindowTracker()
 
@@ -103,6 +105,12 @@ private struct VirtualListBody: View {
             }
         }
         .listStyle(.plain)
+        // Each slot's id is its index, so the row to open at is its own id.
+        .modifier(ListAutoScrollModifier(
+            request: autoScrollTo,
+            targetID: autoScrollTo >= 0 && autoScrollTo < count ? autoScrollTo : nil,
+            anchor: .top
+        ))
         .task(id: "\(count)/\(windowFrom)/\(windowTo)/\(overscan)/\(cbId)/\(nodeId)") {
             tracker.update(
                 count: count,

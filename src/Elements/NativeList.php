@@ -66,6 +66,10 @@ class NativeList extends Element
         if (isset($attrs['visible-range-step']) || isset($attrs['visibleRangeStep'])) {
             $this->visibleRangeStep((int) ($attrs['visible-range-step'] ?? $attrs['visibleRangeStep']));
         }
+        $autoScrollTo = $attrs['auto-scroll-to'] ?? $attrs['autoScrollTo'] ?? null;
+        if ($autoScrollTo !== null && $autoScrollTo !== '') {
+            $this->autoScrollTo((int) $autoScrollTo);
+        }
         if (isset($attrs['on-scroll-end']) || isset($attrs['onScrollEnd'])) {
             $this->onScrollEnd($attrs['on-scroll-end'] ?? $attrs['onScrollEnd']);
         }
@@ -179,6 +183,26 @@ class NativeList extends Element
     public function visibleRangeStep(int $rows): static
     {
         $this->listProps['visible_range_step'] = max(1, $rows);
+
+        return $this;
+    }
+
+    /**
+     * Open the list with row $index at the top: a screen restored after a
+     * relaunch, a deep link to a record, or the row just added. Rows count
+     * as end-reached and visible-range count them (a section's rows in its
+     * place).
+     *
+     * Like ScrollView::autoScrollTo(), the list scrolls when it is created
+     * and again when the index changes, never while it stays the same, so
+     * re-renders don't pull the list away from where the reader scrolled.
+     * Negative indices disable auto-scroll; out-of-range rows wait until
+     * they exist rather than scrolling to a different row.
+     * Going back to a screen keeps its list where it was without this.
+     */
+    public function autoScrollTo(int $index): static
+    {
+        $this->listProps['auto_scroll_to'] = $index;
 
         return $this;
     }

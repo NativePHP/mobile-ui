@@ -25,7 +25,7 @@ dropped without an error.
 | `text` (slot is the text) | `class` (`text-lg font-bold line-through underline text-theme-on-surface`), `font` |
 | `button` | label as slot or `label`; `variant` primary\|secondary\|destructive\|success\|ghost; `size` sm\|md\|lg; `icon`, `icon-trailing`, `ios-icon`, `android-icon`, `disabled`, `loading`, `a11y-label` |
 | `outlined-text-input`, `filled-text-input`, `bare-text-input` | `native:model`, `placeholder`, `label`, `@submit`, `@change`, `keyboard` (text\|number\|decimal\|email\|phone\|url\|password), `secure`, `revealable`, `multiline`, `max-length`, `autofocus`, `leading-icon`, `trailing-icon`, `error`, `supporting`, `@selectionChange`, `:selection` |
-| `list` | `separator`, `plain`, `horizontal`, `on-refresh`, `on-end-reached`. Children: `list-item` or any element |
+| `list` | `separator`, `plain`, `horizontal`, `on-refresh`, `on-end-reached`, `auto-scroll-to` (row to open at). Children: `list-item` or any element |
 | `list-item` | see below |
 | `popover` | `:visible`, `@dismiss`, `placement` top\|bottom. Children are the bubble. Lay it over its anchor in a stack with `absolute top-0 bottom-0 left-0 right-0` |
 | `icon` | `name` (`star.fill`, `trash`, `plus`), or per platform `ios="checkmark.circle.fill" android="check_circle"`, `:size="20"`, `class="text-theme-primary"` |

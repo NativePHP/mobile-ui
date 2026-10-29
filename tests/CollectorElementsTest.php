@@ -287,6 +287,18 @@ it('applies virtual list scroll-indicator props', function () {
     expect($tree['props']['shows_indicators'])->toBeFalse();
 });
 
+it('preserves a virtual list scroll request including negative indices that disable it', function (int $index) {
+    NativeElementCollector::leaf('virtual_list', [
+        'count' => 5000,
+        'auto-scroll-to' => $index,
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['auto_scroll_to'])->toBe($index)
+        ->and(NativeVirtualList::make()->autoScrollTo($index)->toArray(new CallbackRegistry)['props']['auto_scroll_to'])->toBe($index);
+})->with([0, 4200, -3]);
+
 it('marks a virtual list transparent like a list', function () {
     NativeElementCollector::leaf('virtual_list', ['count' => 100]);
     expect(NativeElementCollector::collect()->toArray(new CallbackRegistry)['props'])->not->toHaveKey('transparent');
