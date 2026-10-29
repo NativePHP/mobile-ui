@@ -12,12 +12,15 @@ struct NativeUIBottomSheetRenderer: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isPresented: Bool = false
+    @State private var fitHeight: CGFloat?
+    @State private var selectedDetent: PresentationDetent = .medium
 
     var body: some View {
         let theme = themeStore.resolve(for: colorScheme)
         let visible = node.props.getBool("visible")
         let onDismissCb = node.props.getCallbackId("on_dismiss")
         let detentsStr = node.props.getString("detents", default: "medium,large")
+        let fits = Self.detentTokens(detentsStr).contains("fit")
         let a11yLabel = node.props.getString("a11y_label")
         // Flighty/Maps-style always-on panel: no swipe-away, and the view
         // behind stays interactive (HIG "sheets with interaction behind").
@@ -40,30 +43,58 @@ struct NativeUIBottomSheetRenderer: View {
                             NodeView(node: child).equatable()
                         }
                     }
+                    .fixedSize(horizontal: false, vertical: fits)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if fits, height > 0 { fitHeight = height }
+                    }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(theme.surface)
                 }
                 .onAppear { NativeUIKeyboardAccessoryState.shared.sheetDepth += 1 }
                 .onDisappear { NativeUIKeyboardAccessoryState.shared.sheetDepth -= 1 }
-                .presentationDetents(resolveDetents(detentsStr))
+                .modifier(DetentsModifier(
+                    detents: resolveDetents(detentsStr),
+                    selection: fits ? $selectedDetent : nil
+                ))
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(permanent)
                 .presentationBackgroundInteraction(bgInteraction ? .enabled : .automatic)
                 .modifier(A11yLabelModifier(label: a11yLabel))
             }
-            .onAppear { isPresented = visible }
-            .onChange(of: visible) { _, v in isPresented = v }
+            .onAppear { present(visible) }
+            .onChange(of: visible) { _, v in present(v) }
+            .onChange(of: fitHeight) { old, _ in
+                if selectedDetent == Self.fitDetent(for: old) { selectedDetent = fitDetent }
+            }
+    }
+
+    private func present(_ visible: Bool) {
+        if visible && !isPresented { selectedDetent = fitDetent }
+        isPresented = visible
+    }
+
+    /// `.medium` stands in until the content has been measured: it doesn't
+    /// shrink the screen behind the way `.large` does, so a sheet whose
+    /// first measure lands after presenting only resizes, never re-scales.
+    private var fitDetent: PresentationDetent { Self.fitDetent(for: fitHeight) }
+
+    private static func fitDetent(for height: CGFloat?) -> PresentationDetent {
+        height.map { .height($0) } ?? .medium
+    }
+
+    private static func detentTokens(_ str: String) -> [String] {
+        str.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
     }
 
     private func resolveDetents(_ str: String) -> Set<PresentationDetent> {
-        let parts = str.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
         var detents = Set<PresentationDetent>()
-        for part in parts {
+        for part in Self.detentTokens(str) {
             switch part {
             case "small":  detents.insert(.fraction(0.25))
             case "medium": detents.insert(.medium)
             case "large":  detents.insert(.large)
             case "full":   detents.insert(.fraction(1.0))
+            case "fit":    detents.insert(fitDetent)
             default:
                 if let fraction = Double(part), fraction > 0, fraction <= 1 {
                     detents.insert(.fraction(CGFloat(fraction)))
@@ -71,6 +102,19 @@ struct NativeUIBottomSheetRenderer: View {
             }
         }
         return detents.isEmpty ? [.medium, .large] : detents
+    }
+}
+
+/// A fit detent's height changes as the content does, and a sheet left
+/// on a detent that's no longer in the set snaps elsewhere, so a fit
+/// sheet binds its selection to follow. Other sheets keep SwiftUI's own.
+private struct DetentsModifier: ViewModifier {
+    let detents: Set<PresentationDetent>
+    let selection: Binding<PresentationDetent>?
+
+    func body(content: Content) -> some View {
+        if let selection { content.presentationDetents(detents, selection: selection) }
+        else { content.presentationDetents(detents) }
     }
 }
 

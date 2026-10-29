@@ -36,6 +36,13 @@ import com.nativephp.plugins.native_ui.NativeUITheme
  * the way iOS's `PresentationDetent.fraction(_:)` does — we degrade
  * gracefully: any partial-intent token (named or fractional `< 1.0`)
  * enables the partial-expanded state; otherwise we skip straight to full.
+ *
+ * `fit` sizes the sheet to its content, as iOS's measured `.height`
+ * detent does. M3 already wraps content, so a fit sheet just drops the
+ * `fillMaxHeight()` and the partial stop: it opens expanded at its
+ * content's height, capped below the status bar. M3's partial stop sits
+ * at half the screen whatever the content, so the other detents listed
+ * beside `fit` have nothing to snap to and are ignored.
  */
 object BottomSheetRenderer {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -54,7 +61,8 @@ object BottomSheetRenderer {
         // `sheet_pane` is for.
         val permanent = p.getBool("permanent")
 
-        val skipPartial = !hasPartialDetent(detentsStr)
+        val fits = hasDetent(detentsStr, "fit")
+        val skipPartial = fits || !hasPartialDetent(detentsStr)
         val sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = skipPartial,
             confirmValueChange = { value -> !(permanent && value == SheetValue.Hidden) },
@@ -99,7 +107,8 @@ object BottomSheetRenderer {
             // room and content sits inside. `fillMaxHeight()` reproduces
             // that semantic on Android: content area always fills the
             // current detent's height, leaving drag-room to the next one.
-            Column(modifier = sheetModifier.fillMaxHeight()) {
+            // A fit sheet wants exactly that content-sized default.
+            Column(modifier = if (fits) sheetModifier else sheetModifier.fillMaxHeight()) {
                 node.children.forEach { RenderNode(it) }
             }
         }
@@ -119,9 +128,7 @@ object BottomSheetRenderer {
  * matches that intent).
  */
 private fun hasPartialDetent(str: String): Boolean {
-    val parts = str.split(",")
-        .map { it.trim().lowercase() }
-        .filter { it.isNotEmpty() }
+    val parts = detentTokens(str)
     if (parts.isEmpty()) return true
     var sawAny = false
     for (part in parts) {
@@ -139,3 +146,9 @@ private fun hasPartialDetent(str: String): Boolean {
     }
     return !sawAny
 }
+
+private fun hasDetent(str: String, detent: String): Boolean = detent in detentTokens(str)
+
+private fun detentTokens(str: String): List<String> = str.split(",")
+    .map { it.trim().lowercase() }
+    .filter { it.isNotEmpty() }
