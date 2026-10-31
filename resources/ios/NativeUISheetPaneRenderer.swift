@@ -11,31 +11,43 @@ import SwiftUI
 /// never reset an in-progress position; the `detent` prop only moves the
 /// pane when its value actually changes (same applied-key pattern as the
 /// map camera).
+///
+/// A `fit` detent rests at the content's ideal height, measured on the
+/// device and capped at the screen. Resting on it reports `fit` rather
+/// than a number, and the pane follows the content as its height changes.
 struct NativeUISheetPaneRenderer: View {
     let node: NativeUINode
 
     @StateObject private var model = SheetPaneModel()
+    @State private var fitHeight: CGFloat?
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let theme = themeStore.resolve(for: colorScheme)
         let p = node.props
-        let detents = Self.parseDetents(p.getString("detents", default: "200,560,780"))
+        let config = Self.parseDetents(p.getString("detents", default: "200,560,780"))
         let radius = CGFloat(p.getFloat("corner_radius", default: 44))
         let insetX = CGFloat(p.getFloat("inset_x", default: 8))
         let insetBottom = CGFloat(p.getFloat("inset_bottom", default: 8))
-        let detentProp = CGFloat(p.getFloat("detent", default: Float(detents.first ?? 200)))
+        let detentProp: SheetPaneDetent = p.getString("detent") == "fit"
+            ? .fit
+            : config.points.first.map { .points(CGFloat(p.getFloat("detent", default: Float($0)))) } ?? .fit
         let changeCb = p.getCallbackId("on_change")
 
         GeometryReader { geo in
             let paneWidth = max(0, geo.size.width - insetX * 2)
-            let maxDetent = detents.last ?? 780
+            let fit = fitHeight.map { min($0, geo.size.height - insetBottom) }
+            let heights = Self.resolve(config, fit: fit)
+            let revealHeight = heights.map(\.height).max() ?? 0
 
             // Reveal model: content is laid out ONCE at the tallest detent
             // and the animated frame just uncovers more or less of it —
             // real bottom-sheet behavior. Re-flowing content to the live
             // height would make text and flex children shuffle mid-drag.
+            // A fit pane lays its content out at its ideal height instead,
+            // still pinned to the top, so a lower detent cuts it off at the
+            // bottom rather than re-centering it.
             //
             // Children go through FlexContainer (not a plain VStack) so
             // EDGE flex semantics — a scroll-view's flex-1, gaps,
@@ -52,7 +64,11 @@ struct NativeUISheetPaneRenderer: View {
                     NodeView(node: child).equatable()
                 }
             }
-            .frame(width: paneWidth, height: maxDetent, alignment: .top)
+            .fixedSize(horizontal: false, vertical: config.fits)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                if config.fits, height > 0 { fitHeight = height }
+            }
+            .frame(width: paneWidth, height: revealHeight, alignment: .top)
             .frame(width: paneWidth, height: model.height, alignment: .top)
             .background(theme.background)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -68,14 +84,15 @@ struct NativeUISheetPaneRenderer: View {
                             model.dragStartHeight = model.height
                         }
                         let proposed = (model.dragStartHeight ?? model.height) - value.translation.height
-                        model.height = Self.rubberBand(proposed, detents: detents)
+                        model.height = Self.rubberBand(proposed, detents: heights.map(\.height))
                     }
                     .onEnded { value in
                         model.dragStartHeight = nil
                         // Project momentum so a flick advances a detent even
                         // from a short travel distance.
                         let projected = model.height - value.predictedEndTranslation.height + value.translation.height
-                        let target = Self.nearestDetent(to: projected, in: detents)
+                        guard let settled = Self.nearestDetent(to: projected, in: heights) else { return }
+                        let target = settled.height
 
                         // Seed the spring with the RELEASE velocity so the
                         // settle continues the fling instead of restarting
@@ -93,22 +110,21 @@ struct NativeUISheetPaneRenderer: View {
                         )) {
                             model.height = target
                         }
-                        let settledElsewhere = target != model.appliedDetent
-                        model.appliedDetent = target
+                        let settledElsewhere = settled.detent != model.appliedDetent
+                        model.appliedDetent = settled.detent
                         // Only report a detent CHANGE — snapping back to the
-                        // detent we started from is not one. Report fractional
-                        // detents faithfully: truncating `560.5` to `560`
-                        // fails the applied-detent equality on the republish
-                        // and nudges the pane a frame after every drag.
+                        // detent we started from is not one.
                         if changeCb != 0 && settledElsewhere {
-                            let text = target == target.rounded() ? String(Int(target)) : String(describing: target)
-                            NativeElementBridge.sendTextChangeEvent(changeCb, nodeId: node.id, text: text)
+                            NativeElementBridge.sendTextChangeEvent(changeCb, nodeId: node.id, text: settled.detent.reported)
                         }
                     }
             )
-            .onAppear { model.apply(detentProp, animated: false) }
+            .onAppear { model.apply(detentProp, fit: fit, animated: false) }
             .onChange(of: detentProp) { _, newValue in
-                model.apply(newValue, animated: true)
+                model.apply(newValue, fit: fit, animated: true)
+            }
+            .onChange(of: fit) { _, newValue in
+                model.follow(fit: newValue)
             }
         }
         // The tab bar insets the content's safe area; a Flighty-style pane
@@ -117,17 +133,32 @@ struct NativeUISheetPaneRenderer: View {
         .ignoresSafeArea(.container, edges: .bottom)
     }
 
-    private static func parseDetents(_ raw: String) -> [CGFloat] {
-        let parsed = raw.split(separator: ",")
-            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-            .map { CGFloat($0) }
-            .sorted()
+    private static func parseDetents(_ raw: String) -> SheetPaneDetents {
+        var points: [CGFloat] = []
+        var fits = false
+        for token in raw.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) {
+            switch token {
+            case "fit": fits = true
+            default:
+                if let value = Double(token) { points.append(CGFloat(value)) }
+            }
+        }
 
-        return parsed.isEmpty ? [200, 560] : parsed
+        if points.isEmpty && !fits { points = [200, 560] }
+        return SheetPaneDetents(points: points.sorted(), fits: fits)
     }
 
-    private static func nearestDetent(to height: CGFloat, in detents: [CGFloat]) -> CGFloat {
-        detents.min(by: { abs($0 - height) < abs($1 - height) }) ?? height
+    /// The fit detent joins the point ones once the content is measured.
+    private static func resolve(_ config: SheetPaneDetents, fit: CGFloat?) -> [SheetPaneRestingHeight] {
+        var resolved = config.points.map { SheetPaneRestingHeight(detent: .points($0), height: $0) }
+        if config.fits, let fit {
+            resolved.append(SheetPaneRestingHeight(detent: .fit, height: fit))
+        }
+        return resolved.sorted { $0.height < $1.height }
+    }
+
+    private static func nearestDetent(to height: CGFloat, in detents: [SheetPaneRestingHeight]) -> SheetPaneRestingHeight? {
+        detents.min(by: { abs($0.height - height) < abs($1.height - height) })
     }
 
     /// Clamp with a soft overshoot past the outermost detents, so pulling
@@ -144,24 +175,68 @@ struct NativeUISheetPaneRenderer: View {
     }
 }
 
+struct SheetPaneDetents {
+    let points: [CGFloat]
+    let fits: Bool
+}
+
+enum SheetPaneDetent: Equatable {
+    case fit
+    case points(CGFloat)
+
+    /// What `on_change` sends PHP. Fractional detents are reported
+    /// faithfully: truncating `560.5` to `560` fails the applied-detent
+    /// equality on the republish and nudges the pane a frame after every
+    /// drag.
+    var reported: String {
+        switch self {
+        case .fit: "fit"
+        case .points(let height):
+            height == height.rounded() ? String(Int(height)) : String(describing: height)
+        }
+    }
+}
+
+struct SheetPaneRestingHeight {
+    let detent: SheetPaneDetent
+    let height: CGFloat
+}
+
 /// Pane height that survives recomposition. `apply` early-returns when the
 /// prop value hasn't changed, so republished trees never yank the pane —
 /// only a genuinely new PHP-side detent moves it.
 final class SheetPaneModel: ObservableObject {
     @Published var height: CGFloat = 0
     var dragStartHeight: CGFloat?
-    var appliedDetent: CGFloat = -1
+    var appliedDetent: SheetPaneDetent?
 
-    func apply(_ detent: CGFloat, animated: Bool) {
+    /// A fit detent applied before the content is measured waits for
+    /// `follow(fit:)` to place the pane.
+    func apply(_ detent: SheetPaneDetent, fit: CGFloat?, animated: Bool) {
         guard detent != appliedDetent else { return }
         appliedDetent = detent
 
+        switch detent {
+        case .fit:
+            if let fit { move(to: fit, animated: animated) }
+        case .points(let points):
+            move(to: points, animated: animated)
+        }
+    }
+
+    /// The first measure places the pane; later ones animate it along.
+    func follow(fit: CGFloat?) {
+        guard appliedDetent == .fit, dragStartHeight == nil, let fit, fit != height else { return }
+        move(to: fit, animated: height > 0)
+    }
+
+    private func move(to target: CGFloat, animated: Bool) {
         if animated {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                height = detent
+                height = target
             }
         } else {
-            height = detent
+            height = target
         }
     }
 }
