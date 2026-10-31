@@ -30,3 +30,18 @@ test('reports and follows the iOS fit detent', function () {
         ->toMatch('/\.onChange\(of: fit\) \{ _, newValue in\s*model\.follow\(fit: newValue\)/s')
         ->toMatch('/func follow\(fit: CGFloat\?\) \{\s*guard appliedDetent == \.fit/s');
 });
+
+test('measures an Android fit pane at its content\'s natural height, capped at the screen', function () {
+    expect(sheetPaneRenderer('android/SheetPaneRenderer.kt'))
+        ->toBeString()
+        ->toMatch('/"fit" -> fits = true/')
+        ->toMatch('/\.wrapContentHeight\(align = Alignment\.Top, unbounded = true\)\s*\.onSizeChanged \{/s')
+        ->toMatch('/val fit = fitHeight\?\.let \{ min\(it, maxHeight\.value - insetBottom\) \}/');
+});
+
+test('reports and follows the Android fit detent', function () {
+    expect(sheetPaneRenderer('android/SheetPaneRenderer.kt'))
+        ->toBeString()
+        ->toMatch('/Detent\.Fit -> "fit"/')
+        ->toMatch('/LaunchedEffect\(fit\) \{\s*if \(appliedDetent\.value == Detent\.Fit && !dragging/s');
+});
