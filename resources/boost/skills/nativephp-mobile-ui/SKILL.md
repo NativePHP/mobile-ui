@@ -32,6 +32,7 @@ dropped without an error.
 | `top-bar` | `title`, `subtitle`, `back`. Put it at the top level of the view |
 | `emoji-picker` | `:visible`, `@change` (gets the emoji), `@dismiss`, `done-label`. The system picker: iOS emoji keyboard, Android `EmojiPickerView` in a sheet. Stays open until `visible` is false |
 | `bottom-sheet` | `:visible`, `@dismiss`, `detents` small\|medium\|large\|full\|fit or a fraction (`0.4`), comma-separated (`fit,large`); `fit` sizes the sheet to its content. `permanent`, `background-interaction` (iOS) |
+| `sheet-pane` | Inline pane drawn inside the screen that drags between `detents`: heights in points or `fit` (the content's height), comma-separated (`88,fit`). `detent` (a number or `fit`) and `@change` (gets the settled detent, `fit` included); store it and bind it back to `detent`. `corner-radius`, `inset-x`, `inset-bottom` |
 | also | `toggle`, `checkbox`, `slider`, `select`, `radio-group`, `chip`, `badge`, `date-picker`, `modal`, `tab-row`, `progress-bar`, `activity-indicator` |
 
 There is no `text-input` element. It throws "Unknown native element type: text_input".
