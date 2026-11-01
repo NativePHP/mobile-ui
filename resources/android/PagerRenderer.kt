@@ -363,6 +363,7 @@ object PagerRenderer {
 
         val active = pagerState.currentPage.coerceIn(0, last)
         val fontFamily = nuiNodeFontFamily(tabs.font)
+        val activeFontFamily = if (tabs.activeFont.isNotEmpty()) nuiNodeFontFamily(tabs.activeFont) else fontFamily
         val fontSize = tabs.fontSize?.sp ?: theme.fontMd
         val activeColor = tabs.activeColor.resolve(isDark, if (tabs.pill) theme.onPrimary else theme.onSurface)
         val inactiveColor = tabs.color.resolve(isDark, theme.onSurfaceVariant)
@@ -448,13 +449,15 @@ object PagerRenderer {
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
+                        val family = if (index == active) activeFontFamily else fontFamily
+
                         Text(
                             text = label,
                             color = if (index == active) activeColor else inactiveColor,
                             fontSize = fontSize,
-                            fontFamily = fontFamily,
+                            fontFamily = family,
                             // A bundled font file is one weight already.
-                            fontWeight = if (fontFamily == null) FontWeight.SemiBold else null,
+                            fontWeight = if (family == null) FontWeight.SemiBold else null,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.onGloballyPositioned {
@@ -536,6 +539,7 @@ internal class PagerTabs(p: GenericProps) {
     val pill = p.getString("tab_indicator_style") == "pill"
     val trackPadding = p.getFloat("tab_track_padding", 4f)
     val font = p.getString("tab_font")
+    val activeFont = p.getString("tab_active_font")
     val fontSize: Float? = if (p.has("tab_font_size")) p.getFloat("tab_font_size") else null
     val indicatorHeight = p.getFloat("tab_indicator_height", 3f)
     val paddingX = p.getFloat("tab_padding_x", 12f)

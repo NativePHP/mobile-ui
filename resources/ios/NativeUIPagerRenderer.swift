@@ -404,6 +404,7 @@ private struct PagerTabs: Equatable {
     let pill: Bool
     let trackPadding: CGFloat
     let font: String
+    let activeFont: String
     let fontSize: CGFloat?
     let indicatorHeight: CGFloat
     let paddingX: CGFloat
@@ -438,6 +439,7 @@ private struct PagerTabs: Equatable {
         self.pill = p.getString("tab_indicator_style") == "pill"
         self.trackPadding = points("tab_track_padding", 4)
         self.font = p.getString("tab_font")
+        self.activeFont = p.getString("tab_active_font")
         self.fontSize = p.has("tab_font_size") ? CGFloat(p.getFloat("tab_font_size")) : nil
         self.indicatorHeight = points("tab_indicator_height", 3)
         self.paddingX = points("tab_padding_x", 12)
@@ -451,7 +453,7 @@ private struct PagerTabs: Equatable {
             && lhs.reselectCbId == rhs.reselectCbId && lhs.color == rhs.color && lhs.activeColor == rhs.activeColor
             && lhs.indicatorColor == rhs.indicatorColor && lhs.dividerColor == rhs.dividerColor && lhs.trackColor == rhs.trackColor
             && lhs.trackBorderColor == rhs.trackBorderColor && lhs.trackBorderWidth == rhs.trackBorderWidth
-            && lhs.pill == rhs.pill && lhs.trackPadding == rhs.trackPadding && lhs.font == rhs.font
+            && lhs.pill == rhs.pill && lhs.trackPadding == rhs.trackPadding && lhs.font == rhs.font && lhs.activeFont == rhs.activeFont
             && lhs.fontSize == rhs.fontSize && lhs.indicatorHeight == rhs.indicatorHeight && lhs.paddingX == rhs.paddingX
             && lhs.paddingTop == rhs.paddingTop && lhs.paddingBottom == rhs.paddingBottom && lhs.edgePadding == rhs.edgePadding
     }
@@ -522,6 +524,7 @@ private struct PagerTabStrip: View {
 
     private func row(_ theme: NativeUITokens) -> some View {
         let active = activeIndex
+        let drawsNamedFace = !tabs.activeFont.isEmpty
         let fontSize = tabs.fontSize ?? theme.fontMd
 
         return HStack(spacing: 0) {
@@ -529,12 +532,16 @@ private struct PagerTabStrip: View {
                 let label = tabs.labels[index]
                 let a11yLabel = index < tabs.a11yLabels.count && !tabs.a11yLabels[index].isEmpty ? tabs.a11yLabels[index] : label
                 let selected = index == active
+                let fontName = selected && drawsNamedFace ? tabs.activeFont : tabs.font
 
                 Button {
                     select(index)
                 } label: {
                     Text(label)
-                        .nuiScaledFont(size: fontSize, weight: .semibold, fontName: tabs.font.isEmpty ? nil : tabs.font)
+                        // With an active font, each named font draws its own face, as on
+                        // Android: the semibold weight would swap a `-Regular` file for its
+                        // semibold sibling and draw every tab alike.
+                        .nuiScaledFont(size: fontSize, weight: drawsNamedFace && !fontName.isEmpty ? .regular : .semibold, fontName: fontName.isEmpty ? nil : fontName)
                         .lineLimit(1)
                         .foregroundStyle(selected
                             ? resolve(tabs.activeColor, fallback: tabs.pill ? theme.onPrimary : theme.onSurface)

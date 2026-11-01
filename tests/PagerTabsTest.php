@@ -214,6 +214,27 @@ it('builds a pill indicator on a track fluently', function () {
         ->and($props['tab_track_padding'])->toBe(0.0);
 });
 
+it('sends a heavier font for the current tab', function () {
+    $props = pagerTabProps(['tabs' => ['A', 'B'], 'tab-font' => 'regular', 'tab-active-font' => 'semibold']);
+
+    expect($props['tab_font'])->toBe('regular')
+        ->and($props['tab_active_font'])->toBe('semibold');
+
+    expect(Pager::make()->tabs(['A'])->tabActiveFont('bold')->toArray(new CallbackRegistry)['props']['tab_active_font'])->toBe('bold');
+});
+
+it('gives the current tab its own font on both platforms, falling back to the tab font', function () {
+    expect(file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIPagerRenderer.swift'))
+        ->toContain('let fontName = selected && drawsNamedFace ? tabs.activeFont : tabs.font')
+        // Only an active font changes how named fonts are weighted, so a tab-font on its own draws as before.
+        ->toContain('let drawsNamedFace = !tabs.activeFont.isEmpty')
+        ->toContain('weight: drawsNamedFace && !fontName.isEmpty ? .regular : .semibold');
+
+    expect(file_get_contents(dirname(__DIR__).'/resources/android/PagerRenderer.kt'))
+        ->toContain('if (tabs.activeFont.isNotEmpty()) nuiNodeFontFamily(tabs.activeFont) else fontFamily')
+        ->toContain('val family = if (index == active) activeFontFamily else fontFamily');
+});
+
 it('rejects an indicator style it cannot draw', function () {
     pagerTabProps(['tabs' => ['A'], 'tab-indicator-style' => 'dot']);
 })->throws(InvalidArgumentException::class, "pager tab-indicator-style must be 'underline' or 'pill', got 'dot'");

@@ -306,6 +306,18 @@ class Pager extends Element
         return $this;
     }
 
+    /**
+     * The current tab's label font, so it can be heavier than the rest,
+     * which keep `tab-font`. It switches as the swipe passes halfway, like
+     * the colour. Default: `tab-font`.
+     */
+    public function tabActiveFont(string $font): static
+    {
+        $this->pagerProps['tab_active_font'] = $font;
+
+        return $this;
+    }
+
     /** Label size in points. Default: `theme.font-md`. */
     public function tabFontSize(float $size): static
     {
@@ -424,6 +436,9 @@ class Pager extends Element
         }
         if (($font = $attr('tab-font')) !== null) {
             $this->tabFont((string) $font);
+        }
+        if (($font = $attr('tab-active-font')) !== null) {
+            $this->tabActiveFont((string) $font);
         }
         if (($size = $attr('tab-font-size')) !== null) {
             $this->tabFontSize((float) $size);
