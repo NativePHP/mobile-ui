@@ -197,6 +197,8 @@ NativeUIRefreshIndicators.shared.register("lottie") { scope in
 
 On Android the indicator fills a 48dp disc styled like the stock indicator. The disc slides down with the pull and is clipped to the top of the list. On iOS, `.refreshable` can't show a custom indicator, so a list with a registered indicator runs its own pull-to-refresh: the indicator fills a 40pt square in the gap the pull opens above the rows. Only `native:list` supports this; `native:refreshable` keeps the platform spinner.
 
+The progress reaches `1` exactly where letting go starts a refresh, so an indicator that is complete at `1` tells the user they can let go. When a pull crosses the threshold, mobile-ui also gives a short bounce to the indicator and a haptic tap, as the platform spinners do. It does this again each time the pull goes back below the threshold and crosses it again.
+
 ## Popovers
 
 `<native:popover>` floats its children in a small bubble beside the spot it
