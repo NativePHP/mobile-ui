@@ -158,6 +158,45 @@ use Native\Mobile\UI\Elements\StickyHeader;
 StickyHeader::make($newPostsButton);
 ```
 
+### Custom pull-to-refresh indicators
+
+A list with `on-refresh` shows the platform spinner when pulled. `refresh-indicator` replaces it with an indicator a plugin provides, such as an animated logo, and `refresh-indicator-options` passes that indicator its settings:
+
+```blade
+<native:list
+    on-refresh="reload"
+    refresh-indicator="lottie"
+    :refresh-indicator-options="['asset' => 'animations/logo.lottie']"
+>
+```
+
+```php
+NativeList::make()
+    ->onRefresh('reload')
+    ->refreshIndicator('lottie', ['asset' => 'animations/logo.lottie']);
+```
+
+If no installed plugin provides that indicator, the list keeps the platform spinner, so a screen can name an indicator whether or not the app ships it. mobile-ui ships no indicator of its own and adds no dependency for this.
+
+A plugin registers its indicator from its init function (`android.init_function` / `ios.init_function` in its `nativephp.json`). The indicator receives the pull's progress (`0` at rest, `1` at the refresh threshold), whether a refresh is running, and the options decoded from JSON:
+
+```kotlin
+import com.nativephp.plugins.native_ui.NativeUIRefreshIndicators
+
+NativeUIRefreshIndicators.register("lottie") { scope ->
+    // scope.progress(), scope.isRefreshing, scope.options["asset"]
+}
+```
+
+```swift
+NativeUIRefreshIndicators.shared.register("lottie") { scope in
+    // scope.progress, scope.isRefreshing, scope.options["asset"]
+    AnyView(MyIndicator(scope: scope))
+}
+```
+
+On Android the indicator fills a 48dp disc styled like the stock indicator. The disc slides down with the pull and is clipped to the top of the list. On iOS, `.refreshable` can't show a custom indicator, so a list with a registered indicator runs its own pull-to-refresh: the indicator fills a 40pt square in the gap the pull opens above the rows. Only `native:list` supports this; `native:refreshable` keeps the platform spinner.
+
 ## Popovers
 
 `<native:popover>` floats its children in a small bubble beside the spot it
