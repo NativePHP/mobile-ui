@@ -1,5 +1,7 @@
 package com.nativephp.plugins.native_ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,9 +11,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
@@ -66,6 +74,10 @@ private val REFRESH_INDICATOR_SIZE = 48.dp
 
 private val REFRESH_INDICATOR_PADDING = 6.dp
 
+/** The bounce marking a pull past the threshold: up to this scale and back. */
+private const val REFRESH_INDICATOR_BOUNCE_SCALE = 1.15f
+private const val REFRESH_INDICATOR_BOUNCE_MILLIS = 200
+
 /**
  * The indicator a list's `refresh_indicator` names, on the stock disc, or
  * the stock indicator when no plugin registered that name.
@@ -89,6 +101,23 @@ internal fun BoxScope.NativeUIRefreshIndicator(
     }
 
     val decoded = remember(options) { decodeRefreshIndicatorOptions(options) }
+    // PullToRefreshBox refreshes on a release past the threshold, where the
+    // distance fraction passes 1.
+    val armed by remember(state) { derivedStateOf { state.distanceFraction > 1f } }
+    val haptic = LocalHapticFeedback.current
+    val scale = remember { Animatable(1f) }
+    LaunchedEffect(armed && !isRefreshing) {
+        if (armed && !isRefreshing) {
+            haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+            scale.animateTo(1f, keyframes {
+                durationMillis = REFRESH_INDICATOR_BOUNCE_MILLIS
+                REFRESH_INDICATOR_BOUNCE_SCALE at REFRESH_INDICATOR_BOUNCE_MILLIS * 2 / 5
+            })
+        } else {
+            scale.snapTo(1f)
+        }
+    }
+
     PullToRefreshDefaults.IndicatorBox(
         state = state,
         isRefreshing = isRefreshing,
@@ -97,7 +126,14 @@ internal fun BoxScope.NativeUIRefreshIndicator(
     ) {
         // Inside the box, so its bounds follow the disc as it slides.
         Box(
-            Modifier.fillMaxSize().testTag(REFRESH_INDICATOR_TAG).padding(REFRESH_INDICATOR_PADDING),
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                }
+                .testTag(REFRESH_INDICATOR_TAG)
+                .padding(REFRESH_INDICATOR_PADDING),
             contentAlignment = Alignment.Center,
         ) {
             content(RefreshIndicatorScope({ state.distanceFraction.coerceIn(0f, 1f) }, isRefreshing, decoded))

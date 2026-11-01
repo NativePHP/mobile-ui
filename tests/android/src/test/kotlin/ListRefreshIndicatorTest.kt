@@ -2,10 +2,15 @@ package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -114,12 +119,55 @@ class ListRefreshIndicatorTest {
         assertEquals(80f - 48f, (disc.top - list.top).value, 0.5f)
     }
 
+    @Test fun crossingTheThresholdWhilePullingBuzzesOnceEachTime() {
+        registerProbe()
+        showList(mapOf("on_refresh" to 7, "refresh_indicator" to "probe"))
+        compose.onNodeWithTag("list").performTouchInput {
+            down(Offset(centerX, 10f))
+            repeat(10) { moveBy(Offset(0f, 40f)) }
+        }
+        compose.waitForIdle()
+        assertEquals(listOf(HapticFeedbackType.GestureThresholdActivate), haptics)
+
+        compose.onNodeWithTag("list").performTouchInput { repeat(8) { moveBy(Offset(0f, -40f)) } }
+        compose.waitForIdle()
+        assertTrue("progress ${seen!!.progress()} is back under the threshold", seen!!.progress() < 1f)
+        assertEquals(1, haptics.size)
+
+        compose.onNodeWithTag("list").performTouchInput {
+            repeat(10) { moveBy(Offset(0f, 40f)) }
+            up()
+        }
+        compose.waitForIdle()
+        assertEquals(2, haptics.size)
+    }
+
+    @Test fun theIndicatorBouncesAsTheThresholdIsCrossed() {
+        registerProbe()
+        showList(mapOf("on_refresh" to 7, "refresh_indicator" to "probe"))
+        val rest = probeWidth()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("list").performTouchInput {
+            down(Offset(centerX, 10f))
+            repeat(10) { moveBy(Offset(0f, 40f)) }
+        }
+
+        compose.mainClock.advanceTimeBy(80)
+        assertTrue("width ${probeWidth()} grows past $rest", probeWidth() > rest * 1.05f)
+        compose.mainClock.advanceTimeBy(400)
+        assertEquals(rest, probeWidth(), 0.5f)
+    }
+
+    private fun probeWidth(): Float = compose.onNodeWithTag("probe").getBoundsInRoot().let { (it.right - it.left).value }
+
     private fun registerProbe() {
         NativeUIRefreshIndicators.register("probe") { scope ->
             seen = scope
-            Box(Modifier.testTag("probe"))
+            Box(Modifier.size(20.dp).testTag("probe"))
         }
     }
+
+    private val haptics = mutableListOf<HapticFeedbackType>()
 
     private fun showList(props: Map<String, Any>) {
         compose.setContent {
@@ -127,8 +175,15 @@ class ListRefreshIndicatorTest {
                 NativeUINode(index + 100, "text", null, null, GenericProps(), 0, 0, emptyList())
             }
             val node = NativeUINode(1, "list", null, null, GenericProps(props), 0, 0, rows)
-            MaterialTheme {
-                ListRenderer.Render(node, Modifier.width(300.dp).height(400.dp).testTag("list"))
+            val haptic = object : HapticFeedback {
+                override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+                    haptics += hapticFeedbackType
+                }
+            }
+            CompositionLocalProvider(LocalHapticFeedback provides haptic) {
+                MaterialTheme {
+                    ListRenderer.Render(node, Modifier.width(300.dp).height(400.dp).testTag("list"))
+                }
             }
         }
     }
