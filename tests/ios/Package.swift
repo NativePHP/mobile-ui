@@ -10,5 +10,7 @@ let package = Package(
     targets: [
         .target(name: "NativeUILogic", path: "Sources/NativeUILogic"),
         .testTarget(name: "NativeUILogicTests", dependencies: ["NativeUILogic"], path: "Tests/NativeUILogicTests"),
-    ]
+    ],
+    // The app builds its sources in Swift 5 mode.
+    swiftLanguageModes: [.v5]
 )
