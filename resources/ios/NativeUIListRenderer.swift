@@ -833,7 +833,7 @@ private struct ListCustomRefreshModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .contentMargins(.top, pull.margin, for: .scrollContent)
+            .safeAreaPadding(.top, pull.margin)
             .onScrollGeometryChange(for: ListTopEdge.self) { geometry in
                 ListTopEdge(inset: geometry.contentInsets.top, offset: geometry.contentOffset.y)
             } action: { _, edge in
