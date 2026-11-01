@@ -13,6 +13,9 @@ struct NativeUIPullToRefresh: Equatable {
     static let restHeight: Double = 60
 
     private(set) var isRefreshing = false
+    /// Where the rows' top rests, below the bars, without the room a
+    /// refresh keeps.
+    private(set) var restTop: Double = 0
     private var pull: Double = 0
     private var interacting = false
 
@@ -29,7 +32,7 @@ struct NativeUIPullToRefresh: Equatable {
 
     /// The height of the gap above the content, where the indicator draws.
     var gap: Double {
-        pull + margin
+        pull
     }
 
     /// Where the indicator's top goes in the gap, for an indicator [size]
@@ -43,6 +46,16 @@ struct NativeUIPullToRefresh: Equatable {
     /// rests, the room kept while refreshing included.
     mutating func scrolled(overscroll: Double) {
         pull = max(0, overscroll)
+    }
+
+    /// The list's scroll offset and top content inset. The inset is taken as
+    /// the rows' rest only outside a refresh, since it may or may not count
+    /// the room the refresh keeps.
+    mutating func scrolled(offset: Double, inset: Double) {
+        if !isRefreshing {
+            restTop = inset
+        }
+        scrolled(overscroll: -offset - restTop)
     }
 
     /// Returns whether letting go starts a refresh.

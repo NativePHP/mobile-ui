@@ -79,19 +79,37 @@ import Testing
         pull.scrolled(overscroll: NativeUIPullToRefresh.threshold + 20)
         pull.interactionChanged(interacting: false)
 
-        // The room shifts the content's top down by its height, so the same
-        // spot reads that much less overscroll: the gap doesn't jump.
         #expect(pull.margin == NativeUIPullToRefresh.restHeight)
-        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold + 20 - NativeUIPullToRefresh.restHeight)
-        #expect(pull.gap == NativeUIPullToRefresh.threshold + 20)
-
-        pull.scrolled(overscroll: 0)
+        pull.scrolled(overscroll: NativeUIPullToRefresh.restHeight)
         #expect(pull.gap == NativeUIPullToRefresh.restHeight)
 
         pull.finishRefresh()
         #expect(!pull.isRefreshing)
         #expect(pull.margin == 0)
+        pull.scrolled(overscroll: 0)
         #expect(pull.gap == 0)
+    }
+
+    @Test func measuresThePullFromWhereTheRowsRestBeforeARefresh() {
+        var pull = NativeUIPullToRefresh()
+        let inset: Double = 100
+        pull.scrolled(offset: -inset, inset: inset)
+        #expect(pull.restTop == inset)
+        #expect(pull.gap == 0)
+
+        pull.interactionChanged(interacting: true)
+        pull.scrolled(offset: -inset - NativeUIPullToRefresh.threshold - 20, inset: inset)
+        #expect(pull.gap == NativeUIPullToRefresh.threshold + 20)
+        pull.interactionChanged(interacting: false)
+
+        // Whether the reported inset counts the room the refresh keeps or
+        // not, the rows settling on it read as that room.
+        let room = NativeUIPullToRefresh.restHeight
+        for reportedInset in [inset, inset + room] {
+            pull.scrolled(offset: -inset - room, inset: reportedInset)
+            #expect(pull.restTop == inset)
+            #expect(pull.gap == room)
+        }
     }
 
     @Test func theIndicatorDrawsInFromTheTopThenStaysNearIt() {

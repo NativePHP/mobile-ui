@@ -828,8 +828,6 @@ private struct ListCustomRefreshModifier: ViewModifier {
     let options: [String: Any]
 
     @State private var pull = NativeUIPullToRefresh()
-    /// Where the rows' top rests, without the room a refresh keeps.
-    @State private var contentTop: CGFloat = 0
 
     private static let indicatorSize: CGFloat = 40
 
@@ -837,11 +835,9 @@ private struct ListCustomRefreshModifier: ViewModifier {
         content
             .contentMargins(.top, pull.margin, for: .scrollContent)
             .onScrollGeometryChange(for: ListTopEdge.self) { geometry in
-                ListTopEdge(inset: geometry.contentInsets.top,
-                            overscroll: -(geometry.contentOffset.y + geometry.contentInsets.top))
+                ListTopEdge(inset: geometry.contentInsets.top, offset: geometry.contentOffset.y)
             } action: { _, edge in
-                pull.scrolled(overscroll: edge.overscroll)
-                contentTop = edge.inset - pull.margin
+                pull.scrolled(offset: edge.offset, inset: edge.inset)
             }
             .onScrollPhaseChange { _, phase in
                 if pull.interactionChanged(interacting: phase == .interacting) {
@@ -856,7 +852,7 @@ private struct ListCustomRefreshModifier: ViewModifier {
                         .frame(maxWidth: .infinity)
                         .frame(height: pull.gap, alignment: .top)
                         .clipped()
-                        .offset(y: contentTop)
+                        .offset(y: pull.restTop)
                         .allowsHitTesting(false)
                 }
             }
@@ -872,10 +868,10 @@ private struct ListCustomRefreshModifier: ViewModifier {
     }
 }
 
-/// Where a list's rows start, and how far below that a pull has drawn them.
+/// A list's top content inset and scroll offset.
 private struct ListTopEdge: Equatable {
     let inset: CGFloat
-    let overscroll: CGFloat
+    let offset: CGFloat
 }
 
 /// The horizontal inset of a list row's content: the system's minimum
