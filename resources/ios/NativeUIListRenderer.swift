@@ -830,6 +830,8 @@ private struct ListCustomRefreshModifier: ViewModifier {
     @State private var pull = NativeUIPullToRefresh()
 
     private static let indicatorSize: CGFloat = 40
+    /// The bounce marking a pull past the threshold: up to this scale and back.
+    private static let bounceScale: CGFloat = 1.15
 
     func body(content: Content) -> some View {
         content
@@ -848,6 +850,12 @@ private struct ListCustomRefreshModifier: ViewModifier {
                 if pull.gap > 0 {
                     indicator(NativeUIRefreshIndicatorScope(progress: pull.progress, isRefreshing: pull.isRefreshing, options: options))
                         .frame(width: Self.indicatorSize, height: Self.indicatorSize)
+                        .keyframeAnimator(initialValue: 1.0, trigger: pull.crossings) { view, scale in
+                            view.scaleEffect(scale)
+                        } keyframes: { _ in
+                            CubicKeyframe(Self.bounceScale, duration: 0.08)
+                            SpringKeyframe(1.0, duration: 0.12)
+                        }
                         .offset(y: pull.indicatorTop(size: Self.indicatorSize))
                         .frame(maxWidth: .infinity)
                         .frame(height: pull.gap, alignment: .top)
@@ -856,7 +864,7 @@ private struct ListCustomRefreshModifier: ViewModifier {
                         .allowsHitTesting(false)
                 }
             }
-            .sensoryFeedback(.impact(weight: .light), trigger: pull.isRefreshing) { _, refreshing in refreshing }
+            .sensoryFeedback(.impact(weight: .medium), trigger: pull.crossings)
     }
 
     private func refresh() {

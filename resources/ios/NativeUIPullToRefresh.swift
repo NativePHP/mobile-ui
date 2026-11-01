@@ -16,8 +16,24 @@ struct NativeUIPullToRefresh: Equatable {
     /// Where the rows' top rests, below the bars, without the room a
     /// refresh keeps.
     private(set) var restTop: Double = 0
+    /// How many times a pull has crossed the threshold, to mark each
+    /// crossing with a bounce and a buzz.
+    private(set) var crossings = 0
     private var pull: Double = 0
-    private var interacting = false
+    private var interacting = false {
+        didSet { countCrossing(wasArmed: oldValue && !isRefreshing && pull >= Self.threshold) }
+    }
+
+    /// Whether letting go now would start a refresh.
+    var isArmed: Bool {
+        interacting && !isRefreshing && pull >= Self.threshold
+    }
+
+    private mutating func countCrossing(wasArmed: Bool) {
+        if isArmed && !wasArmed {
+            crossings += 1
+        }
+    }
 
     /// How far the list is pulled, from 0 at rest to 1 at the threshold; 1
     /// while refreshing.
@@ -45,7 +61,9 @@ struct NativeUIPullToRefresh: Equatable {
     /// The list's top overscroll: how far its content sits below where it
     /// rests, the room kept while refreshing included.
     mutating func scrolled(overscroll: Double) {
+        let wasArmed = isArmed
         pull = max(0, overscroll)
+        countCrossing(wasArmed: wasArmed)
     }
 
     /// The list's scroll offset and top content inset. The inset is taken as

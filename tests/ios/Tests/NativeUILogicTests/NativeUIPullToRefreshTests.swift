@@ -112,6 +112,49 @@ import Testing
         }
     }
 
+    @Test func theProgressIsFullRightWhereALetGoRefreshes() {
+        var pull = NativeUIPullToRefresh()
+        pull.interactionChanged(interacting: true)
+
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold - 1)
+        #expect(pull.progress < 1)
+        #expect(!pull.isArmed)
+
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold)
+        #expect(pull.progress == 1)
+        #expect(pull.isArmed)
+        let started = pull.interactionChanged(interacting: false)
+        #expect(started)
+    }
+
+    @Test func countsEachCrossingOfTheThresholdWhilePulling() {
+        var pull = NativeUIPullToRefresh()
+        pull.interactionChanged(interacting: true)
+        #expect(pull.crossings == 0)
+
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold + 5)
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold + 30)
+        #expect(pull.crossings == 1)
+
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold - 5)
+        #expect(!pull.isArmed)
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold + 5)
+        #expect(pull.crossings == 2)
+
+        pull.interactionChanged(interacting: false)
+        #expect(!pull.isArmed)
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold * 2)
+        #expect(pull.crossings == 2)
+    }
+
+    @Test func aBounceWithoutAFingerCrossesNothing() {
+        var pull = NativeUIPullToRefresh()
+        pull.scrolled(overscroll: NativeUIPullToRefresh.threshold * 2)
+
+        #expect(!pull.isArmed)
+        #expect(pull.crossings == 0)
+    }
+
     @Test func theIndicatorDrawsInFromTheTopThenStaysNearIt() {
         var pull = NativeUIPullToRefresh()
         let size: Double = 40
