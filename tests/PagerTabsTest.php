@@ -172,3 +172,74 @@ it('drives the Android tab row from the pager position, not PHP', function () {
         ->toContain('NativeElementBridge.sendTabChangeEvent(tabs.reselectCbId, node.id, index)')
         ->toContain('scrollState.scrollTo(');
 });
+
+it('sends a pill indicator on a track, with both shades of a theme track colour', function () {
+    Theme::load([
+        'light' => ['groove' => '#f2f2f2', 'rim' => '#e5e5e5'],
+        'dark' => ['groove' => '#1c1c1e', 'rim' => '#2c2c2e'],
+    ]);
+
+    $props = pagerTabProps([
+        'tabs' => ['Cart', 'Ongoing', 'History'],
+        'tab-indicator-style' => 'pill',
+        'tab-track-color' => 'theme-groove',
+        'tab-track-border-color' => 'theme-rim',
+        'tab-track-border-width' => 1.5,
+        'tab-track-padding' => 4,
+    ]);
+
+    expect($props['tab_indicator_style'])->toBe('pill')
+        ->and($props['tab_track_color'])->toBe('#F2F2F2')
+        ->and($props['dark_tab_track_color'])->toBe('#1C1C1E')
+        ->and($props['tab_track_border_color'])->toBe('#E5E5E5')
+        ->and($props['dark_tab_track_border_color'])->toBe('#2C2C2E')
+        ->and($props['tab_track_border_width'])->toBe(1.5)
+        ->and($props['tab_track_padding'])->toBe(4.0);
+});
+
+it('builds a pill indicator on a track fluently', function () {
+    $props = Pager::make()
+        ->tabs(['A', 'B'])
+        ->tabIndicatorStyle('pill')
+        ->tabTrackColor('gray-100')
+        ->tabTrackBorderColor('gray-200')
+        ->tabTrackBorderWidth(-1)
+        ->tabTrackPadding(-1)
+        ->toArray(new CallbackRegistry)['props'];
+
+    expect($props['tab_indicator_style'])->toBe('pill')
+        ->and($props['tab_track_color'])->toBe('#F3F4F6')
+        ->and($props['tab_track_border_color'])->toBe('#E5E7EB')
+        ->and($props['tab_track_border_width'])->toBe(0.0)
+        ->and($props['tab_track_padding'])->toBe(0.0);
+});
+
+it('rejects an indicator style it cannot draw', function () {
+    pagerTabProps(['tabs' => ['A'], 'tab-indicator-style' => 'dot']);
+})->throws(InvalidArgumentException::class, "pager tab-indicator-style must be 'underline' or 'pill', got 'dot'");
+
+it('draws the pill and track behind the tab labels on iOS, and the underline over them', function () {
+    $source = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIPagerRenderer.swift');
+
+    expect($source)
+        ->toContain('self.pill = p.getString("tab_indicator_style") == "pill"')
+        ->toMatch('/\.background\(alignment: \.topLeading\) \{\s*ZStack\(alignment: \.topLeading\) \{\s*if tabs\.hasTrack/')
+        ->toContain('if tabs.pill, let frame = pillFrame')
+        ->toContain('.strokeBorder(resolve(tabs.trackBorderColor, fallback: .clear), lineWidth: tabs.trackBorderWidth)')
+        ->toContain('if !tabs.pill, let frame = indicatorFrame')
+        // The pill fills each tab, so it slides between whole tabs, not labels.
+        ->toContain('action: { tabFrames[index] = $0 }')
+        ->toContain('fallback: tabs.pill ? theme.onPrimary : theme.onSurface');
+});
+
+it('draws the pill and track behind the tab labels on Android', function () {
+    $source = file_get_contents(dirname(__DIR__).'/resources/android/PagerRenderer.kt');
+
+    expect($source)
+        ->toContain('val pill = p.getString("tab_indicator_style") == "pill"')
+        ->toContain('if (tabs.trackColor.isSet) {')
+        ->toContain('style = Stroke(width = width)')
+        ->toContain('val bounds = pill() ?: return@drawBehind')
+        ->toContain('tabBounds[index] = Rect(origin, Size(it.size.width.toFloat(), it.size.height.toFloat()))')
+        ->toContain('if (tabs.pill) theme.onPrimary else theme.onSurface');
+});

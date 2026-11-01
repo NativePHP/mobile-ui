@@ -3,6 +3,7 @@
 namespace Native\Mobile\UI\Elements;
 
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
 use Native\Mobile\UI\Concerns\ResolvesColorValues;
@@ -66,6 +67,17 @@ use Native\Mobile\UI\Theme;
  * `on-surface-variant`, `primary`, `outline-variant`), and the `tab-*`
  * attributes override them per pager, since the row sits on whatever the
  * pages are (light labels over a video feed, say).
+ *
+ * `tab-indicator-style="pill"` draws the indicator as a pill behind the
+ * current tab instead of a line under it, filling the tab and sliding to
+ * the next one with the swipe. `tab-track-color` lays a pill-shaped track
+ * behind the whole row, `tab-track-padding` apart from the tabs, and
+ * `tab-track-border-color` outlines it, which makes a segmented control:
+ *
+ *   <native:pager horizontal :tabs="['Cart', 'Ongoing', 'History']"
+ *                 tab-indicator-style="pill" tab-track-color="theme-surface-variant"
+ *                 tab-track-border-color="theme-outline-variant" tab-divider-color="transparent"
+ *                 :page="$page" on-page-change="showPage">
  *
  * A horizontal pager can have a header above its tabs, a profile's say,
  * that scrolls up with the page showing while the tabs pin under the nav
@@ -302,6 +314,50 @@ class Pager extends Element
         return $this;
     }
 
+    /**
+     * How the current tab is marked: `underline`, a line under its label, or
+     * `pill`, a pill behind the whole tab. With `pill` the active label
+     * defaults to `theme.on-primary`. Default: `underline`.
+     */
+    public function tabIndicatorStyle(string $style): static
+    {
+        if (! in_array($style, ['underline', 'pill'], true)) {
+            throw new InvalidArgumentException("pager tab-indicator-style must be 'underline' or 'pill', got '{$style}'");
+        }
+
+        $this->pagerProps['tab_indicator_style'] = $style;
+
+        return $this;
+    }
+
+    /** Colour of a pill-shaped track behind the whole row. Default: none. */
+    public function tabTrackColor(string $color): static
+    {
+        return $this->tabColorProp('tab_track_color', $color);
+    }
+
+    /** Colour of a border around the track. Default: none. */
+    public function tabTrackBorderColor(string $color): static
+    {
+        return $this->tabColorProp('tab_track_border_color', $color);
+    }
+
+    /** Thickness of the border around the track, in points. Default: 1. */
+    public function tabTrackBorderWidth(float $width): static
+    {
+        $this->pagerProps['tab_track_border_width'] = max(0.0, $width);
+
+        return $this;
+    }
+
+    /** Space between the track and the tabs, in points. Default: 4. */
+    public function tabTrackPadding(float $padding): static
+    {
+        $this->pagerProps['tab_track_padding'] = max(0.0, $padding);
+
+        return $this;
+    }
+
     /** Indicator thickness in points. Default: 3. */
     public function tabIndicatorHeight(float $height): static
     {
@@ -326,7 +382,10 @@ class Pager extends Element
         return $this;
     }
 
-    /** Space before the first and after the last tab of a scrollable row, in points. Default: 4. */
+    /**
+     * Space before the first and after the last tab of a scrollable row, or
+     * around the track of a fixed row with one, in points. Default: 4.
+     */
     public function tabEdgePadding(float $padding): static
     {
         $this->pagerProps['tab_edge_padding'] = max(0.0, $padding);
@@ -371,6 +430,21 @@ class Pager extends Element
         }
         if (($height = $attr('tab-indicator-height')) !== null) {
             $this->tabIndicatorHeight((float) $height);
+        }
+        if (($style = $attr('tab-indicator-style')) !== null) {
+            $this->tabIndicatorStyle((string) $style);
+        }
+        if (($color = $attr('tab-track-color')) !== null) {
+            $this->tabTrackColor((string) $color);
+        }
+        if (($color = $attr('tab-track-border-color')) !== null) {
+            $this->tabTrackBorderColor((string) $color);
+        }
+        if (($width = $attr('tab-track-border-width')) !== null) {
+            $this->tabTrackBorderWidth((float) $width);
+        }
+        if (($padding = $attr('tab-track-padding')) !== null) {
+            $this->tabTrackPadding((float) $padding);
         }
 
         $paddingX = $attr('tab-padding-x');
