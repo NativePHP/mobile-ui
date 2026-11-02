@@ -44,8 +44,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -297,10 +299,13 @@ object PagerRenderer {
         val density = LocalDensity.current
         val last = tabs.labels.size - 1
 
-        // Each label's left edge and width, and the row's left edge, all in
-        // root coordinates, so they can be measured in any order.
+        // Each label's left edge and width, each whole tab's bounds, and the
+        // row's top-left corner, all in root coordinates, so they can be
+        // measured in any order.
         val labelBounds = remember { mutableStateMapOf<Int, Pair<Float, Float>>() }
+        val tabBounds = remember { mutableStateMapOf<Int, Rect>() }
         var rowLeft by remember { mutableFloatStateOf(0f) }
+        var rowTop by remember { mutableFloatStateOf(0f) }
         var viewportWidth by remember { mutableIntStateOf(0) }
         val scrollState = rememberScrollState()
 
@@ -318,12 +323,35 @@ object PagerRenderer {
             return (a.first + (b.first - a.first) * t - rowLeft) to (a.second + (b.second - a.second) * t)
         }
 
+        // The pill's bounds in the row: between the tabs of the pages either
+        // side of the pager's position, the same way.
+        fun pill(): Rect? {
+            val position = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, last.toFloat())
+            val from = floor(position).toInt()
+            val to = min(from + 1, last)
+            val a = tabBounds[from] ?: return null
+            val b = tabBounds[to] ?: return null
+            val t = position - from
+
+            return Rect(
+                left = a.left + (b.left - a.left) * t - rowLeft,
+                top = a.top + (b.top - a.top) * t - rowTop,
+                right = a.right + (b.right - a.right) * t - rowLeft,
+                bottom = a.bottom + (b.bottom - a.bottom) * t - rowTop,
+            )
+        }
+
+        // Where the row keeps the current tab in view: the pill, or the
+        // underline under its label.
+        fun marker(): Pair<Float, Float>? =
+            if (tabs.pill) pill()?.let { it.left to it.width } else indicator()
+
         if (tabs.scrollable) {
             // Keeps the indicator in the middle of the row, as far as the
             // row's ends allow.
             LaunchedEffect(pagerState, tabs.edgePadding) {
                 val edge = with(density) { tabs.edgePadding.dp.toPx() }
-                snapshotFlow { indicator() to viewportWidth }
+                snapshotFlow { marker() to viewportWidth }
                     .collect { (frame, width) ->
                         if (frame != null && width > 0) {
                             val target = edge + frame.first + frame.second / 2 - width / 2f
@@ -335,18 +363,60 @@ object PagerRenderer {
 
         val active = pagerState.currentPage.coerceIn(0, last)
         val fontFamily = nuiNodeFontFamily(tabs.font)
+        val activeFontFamily = if (tabs.activeFont.isNotEmpty()) nuiNodeFontFamily(tabs.activeFont) else fontFamily
         val fontSize = tabs.fontSize?.sp ?: theme.fontMd
-        val activeColor = tabs.activeColor.resolve(isDark, theme.onSurface)
+        val activeColor = tabs.activeColor.resolve(isDark, if (tabs.pill) theme.onPrimary else theme.onSurface)
         val inactiveColor = tabs.color.resolve(isDark, theme.onSurfaceVariant)
         val indicatorColor = tabs.indicatorColor.resolve(isDark, theme.primary)
         val indicatorHeight = tabs.indicatorHeight.dp
+        val trackColor = tabs.trackColor.resolve(isDark, Color.Transparent)
+        val trackBorderColor = tabs.trackBorderColor.resolve(isDark, Color.Transparent)
 
         val row: @Composable () -> Unit = {
             Row(
                 modifier = Modifier
-                    .then(if (tabs.scrollable) Modifier.padding(horizontal = tabs.edgePadding.dp) else Modifier.fillMaxWidth())
-                    .onGloballyPositioned { rowLeft = it.positionInRoot().x }
+                    .then(
+                        when {
+                            tabs.scrollable -> Modifier.padding(horizontal = tabs.edgePadding.dp)
+                            tabs.hasTrack -> Modifier.fillMaxWidth().padding(tabs.edgePadding.dp)
+                            else -> Modifier.fillMaxWidth()
+                        },
+                    )
+                    .onGloballyPositioned {
+                        rowLeft = it.positionInRoot().x
+                        rowTop = it.positionInRoot().y
+                    }
+                    // The track and the pill sit behind the labels, as the
+                    // underline does.
                     .drawBehind {
+                        if (tabs.trackColor.isSet) {
+                            drawRoundRect(color = trackColor, cornerRadius = CornerRadius(size.height / 2))
+                        }
+
+                        if (tabs.hasTrackBorder) {
+                            // A stroke straddles its path, so inset it to keep it inside the track.
+                            val width = tabs.trackBorderWidth.dp.toPx()
+                            drawRoundRect(
+                                color = trackBorderColor,
+                                topLeft = Offset(width / 2, width / 2),
+                                size = Size(size.width - width, size.height - width),
+                                cornerRadius = CornerRadius((size.height - width) / 2),
+                                style = Stroke(width = width),
+                            )
+                        }
+
+                        if (tabs.pill) {
+                            val bounds = pill() ?: return@drawBehind
+                            drawRoundRect(
+                                color = indicatorColor,
+                                topLeft = bounds.topLeft,
+                                size = bounds.size,
+                                cornerRadius = CornerRadius(bounds.height / 2),
+                            )
+
+                            return@drawBehind
+                        }
+
                         val (left, width) = indicator() ?: return@drawBehind
                         val height = indicatorHeight.toPx()
                         drawRoundRect(
@@ -356,6 +426,7 @@ object PagerRenderer {
                             cornerRadius = CornerRadius(height / 2),
                         )
                     }
+                    .padding(if (tabs.hasTrack) tabs.trackPadding.dp else 0.dp)
                     .selectableGroup(),
             ) {
                 tabs.labels.forEachIndexed { index, label ->
@@ -364,23 +435,29 @@ object PagerRenderer {
                     Box(
                         modifier = (if (tabs.scrollable) Modifier else Modifier.weight(1f))
                             .heightIn(min = 48.dp)
+                            .onGloballyPositioned {
+                                val origin = it.positionInRoot()
+                                tabBounds[index] = Rect(origin, Size(it.size.width.toFloat(), it.size.height.toFloat()))
+                            }
                             .selectable(selected = index == active, role = Role.Tab, onClick = { onSelect(index) })
                             .then(if (a11yLabel.isNotEmpty()) Modifier.semantics { contentDescription = a11yLabel } else Modifier)
                             .padding(
                                 start = tabs.paddingX.dp,
                                 end = tabs.paddingX.dp,
                                 top = tabs.paddingTop.dp,
-                                bottom = tabs.paddingBottom.dp + indicatorHeight,
+                                bottom = tabs.paddingBottom.dp + if (tabs.pill) 0.dp else indicatorHeight,
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
+                        val family = if (index == active) activeFontFamily else fontFamily
+
                         Text(
                             text = label,
                             color = if (index == active) activeColor else inactiveColor,
                             fontSize = fontSize,
-                            fontFamily = fontFamily,
+                            fontFamily = family,
                             // A bundled font file is one weight already.
-                            fontWeight = if (fontFamily == null) FontWeight.SemiBold else null,
+                            fontWeight = if (family == null) FontWeight.SemiBold else null,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.onGloballyPositioned {
@@ -456,13 +533,25 @@ internal class PagerTabs(p: GenericProps) {
     val activeColor = PagerTabColor.from(p, "tab_active_color")
     val indicatorColor = PagerTabColor.from(p, "tab_indicator_color")
     val dividerColor = PagerTabColor.from(p, "tab_divider_color")
+    val trackColor = PagerTabColor.from(p, "tab_track_color")
+    val trackBorderColor = PagerTabColor.from(p, "tab_track_border_color")
+    val trackBorderWidth = p.getFloat("tab_track_border_width", 1f)
+    val pill = p.getString("tab_indicator_style") == "pill"
+    val trackPadding = p.getFloat("tab_track_padding", 4f)
     val font = p.getString("tab_font")
+    val activeFont = p.getString("tab_active_font")
     val fontSize: Float? = if (p.has("tab_font_size")) p.getFloat("tab_font_size") else null
     val indicatorHeight = p.getFloat("tab_indicator_height", 3f)
     val paddingX = p.getFloat("tab_padding_x", 12f)
     val paddingTop = p.getFloat("tab_padding_top", 14f)
     val paddingBottom = p.getFloat("tab_padding_bottom", 11f)
     val edgePadding = p.getFloat("tab_edge_padding", 4f)
+
+    /** Whether the track is outlined. */
+    val hasTrackBorder: Boolean get() = trackBorderColor.isSet && trackBorderWidth > 0f
+
+    /** Whether a track is drawn behind the row, filled or outlined. */
+    val hasTrack: Boolean get() = trackColor.isSet || hasTrackBorder
 
     companion object {
         fun from(p: GenericProps): PagerTabs? =
@@ -472,6 +561,9 @@ internal class PagerTabs(p: GenericProps) {
 
 /** A tab colour PHP sent, with its dark shade when it came from a theme token. */
 internal class PagerTabColor(private val light: Int?, private val dark: Int?) {
+    /** Whether PHP sent this colour at all. */
+    val isSet: Boolean get() = light != null || dark != null
+
     fun resolve(isDark: Boolean, fallback: Color): Color {
         val argb = if (isDark) dark ?: light else light
 

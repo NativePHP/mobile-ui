@@ -398,7 +398,13 @@ private struct PagerTabs: Equatable {
     let activeColor: (light: Int?, dark: Int?)
     let indicatorColor: (light: Int?, dark: Int?)
     let dividerColor: (light: Int?, dark: Int?)
+    let trackColor: (light: Int?, dark: Int?)
+    let trackBorderColor: (light: Int?, dark: Int?)
+    let trackBorderWidth: CGFloat
+    let pill: Bool
+    let trackPadding: CGFloat
     let font: String
+    let activeFont: String
     let fontSize: CGFloat?
     let indicatorHeight: CGFloat
     let paddingX: CGFloat
@@ -427,7 +433,13 @@ private struct PagerTabs: Equatable {
         self.activeColor = color("tab_active_color")
         self.indicatorColor = color("tab_indicator_color")
         self.dividerColor = color("tab_divider_color")
+        self.trackColor = color("tab_track_color")
+        self.trackBorderColor = color("tab_track_border_color")
+        self.trackBorderWidth = points("tab_track_border_width", 1)
+        self.pill = p.getString("tab_indicator_style") == "pill"
+        self.trackPadding = points("tab_track_padding", 4)
         self.font = p.getString("tab_font")
+        self.activeFont = p.getString("tab_active_font")
         self.fontSize = p.has("tab_font_size") ? CGFloat(p.getFloat("tab_font_size")) : nil
         self.indicatorHeight = points("tab_indicator_height", 3)
         self.paddingX = points("tab_padding_x", 12)
@@ -439,9 +451,21 @@ private struct PagerTabs: Equatable {
     static func == (lhs: PagerTabs, rhs: PagerTabs) -> Bool {
         lhs.labels == rhs.labels && lhs.a11yLabels == rhs.a11yLabels && lhs.scrollable == rhs.scrollable
             && lhs.reselectCbId == rhs.reselectCbId && lhs.color == rhs.color && lhs.activeColor == rhs.activeColor
-            && lhs.indicatorColor == rhs.indicatorColor && lhs.dividerColor == rhs.dividerColor && lhs.font == rhs.font
+            && lhs.indicatorColor == rhs.indicatorColor && lhs.dividerColor == rhs.dividerColor && lhs.trackColor == rhs.trackColor
+            && lhs.trackBorderColor == rhs.trackBorderColor && lhs.trackBorderWidth == rhs.trackBorderWidth
+            && lhs.pill == rhs.pill && lhs.trackPadding == rhs.trackPadding && lhs.font == rhs.font && lhs.activeFont == rhs.activeFont
             && lhs.fontSize == rhs.fontSize && lhs.indicatorHeight == rhs.indicatorHeight && lhs.paddingX == rhs.paddingX
             && lhs.paddingTop == rhs.paddingTop && lhs.paddingBottom == rhs.paddingBottom && lhs.edgePadding == rhs.edgePadding
+    }
+
+    /// Whether a track is drawn behind the row, filled or outlined.
+    var hasTrack: Bool {
+        trackColor.light != nil || trackColor.dark != nil || hasTrackBorder
+    }
+
+    /// Whether the track is outlined.
+    var hasTrackBorder: Bool {
+        (trackBorderColor.light != nil || trackBorderColor.dark != nil) && trackBorderWidth > 0
     }
 }
 
@@ -458,9 +482,12 @@ private struct PagerTabStrip: View {
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Each label's frame in the row, by tab index. The indicator goes
+    /// Each label's frame in the row, by tab index. The underline goes
     /// between these.
     @State private var labelFrames: [Int: CGRect] = [:]
+    /// Each whole tab's frame in the row, by tab index. The pill goes
+    /// between these.
+    @State private var tabFrames: [Int: CGRect] = [:]
     @State private var rowWidth: CGFloat = 0
     @State private var viewportWidth: CGFloat = 0
     @State private var rowPosition = ScrollPosition(edge: .leading)
@@ -481,9 +508,11 @@ private struct PagerTabStrip: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewportWidth = $0 }
                 .onChange(of: progress.value) { follow() }
                 .onChange(of: labelFrames) { follow() }
+                .onChange(of: tabFrames) { follow() }
                 .onChange(of: viewportWidth) { follow() }
             } else {
                 row(theme)
+                    .padding(tabs.hasTrack ? tabs.edgePadding : 0)
             }
 
             Rectangle()
@@ -495,6 +524,7 @@ private struct PagerTabStrip: View {
 
     private func row(_ theme: NativeUITokens) -> some View {
         let active = activeIndex
+        let drawsNamedFace = !tabs.activeFont.isEmpty
         let fontSize = tabs.fontSize ?? theme.fontMd
 
         return HStack(spacing: 0) {
@@ -502,22 +532,27 @@ private struct PagerTabStrip: View {
                 let label = tabs.labels[index]
                 let a11yLabel = index < tabs.a11yLabels.count && !tabs.a11yLabels[index].isEmpty ? tabs.a11yLabels[index] : label
                 let selected = index == active
+                let fontName = selected && drawsNamedFace ? tabs.activeFont : tabs.font
 
                 Button {
                     select(index)
                 } label: {
                     Text(label)
-                        .nuiScaledFont(size: fontSize, weight: .semibold, fontName: tabs.font.isEmpty ? nil : tabs.font)
+                        // With an active font, each named font draws its own face, as on
+                        // Android: the semibold weight would swap a `-Regular` file for its
+                        // semibold sibling and draw every tab alike.
+                        .nuiScaledFont(size: fontSize, weight: drawsNamedFace && !fontName.isEmpty ? .regular : .semibold, fontName: fontName.isEmpty ? nil : fontName)
                         .lineLimit(1)
                         .foregroundStyle(selected
-                            ? resolve(tabs.activeColor, fallback: theme.onSurface)
+                            ? resolve(tabs.activeColor, fallback: tabs.pill ? theme.onPrimary : theme.onSurface)
                             : resolve(tabs.color, fallback: theme.onSurfaceVariant))
                         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { labelFrames[index] = $0 }
                         .padding(.horizontal, tabs.paddingX)
                         .padding(.top, tabs.paddingTop)
-                        .padding(.bottom, tabs.paddingBottom + tabs.indicatorHeight)
+                        .padding(.bottom, tabs.paddingBottom + (tabs.pill ? 0 : tabs.indicatorHeight))
                         .frame(maxWidth: tabs.scrollable ? nil : .infinity)
                         .frame(minHeight: 44)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { tabFrames[index] = $0 }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -525,14 +560,39 @@ private struct PagerTabStrip: View {
                 .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             }
         }
+        .padding(tabs.hasTrack ? tabs.trackPadding : 0)
         // VoiceOver reads each as a tab, "1 of 3". Only the tabs: the
-        // indicator overlaid below stays out of the group.
+        // indicator and track stay out of the group.
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isTabBar)
         .coordinateSpace(.named(Self.space))
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
+        // The track and the pill sit behind the labels, the underline over them.
+        .background(alignment: .topLeading) {
+            ZStack(alignment: .topLeading) {
+                if tabs.hasTrack {
+                    Capsule()
+                        .fill(resolve(tabs.trackColor, fallback: .clear))
+                        .overlay {
+                            if tabs.hasTrackBorder {
+                                Capsule()
+                                    .strokeBorder(resolve(tabs.trackBorderColor, fallback: .clear), lineWidth: tabs.trackBorderWidth)
+                            }
+                        }
+                }
+
+                if tabs.pill, let frame = pillFrame {
+                    Capsule()
+                        .fill(resolve(tabs.indicatorColor, fallback: theme.primary))
+                        .frame(width: frame.width, height: frame.height)
+                        .offset(x: frame.minX, y: frame.minY)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .overlay(alignment: .bottomLeading) {
-            if let frame = indicatorFrame {
+            if !tabs.pill, let frame = indicatorFrame {
                 Capsule()
                     .fill(resolve(tabs.indicatorColor, fallback: theme.primary))
                     .frame(width: frame.width, height: tabs.indicatorHeight)
@@ -548,26 +608,42 @@ private struct PagerTabStrip: View {
         min(max(Int(progress.value.rounded()), 0), tabs.labels.count - 1)
     }
 
-    /// The indicator's x and width: between the labels of the pages either
-    /// side of the pager's position, in proportion to how far it is from one
-    /// to the other.
+    /// The underline's x and width: between the labels of the pages either
+    /// side of the pager's position.
     private var indicatorFrame: CGRect? {
+        between(labelFrames)
+    }
+
+    /// The pill's frame: between the tabs of the pages either side of the
+    /// pager's position.
+    private var pillFrame: CGRect? {
+        between(tabFrames)
+    }
+
+    /// A frame between those of the pages either side of the pager's
+    /// position, in proportion to how far it is from one to the other.
+    private func between(_ frames: [Int: CGRect]) -> CGRect? {
         let last = tabs.labels.count - 1
         let position = min(max(progress.value, 0), CGFloat(last))
         let from = Int(position.rounded(.down))
         let to = min(from + 1, last)
 
-        guard let a = labelFrames[from], let b = labelFrames[to] else { return nil }
+        guard let a = frames[from], let b = frames[to] else { return nil }
 
         let t = position - CGFloat(from)
 
-        return CGRect(x: a.minX + (b.minX - a.minX) * t, y: 0, width: a.width + (b.width - a.width) * t, height: 0)
+        return CGRect(
+            x: a.minX + (b.minX - a.minX) * t,
+            y: a.minY + (b.minY - a.minY) * t,
+            width: a.width + (b.width - a.width) * t,
+            height: a.height + (b.height - a.height) * t
+        )
     }
 
     /// Keeps the indicator in the middle of a scrollable row, as far as the
     /// row's ends allow.
     private func follow() {
-        guard viewportWidth > 0, let frame = indicatorFrame else { return }
+        guard viewportWidth > 0, let frame = tabs.pill ? pillFrame : indicatorFrame else { return }
 
         let contentWidth = rowWidth + tabs.edgePadding * 2
         let target = tabs.edgePadding + frame.midX - viewportWidth / 2
