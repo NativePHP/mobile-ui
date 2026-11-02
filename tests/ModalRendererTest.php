@@ -15,3 +15,14 @@ test('applies the status bar inset before padding the Android modal close button
         ->toBeString()
         ->toMatch($closeButtonModifierPattern);
 });
+
+test('copies the status bar appearance of the activity to the Android modal window', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/android/ModalRenderer.kt');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/\(dialogView\.parent as\? DialogWindowProvider\)\?\.window/')
+        ->toMatch('/val screenWindow = MainActivity\.instance\?\.window/')
+        ->toMatch('/WindowCompat\.getInsetsController\(dialogWindow, dialogView\)\.isAppearanceLightStatusBars =\s*'
+            .'WindowCompat\.getInsetsController\(screenWindow, screenWindow\.decorView\)\.isAppearanceLightStatusBars/');
+});

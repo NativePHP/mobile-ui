@@ -18,16 +18,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import com.nativephp.mobile.ui.MainActivity
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
@@ -77,6 +82,20 @@ object ModalRenderer {
                 decorFitsSystemWindows = false,
             ),
         ) {
+            // The dialog has its own window, and its status bar icons stay white
+            // unless it is told otherwise. Copy the appearance from the activity,
+            // which applies `status_bar_style`, so the modal matches the screen
+            // behind it. The side effect runs again when the theme changes.
+            val dialogView = LocalView.current
+            SideEffect {
+                val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
+                val screenWindow = MainActivity.instance?.window
+                if (dialogWindow != null && screenWindow != null) {
+                    WindowCompat.getInsetsController(dialogWindow, dialogView).isAppearanceLightStatusBars =
+                        WindowCompat.getInsetsController(screenWindow, screenWindow.decorView).isAppearanceLightStatusBars
+                }
+            }
+
             val dialogModifier = Modifier
                 .fillMaxSize()
                 .background(theme.background)
