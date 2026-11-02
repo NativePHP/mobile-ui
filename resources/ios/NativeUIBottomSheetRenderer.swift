@@ -12,6 +12,8 @@ struct NativeUIBottomSheetRenderer: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isPresented: Bool = false
+    /// PHP set `visible` to false, and the sheet hasn't finished closing yet.
+    @State private var closedByPhp: Bool = false
     @State private var fitHeight: CGFloat?
     @State private var selectedDetent: PresentationDetent = .medium
 
@@ -29,6 +31,14 @@ struct NativeUIBottomSheetRenderer: View {
 
         Color.clear.frame(width: 0, height: 0)
             .sheet(isPresented: $isPresented, onDismiss: {
+                // SwiftUI calls onDismiss for every close, also the one PHP
+                // asked for, and it writes the binding for both, so only
+                // present(false) can tell them apart. Report the user's
+                // dismissals only, as Android's onDismissRequest does.
+                if closedByPhp {
+                    closedByPhp = false
+                    return
+                }
                 if onDismissCb != 0 {
                     NativeUIBridge.sendSheetDismissEvent(onDismissCb, nodeId: node.id)
                 }
@@ -50,7 +60,12 @@ struct NativeUIBottomSheetRenderer: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(theme.surface)
                 }
-                .onAppear { NativeUIKeyboardAccessoryState.shared.sheetDepth += 1 }
+                .onAppear {
+                    NativeUIKeyboardAccessoryState.shared.sheetDepth += 1
+                    // A close that never reached onDismiss must not swallow
+                    // the user's dismissal of this presentation.
+                    closedByPhp = false
+                }
                 .onDisappear { NativeUIKeyboardAccessoryState.shared.sheetDepth -= 1 }
                 .modifier(DetentsModifier(
                     detents: resolveDetents(detentsStr),
@@ -70,6 +85,7 @@ struct NativeUIBottomSheetRenderer: View {
 
     private func present(_ visible: Bool) {
         if visible && !isPresented { selectedDetent = fitDetent }
+        if !visible && isPresented { closedByPhp = true }
         isPresented = visible
     }
 
