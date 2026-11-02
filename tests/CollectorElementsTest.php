@@ -502,6 +502,24 @@ it('accepts camelCase sheet pane attributes', function () {
     expect($tree['props']['inset_bottom'])->toBe(6.0);
 });
 
+it('rests a sheet pane on its fit detent', function () {
+    NativeElementCollector::leaf('sheet_pane', [
+        'detents' => '88,fit',
+        'detent' => 'fit',
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['detents'])->toBe('88,fit');
+    expect($tree['props']['detent'])->toBe('fit');
+});
+
+it('accepts the fit detent and numeric strings fluently', function () {
+    expect(SheetPane::make()->detent('fit')->toArray(new CallbackRegistry)['props']['detent'])->toBe('fit');
+    expect(SheetPane::make()->detent('560.5')->toArray(new CallbackRegistry)['props']['detent'])->toBe(560.5);
+    expect(SheetPane::make()->detent(200)->toArray(new CallbackRegistry)['props']['detent'])->toBe(200.0);
+});
+
 it('falls back to the sheet pane defaults when attributes are absent', function () {
     NativeElementCollector::leaf('sheet_pane', []);
 

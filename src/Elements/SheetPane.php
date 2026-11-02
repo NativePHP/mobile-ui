@@ -26,7 +26,11 @@ use Native\Mobile\Edge\Element;
  *
  * `@change` fires when a drag settles, with the resolved detent (px) as
  * the value — store it and re-publish the same number so re-renders
- * don't move the pane.
+ * don't move the pane. When the pane settles on the "fit" detent the
+ * value is the string "fit" instead, so re-publishing it keeps the pane
+ * on its content's height as that height changes:
+ *
+ *   <native:sheet-pane detents="88,fit" :detent="$detent" @change="setDetent">
  */
 class SheetPane extends Element
 {
@@ -48,7 +52,7 @@ class SheetPane extends Element
             $this->detents($attrs['detents']);
         }
         if (isset($attrs['detent'])) {
-            $this->detent((float) $attrs['detent']);
+            $this->detent($attrs['detent']);
         }
         foreach (['corner-radius', 'cornerRadius'] as $key) {
             if (isset($attrs[$key])) {
@@ -69,7 +73,15 @@ class SheetPane extends Element
         $this->applyA11yAttributes($attrs);
     }
 
-    /** Comma-separated resting heights in points, ascending: "200,560,780". */
+    /**
+     * Comma-separated resting heights in points: "200,560,780".
+     *
+     * "fit" is a resting height equal to the content's measured height,
+     * capped at the screen, and combines with point heights ("88,fit").
+     * The content stays pinned to the top of the pane and is cut off at
+     * the bottom when the pane rests lower. With "fit" listed, the content
+     * takes its natural height instead of filling the tallest detent.
+     */
     public function detents(string $detents): static
     {
         $this->paneProps['detents'] = $detents;
@@ -77,10 +89,15 @@ class SheetPane extends Element
         return $this;
     }
 
-    /** Current resting height (px). Bind to the value @change reported. */
-    public function detent(float $height): static
+    /**
+     * Current resting height in points, or "fit" to rest on the fit
+     * detent. Bind it to the value @change reported.
+     */
+    public function detent(float|int|string $height): static
     {
-        $this->paneProps['detent'] = $height;
+        $this->paneProps['detent'] = is_string($height) && strtolower(trim($height)) === 'fit'
+            ? 'fit'
+            : (float) $height;
 
         return $this;
     }
