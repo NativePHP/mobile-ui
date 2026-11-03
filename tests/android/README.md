@@ -28,6 +28,13 @@ scroll container, and a bound pan still follows the finger. `NodeView` here
 stands in for core's: each child is a fixed-size box, clickable like a core
 `pressable` when it has a press handler.
 
+`GestureAreaTriggerTest` pulls a pan with a trigger point (`pan-x-trigger`):
+let go past the point it fires `@trigger` and springs back, short of it or
+after coming back under it it only springs back, the haptic plays each time
+the pull goes out past the point, the pan follows the finger to the point
+and resists past it, and a drag the other way is left to an enclosing
+scroll container.
+
 `TextInputCaretTest` pushes a new value into the outlined, filled and bare
 editors and checks where the caret lands: where the `selection` props say
 (code points, clamped), at the end when they don't, never on an echo of what

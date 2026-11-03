@@ -17,6 +17,19 @@ import UIKit
 ///                                and highest with resistance past them,
 ///                                springs to the nearest on release, and
 ///                                springs to a PHP write-back too.
+///   - `pan-x-trigger` /
+///     `pan-y-trigger`  (float) — how far from rest a pull on a bound
+///                                axis goes to trigger, its sign the way
+///                                it goes (see NativeUIPanTrigger): the
+///                                pan only starts that way, follows the
+///                                finger to the point with resistance
+///                                past it, plays a light haptic each time
+///                                it goes out past it, and springs back
+///                                to rest on release. Takes the place of
+///                                snap points; one-axis pans only.
+///   - `on_trigger`     (int)   — callback fired when a pull is let go
+///                                past its trigger point (rides the
+///                                PRESS format, which carries nothing).
 ///   - `on_drag_end`    (int)   — callback fired when a drag ends,
 ///                                carrying the final "x,y" translation
 ///                                (points) as text; an unbound axis
@@ -81,6 +94,9 @@ struct NativeUIGestureAreaRenderer: View {
     @State private var writtenPan: CGSize = .zero
     @State private var pinching = false
     @State private var settle = NativeUIPanSettle()
+    // A trigger axis only: the haptic at the point, and whether the pull
+    // is past it.
+    @State private var pull = NativeUIPanPull()
 
     var body: some View {
         let panXId = node.props.getInt("pan-x-id", default: 0)
@@ -105,6 +121,9 @@ struct NativeUIGestureAreaRenderer: View {
         let a11yHint = node.props.getString("a11y_hint")
         let snapX = NativeUIPanSnap(node.props.getString("pan-x-snap"))
         let snapY = NativeUIPanSnap(node.props.getString("pan-y-snap"))
+        let triggerX = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-x-trigger", default: 0)))
+        let triggerY = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-y-trigger", default: 0)))
+        let onTrigger = node.props.getInt("on_trigger", default: 0)
         // One bound axis and nothing else moving the pan: a UIKit pan that
         // only takes drags along that axis, so an enclosing scroll view
         // keeps the other (see AxisPanRecognizer). SwiftUI's drag below
@@ -161,27 +180,44 @@ struct NativeUIGestureAreaRenderer: View {
         )
         .modifier(AxisPanModifier(
             axis: axisPan,
+            pulls: axisPan == .horizontal ? triggerX.distance : triggerY.distance,
             began: {
                 settle.stop()
+                if !(axisPan == .horizontal ? triggerX : triggerY).isEmpty { pull.begin() }
                 if axisPan == .horizontal { dragStartX = store.value(for: panXId) } else { dragStart = store.value(for: panYId) }
             },
             changed: { translation in
-                if axisPan == .horizontal {
-                    store.set(snapX.resisted(dragStartX + translation), for: panXId)
-                } else {
-                    store.set(snapY.resisted(dragStart + translation), for: panYId)
-                }
-            },
-            ended: { velocity, across in
                 let horizontal = axisPan == .horizontal
                 let id = horizontal ? panXId : panYId
-                let snap = horizontal ? snapX : snapY
+                let start = horizontal ? dragStartX : dragStart
+                let trigger = horizontal ? triggerX : triggerY
+                guard !trigger.isEmpty else {
+                    store.set((horizontal ? snapX : snapY).resisted(start + translation), for: id)
+                    return
+                }
+                // Measured from rest, so a pull caught on its way back
+                // carries on from where it is.
+                let rest = horizontal ? panXInitial : panYInitial
+                let shown = trigger.resisted(start - rest + translation)
+                store.set(rest + shown, for: id)
+                pull.update(past: trigger.passed(shown))
+            },
+            ended: { velocity, across, lifted in
+                let horizontal = axisPan == .horizontal
+                let id = horizontal ? panXId : panYId
+                let trigger = horizontal ? triggerX : triggerY
                 let current = store.value(for: id)
-                let rest = snap.target(from: current, velocity: velocity)
+                // A trigger axis always goes back to rest.
+                let rest = trigger.isEmpty
+                    ? (horizontal ? snapX : snapY).target(from: current, velocity: velocity)
+                    : (horizontal ? panXInitial : panYInitial)
                 if rest != current {
                     settle.run([.init(id: id, from: current, to: rest)])
                 }
                 if horizontal { dragStartX = rest } else { dragStart = rest }
+                if pull.end(), lifted, onTrigger != 0 {
+                    NativeElementBridge.sendPressEvent(onTrigger, nodeId: node.id)
+                }
                 guard onDragEnd != 0 else { return }
                 // The other axis isn't bound, so it reports the finger's
                 // raw movement across, as the drag above does.
@@ -235,7 +271,7 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .onChange(of: panXInitial) { _, newInitial in
             guard panXId != 0 else { return }
-            writeBack(newInitial, for: panXId, snapping: !snapX.isEmpty)
+            writeBack(newInitial, for: panXId, snapping: !snapX.isEmpty || !triggerX.isEmpty)
             dragStartX = newInitial
         }
         .onChange(of: pinchId) { _, newId in
@@ -243,7 +279,7 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .onChange(of: panYInitial) { _, newInitial in
             guard panYId != 0 else { return }
-            writeBack(newInitial, for: panYId, snapping: !snapY.isEmpty)
+            writeBack(newInitial, for: panYId, snapping: !snapY.isEmpty || !triggerY.isEmpty)
             dragStart = newInitial
         }
         .onChange(of: pinchInitial) { _, newInitial in
@@ -254,9 +290,9 @@ struct NativeUIGestureAreaRenderer: View {
         .modifier(A11yHintModifier(hint: a11yHint))
     }
 
-    /// PHP set a persistent SharedValue (`setValue()`): a snapping axis
-    /// springs there, as it does on release, so closing a revealed row
-    /// from PHP slides it shut; any other value jumps.
+    /// PHP set a persistent SharedValue (`setValue()`): a snapping or
+    /// trigger axis springs there, as it does on release, so closing a
+    /// revealed row from PHP slides it shut; any other value jumps.
     private func writeBack(_ value: CGFloat, for id: Int, snapping: Bool) {
         guard snapping else {
             store.set(value, for: id)
@@ -628,17 +664,79 @@ struct NativeUIPanSnap {
     }
 }
 
+// MARK: - Trigger pull
+
+/// A pull that acts when let go far enough (`pan-x-trigger` /
+/// `pan-y-trigger`): how far from rest it goes to trigger, its sign the
+/// way it goes. Zero when the axis doesn't trigger.
+struct NativeUIPanTrigger {
+    let distance: CGFloat
+
+    var isEmpty: Bool { distance == 0 }
+
+    /// What the pull shows for the finger's offset from rest: nothing the
+    /// other way, the finger itself as far as the point, and past it a
+    /// third of the finger's movement, as past the outer snap points.
+    func resisted(_ offset: CGFloat) -> CGFloat {
+        let sign: CGFloat = distance < 0 ? -1 : 1
+        let reach = abs(distance)
+        let toward = offset * sign
+        let shown = toward <= 0 ? 0 : toward <= reach ? toward : reach + (toward - reach) / 3
+        return shown * sign
+    }
+
+    /// Whether a pull this far from rest is at the point or past it.
+    func passed(_ offset: CGFloat) -> Bool {
+        !isEmpty && (distance < 0 ? offset <= distance : offset >= distance)
+    }
+}
+
+/// What a trigger pull keeps while the finger is down: the light haptic
+/// that plays each time it goes out past the point, and whether it's past
+/// it now. Coming back under the point plays nothing.
+final class NativeUIPanPull {
+    private var haptic: UIImpactFeedbackGenerator?
+    private var past = false
+
+    func begin() {
+        past = false
+        haptic = UIImpactFeedbackGenerator(style: .light)
+        haptic?.prepare()
+    }
+
+    func update(past now: Bool) {
+        if now && !past {
+            haptic?.impactOccurred()
+            haptic?.prepare()
+        }
+        past = now
+    }
+
+    /// Whether the pull was past the point when it ended.
+    func end() -> Bool {
+        defer {
+            past = false
+            haptic = nil
+        }
+        return past
+    }
+}
+
 /// Attaches AxisPanRecognizer when the area pans on one axis only.
 private struct AxisPanModifier: ViewModifier {
     let axis: Axis?
+    /// Which way along the axis the pan may start: either way when zero,
+    /// otherwise only the way of its sign, as a trigger's pull goes.
+    let pulls: CGFloat
     let began: () -> Void
     let changed: (CGFloat) -> Void
-    /// The velocity along the axis, then the translation across it.
-    let ended: (CGFloat, CGFloat) -> Void
+    /// The velocity along the axis, the translation across it, and whether
+    /// the finger lifted rather than the pan being cancelled.
+    let ended: (CGFloat, CGFloat, Bool) -> Void
 
     func body(content: Content) -> some View {
         if let axis {
-            content.gesture(AxisPanRecognizer(axis: axis, began: began, changed: changed, ended: ended))
+            content.gesture(AxisPanRecognizer(axis: axis, pulls: pulls, began: began, changed: changed, ended: ended))
         } else {
             content
         }
@@ -651,15 +749,22 @@ private struct AxisPanModifier: ViewModifier {
 /// drag along it doesn't: the scroll view waits for this pan to decide,
 /// as does iOS 26's swipe back from mid-screen. The edge swipe back still
 /// wins, since this pan waits for it. A drag that takes the pan cancels
-/// the taps of whatever it started on.
+/// the taps of whatever it started on. A one-way pan (`pulls`) doesn't
+/// begin on a drag the other way, which leaves it to the scroll view or
+/// the swipe back.
 private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
     let axis: Axis
+    let pulls: CGFloat
     let began: () -> Void
     let changed: (CGFloat) -> Void
-    let ended: (CGFloat, CGFloat) -> Void
+    let ended: (CGFloat, CGFloat, Bool) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
-        Coordinator(axis: axis)
+        Coordinator(axis: axis, pulls: pulls)
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.pulls = pulls
     }
 
     func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
@@ -681,9 +786,9 @@ private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
             changed(along)
         case .ended:
             let velocity = recognizer.velocity(in: recognizer.view)
-            ended(axis == .horizontal ? velocity.x : velocity.y, across)
+            ended(axis == .horizontal ? velocity.x : velocity.y, across, true)
         case .cancelled, .failed:
-            ended(0, across)
+            ended(0, across, false)
         default:
             break
         }
@@ -691,15 +796,20 @@ private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let axis: Axis
+        var pulls: CGFloat
 
-        init(axis: Axis) {
+        init(axis: Axis, pulls: CGFloat) {
             self.axis = axis
+            self.pulls = pulls
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
             let velocity = pan.velocity(in: pan.view)
-            return axis == .horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+            let along = axis == .horizontal ? velocity.x : velocity.y
+            let across = axis == .horizontal ? velocity.y : velocity.x
+            guard abs(along) > abs(across) else { return false }
+            return pulls == 0 || (along < 0) == (pulls < 0)
         }
 
         func gestureRecognizer(
