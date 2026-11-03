@@ -5,27 +5,37 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
@@ -57,6 +67,19 @@ import kotlin.math.abs
  *                                with resistance past them, springs to
  *                                the nearest on release, and springs to a
  *                                PHP write-back too.
+ *   - `pan-x-trigger` /
+ *     `pan-y-trigger`  (float) — how far from rest a pull on a bound
+ *                                axis goes to trigger, its sign the way
+ *                                it goes (see PanTrigger): the drag only
+ *                                starts that way, follows the finger to
+ *                                the point with resistance past it, plays
+ *                                a light haptic each time it goes out
+ *                                past it, and springs back to rest on
+ *                                release. Takes the place of snap points;
+ *                                one-axis pans only.
+ *   - `on_trigger`     (int)   — callback fired when a pull is let go
+ *                                past its trigger point (rides the PRESS
+ *                                format, which carries nothing).
  *   - `on_drag_end`    (int)   — callback fired when a drag ends,
  *                                carrying the final "x,y" translation
  *                                (dp) as text (rides the TEXT_CHANGE
@@ -131,6 +154,15 @@ object GestureAreaRenderer {
         val snapX = PanSnap.parse(node.props.getString("pan-x-snap"))
         val snapY = PanSnap.parse(node.props.getString("pan-y-snap"))
         val snapping = remember { SnapPan() }
+        val triggerX = PanTrigger(node.props.getFloat("pan-x-trigger", 0f))
+        val triggerY = PanTrigger(node.props.getFloat("pan-y-trigger", 0f))
+        val onTrigger = node.props.getInt("on_trigger", 0)
+        val haptics = LocalHapticFeedback.current
+        // Where a trigger axis rests, as PHP last published it. Read when a
+        // pull moves and ends rather than keying the gesture on it, so a
+        // write-back doesn't cut a pull short.
+        val restX by rememberUpdatedState(panXInitial)
+        val restY by rememberUpdatedState(panYInitial)
 
         // Seed during COMPOSITION (inline, before children compose) rather
         // than in a LaunchedEffect: effects run after children have
@@ -144,8 +176,8 @@ object GestureAreaRenderer {
         //     on a persistent SharedValue. That is an explicit
         //     write-back: push it into the store even though the id
         //     already has a live value (a reset button, snap-to, etc.).
-        SyncBinding(panXId, panXInitial, if (snapX.isEmpty) null else { value -> snapping.to(panXId, value, scope) })
-        SyncBinding(panYId, panYInitial, if (snapY.isEmpty) null else { value -> snapping.to(panYId, value, scope) })
+        SyncBinding(panXId, panXInitial, if (snapX.isEmpty && triggerX.isEmpty) null else { value -> snapping.to(panXId, value, scope) })
+        SyncBinding(panYId, panYInitial, if (snapY.isEmpty && triggerY.isEmpty) null else { value -> snapping.to(panYId, value, scope) })
         SyncBinding(pinchId, pinchInitial)
 
         Box(
@@ -154,7 +186,7 @@ object GestureAreaRenderer {
                 .onSizeChanged { size ->
                     areaSize = with(density) { Size(size.width.toDp().value, size.height.toDp().value) }
                 }
-                .pointerInput(panXId, panYId, onDragEnd, bounds, snapX, snapY) {
+                .pointerInput(panXId, panYId, onDragEnd, bounds, snapX, snapY, triggerX, triggerY, onTrigger) {
                     if (panXId == 0 && panYId == 0 && onDragEnd == 0) return@pointerInput
                     if (bounds.enabled) {
                         // The undamped pan the finger asked for, and what was
@@ -215,6 +247,11 @@ object GestureAreaRenderer {
                     var rawX = 0f
                     var rawY = 0f
                     val velocity = VelocityTracker()
+                    // A one-axis pan's trigger, if it has one, and whether the
+                    // pull is past its point.
+                    val pullsX = panXId != 0 && panYId == 0 && !triggerX.isEmpty
+                    val pullsY = panYId != 0 && panXId == 0 && !triggerY.isEmpty
+                    var past = false
                     val onStart: (Offset) -> Unit = {
                         snapping.stop()
                         rawX = if (panXId != 0) SharedValueStore.valueOf(panXId) else 0f
@@ -226,18 +263,47 @@ object GestureAreaRenderer {
                         gestureY += raw.y.toDp().value
                         rawX += bound.x.toDp().value
                         rawY += bound.y.toDp().value
+                        // A pull is measured from rest, so one caught on its way
+                        // back carries on from where it is.
                         if (panXId != 0) {
-                            SharedValueStore.set(panXId, if (snapX.isEmpty) SharedValueStore.valueOf(panXId) + bound.x.toDp().value else snapX.resisted(rawX))
+                            SharedValueStore.set(panXId, when {
+                                pullsX -> restX + triggerX.resisted(rawX - restX)
+                                snapX.isEmpty -> SharedValueStore.valueOf(panXId) + bound.x.toDp().value
+                                else -> snapX.resisted(rawX)
+                            })
                         }
                         if (panYId != 0) {
-                            SharedValueStore.set(panYId, if (snapY.isEmpty) SharedValueStore.valueOf(panYId) + bound.y.toDp().value else snapY.resisted(rawY))
+                            SharedValueStore.set(panYId, when {
+                                pullsY -> restY + triggerY.resisted(rawY - restY)
+                                snapY.isEmpty -> SharedValueStore.valueOf(panYId) + bound.y.toDp().value
+                                else -> snapY.resisted(rawY)
+                            })
+                        }
+                        if (pullsX || pullsY) {
+                            val now = if (pullsX) triggerX.passed(SharedValueStore.valueOf(panXId) - restX) else triggerY.passed(SharedValueStore.valueOf(panYId) - restY)
+                            if (now && !past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                            past = now
                         }
                     }
-                    val onEnd: () -> Unit = {
-                        // px per second, into dp like the pan itself.
+                    // Whether the finger lifted, rather than the drag being cancelled.
+                    val onEnd: (Boolean) -> Unit = { lifted ->
+                        // px per second, into dp like the pan itself. A pull
+                        // always goes back to rest.
                         val fling = velocity.calculateVelocity()
-                        val x = if (panXId != 0) snapping.settle(panXId, snapX, fling.x.toDp().value, scope) else gestureX
-                        val y = if (panYId != 0) snapping.settle(panYId, snapY, fling.y.toDp().value, scope) else gestureY
+                        val x = when {
+                            panXId == 0 -> gestureX
+                            pullsX -> restX.also { snapping.to(panXId, it, scope) }
+                            else -> snapping.settle(panXId, snapX, fling.x.toDp().value, scope)
+                        }
+                        val y = when {
+                            panYId == 0 -> gestureY
+                            pullsY -> restY.also { snapping.to(panYId, it, scope) }
+                            else -> snapping.settle(panYId, snapY, fling.y.toDp().value, scope)
+                        }
+                        if (past && lifted && onTrigger != 0) {
+                            NativeUIBridge.sendPressEvent(onTrigger, node.id)
+                        }
+                        past = false
                         if (onDragEnd != 0) {
                             NativeUIBridge.sendTextChangeEvent(onDragEnd, node.id, "$x,$y")
                         }
@@ -245,29 +311,40 @@ object GestureAreaRenderer {
                         gestureY = 0f
                     }
                     when {
+                        // A pull: the same as below, but only a drag its own way.
+                        pullsX || pullsY -> detectPull(
+                            horizontal = pullsX,
+                            way = if (pullsX) triggerX.distance else triggerY.distance,
+                            onStart = onStart,
+                            onEnd = onEnd,
+                        ) { change, dragAmount ->
+                            velocity.addPosition(change.uptimeMillis, change.position)
+                            val raw = change.position - change.previousPosition
+                            onDrag(if (pullsX) Offset(dragAmount, 0f) else Offset(0f, dragAmount), raw)
+                        }
                         // One axis bound: detect on that axis only, so the
                         // other direction stays free for an enclosing
                         // scroll container.
                         panXId != 0 && panYId == 0 -> detectHorizontalDragGestures(
                             onDragStart = onStart,
-                            onDragEnd = onEnd,
-                            onDragCancel = onEnd,
+                            onDragEnd = { onEnd(true) },
+                            onDragCancel = { onEnd(false) },
                         ) { change, dragAmount ->
                             velocity.addPosition(change.uptimeMillis, change.position)
                             onDrag(Offset(dragAmount, 0f), change.position - change.previousPosition)
                         }
                         panXId == 0 && panYId != 0 -> detectVerticalDragGestures(
                             onDragStart = onStart,
-                            onDragEnd = onEnd,
-                            onDragCancel = onEnd,
+                            onDragEnd = { onEnd(true) },
+                            onDragCancel = { onEnd(false) },
                         ) { change, dragAmount ->
                             velocity.addPosition(change.uptimeMillis, change.position)
                             onDrag(Offset(0f, dragAmount), change.position - change.previousPosition)
                         }
                         else -> detectDragGestures(
                             onDragStart = onStart,
-                            onDragEnd = onEnd,
-                            onDragCancel = onEnd,
+                            onDragEnd = { onEnd(true) },
+                            onDragCancel = { onEnd(false) },
                         ) { change, dragAmount ->
                             velocity.addPosition(change.uptimeMillis, change.position)
                             onDrag(dragAmount, dragAmount)
@@ -435,6 +512,52 @@ object GestureAreaRenderer {
     }
 
     /**
+     * A one-axis drag that only starts once the finger passes touch slop
+     * the way of [way]'s sign, as a trigger's pull goes, and otherwise
+     * runs like detectHorizontalDragGestures. A drag the other way isn't
+     * taken, so whatever else wants it can have it.
+     */
+    private suspend fun PointerInputScope.detectPull(
+        horizontal: Boolean,
+        way: Float,
+        onStart: (Offset) -> Unit,
+        onEnd: (Boolean) -> Unit,
+        onDrag: (PointerInputChange, Float) -> Unit,
+    ) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            var overSlop = 0f
+            // Left unconsumed, a drag the other way past slop starts the
+            // slop over from there rather than taking the gesture.
+            val pulls: (PointerInputChange, Float) -> Unit = { change, over ->
+                if (over * way > 0f) {
+                    change.consume()
+                    overSlop = over
+                }
+            }
+            val start = if (horizontal) {
+                awaitHorizontalTouchSlopOrCancellation(down.id, pulls)
+            } else {
+                awaitVerticalTouchSlopOrCancellation(down.id, pulls)
+            } ?: return@awaitEachGesture
+            onStart(start.position)
+            onDrag(start, overSlop)
+            val lifted = if (horizontal) {
+                horizontalDrag(start.id) { change ->
+                    onDrag(change, change.positionChange().x)
+                    change.consume()
+                }
+            } else {
+                verticalDrag(start.id) { change ->
+                    onDrag(change, change.positionChange().y)
+                    change.consume()
+                }
+            }
+            onEnd(lifted)
+        }
+    }
+
+    /**
      * Keep a SharedValue binding in sync with what PHP published, during
      * composition. Unknown id → seed (don't stomp a live gesture value);
      * known id with a changed initial → PHP `setValue()` write-back.
@@ -588,7 +711,38 @@ object GestureAreaRenderer {
         }
     }
 
-    /** Springs a snapping axis to where it rests, on release or a PHP write-back. */
+    /**
+     * A pull that acts when let go far enough (`pan-x-trigger` /
+     * `pan-y-trigger`): how far from rest it goes to trigger, its sign the
+     * way it goes. Zero when the axis doesn't trigger. A data class, so a
+     * pointerInput keyed on it restarts only when the distance changes.
+     */
+    private data class PanTrigger(val distance: Float) {
+        val isEmpty: Boolean get() = distance == 0f
+
+        /**
+         * What the pull shows for the finger's offset from rest: nothing
+         * the other way, the finger itself as far as the point, and past it
+         * a third of the finger's movement, as past the outer snap points.
+         */
+        fun resisted(offset: Float): Float {
+            val sign = if (distance < 0f) -1f else 1f
+            val reach = abs(distance)
+            val toward = offset * sign
+            val shown = when {
+                toward <= 0f -> 0f
+                toward <= reach -> toward
+                else -> reach + (toward - reach) / 3f
+            }
+            return shown * sign
+        }
+
+        /** Whether a pull this far from rest is at the point or past it. */
+        fun passed(offset: Float): Boolean =
+            !isEmpty && if (distance < 0f) offset <= distance else offset >= distance
+    }
+
+    /** Springs a snapping or trigger axis to where it rests, on release or a PHP write-back. */
     private class SnapPan {
         private var job: Job? = null
 
