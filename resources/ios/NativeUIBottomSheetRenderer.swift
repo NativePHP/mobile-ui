@@ -56,7 +56,10 @@ struct NativeUIBottomSheetRenderer: View {
                     detents: resolveDetents(detentsStr),
                     selection: fits ? $selectedDetent : nil
                 ))
-                .presentationDragIndicator(.visible)
+                // The system shows the grabber only when the sheet can be
+                // resized, as Apple's HIG has it. A single-detent sheet has
+                // nothing to drag between, so a grabber would only mislead.
+                .presentationDragIndicator(.automatic)
                 .interactiveDismissDisabled(permanent)
                 .presentationBackgroundInteraction(bgInteraction ? .enabled : .automatic)
                 .modifier(A11yLabelModifier(label: a11yLabel))
