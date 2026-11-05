@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.NativeElementBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
+import com.nativephp.plugins.native_ui.NativeUIRefreshIndicator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -288,7 +289,15 @@ object ListRenderer {
                     }
                 },
                 state = refreshState,
-                modifier = modifier
+                modifier = modifier,
+                indicator = {
+                    NativeUIRefreshIndicator(
+                        name = node.props.getString("refresh_indicator", ""),
+                        options = node.props.getString("refresh_indicator_options", ""),
+                        state = refreshState,
+                        isRefreshing = isRefreshing.value,
+                    )
+                },
             ) {
                 listContent()
             }

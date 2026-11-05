@@ -194,7 +194,9 @@ struct NativeUIListRenderer: View {
             // pull-to-refresh (spinner and all) on every list, including
             // static settings/forms where it does nothing. Android's renderer
             // already gates its PullToRefreshBox the same way.
-            .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId))
+            .modifier(ListRefreshModifier(onRefreshCb: onRefreshCb, nodeId: nodeId,
+                                          indicatorName: node.props.getString("refresh_indicator"),
+                                          indicatorOptions: node.props.getString("refresh_indicator_options")))
             .modifier(ListScrollPhaseModifier(tracker: onScrollEndCb != 0 ? visibleRange : nil))
             .modifier(NativeUIPagerHeaderListModifier(header: pagerHeader))
             // Only this list draws the header, not one in its rows.
@@ -789,21 +791,95 @@ struct ListBackgroundModifier: ViewModifier {
 }
 
 /// Conditionally attaches pull-to-refresh: only lists with an `on_refresh`
-/// callback get the control; every other list scrolls plainly.
+/// callback get the control; every other list scrolls plainly. A list
+/// naming an indicator a plugin registered runs its own pull-to-refresh to
+/// draw it; any other gets `.refreshable` and the system spinner.
 private struct ListRefreshModifier: ViewModifier {
     let onRefreshCb: Int
     let nodeId: Int
+    let indicatorName: String
+    let indicatorOptions: String
 
     func body(content: Content) -> some View {
-        if onRefreshCb != 0 {
+        if onRefreshCb == 0 {
+            content
+        } else if let indicator = NativeUIRefreshIndicators.shared.indicator(named: indicatorName) {
+            content.modifier(ListCustomRefreshModifier(
+                onRefreshCb: onRefreshCb, nodeId: nodeId, indicator: indicator,
+                options: decodeRefreshIndicatorOptions(indicatorOptions)))
+        } else {
             content.refreshable {
                 NativeElementBridge.sendPressEvent(onRefreshCb, nodeId: nodeId)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
-        } else {
-            content
         }
     }
+}
+
+/// Pull-to-refresh drawing a plugin's indicator, driven by
+/// NativeUIPullToRefresh: the indicator draws in the gap the pull opens
+/// above the rows, clipped to it, and a release past the threshold calls
+/// `on_refresh` and keeps the indicator in view for as long as
+/// `.refreshable` would.
+private struct ListCustomRefreshModifier: ViewModifier {
+    let onRefreshCb: Int
+    let nodeId: Int
+    let indicator: NativeUIRefreshIndicators.Indicator
+    let options: [String: Any]
+
+    @State private var pull = NativeUIPullToRefresh()
+
+    private static let indicatorSize: CGFloat = 40
+    /// The bounce marking a pull past the threshold: up to this scale and back.
+    private static let bounceScale: CGFloat = 1.15
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaPadding(.top, pull.margin)
+            .onScrollGeometryChange(for: ListTopEdge.self) { geometry in
+                ListTopEdge(inset: geometry.contentInsets.top, offset: geometry.contentOffset.y)
+            } action: { _, edge in
+                pull.scrolled(offset: edge.offset, inset: edge.inset)
+            }
+            .onScrollPhaseChange { _, phase in
+                if pull.interactionChanged(interacting: phase == .interacting) {
+                    refresh()
+                }
+            }
+            .overlay(alignment: .top) {
+                if pull.gap > 0 {
+                    indicator(NativeUIRefreshIndicatorScope(progress: pull.progress, isRefreshing: pull.isRefreshing, options: options))
+                        .frame(width: Self.indicatorSize, height: Self.indicatorSize)
+                        .keyframeAnimator(initialValue: 1.0, trigger: pull.crossings) { view, scale in
+                            view.scaleEffect(scale)
+                        } keyframes: { _ in
+                            CubicKeyframe(Self.bounceScale, duration: 0.08)
+                            SpringKeyframe(1.0, duration: 0.12)
+                        }
+                        .offset(y: pull.indicatorTop(size: Self.indicatorSize))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: pull.gap, alignment: .top)
+                        .clipped()
+                        .offset(y: pull.restTop)
+                        .allowsHitTesting(false)
+                }
+            }
+            .sensoryFeedback(.impact(weight: .medium), trigger: pull.crossings)
+    }
+
+    private func refresh() {
+        NativeElementBridge.sendPressEvent(onRefreshCb, nodeId: nodeId)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            withAnimation { pull.finishRefresh() }
+        }
+    }
+}
+
+/// A list's top content inset and scroll offset.
+private struct ListTopEdge: Equatable {
+    let inset: CGFloat
+    let offset: CGFloat
 }
 
 /// The horizontal inset of a list row's content: the system's minimum

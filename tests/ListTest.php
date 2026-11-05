@@ -186,3 +186,35 @@ it('preserves the requested row including negative indices that disable auto-scr
     expect(collectList(['autoScrollTo' => $index])['props']['auto_scroll_to'])->toBe($index)
         ->and(NativeList::make()->autoScrollTo($index)->toArray(new CallbackRegistry)['props']['auto_scroll_to'])->toBe($index);
 })->with([0, 12, -3]);
+
+it('names a registered pull-to-refresh indicator with its options', function () {
+    $tree = collectList([
+        'refresh-indicator' => 'lottie',
+        'refresh-indicator-options' => ['asset' => 'animations/splash.lottie', 'loop' => true],
+    ]);
+
+    expect($tree['props']['refresh_indicator'])->toBe('lottie')
+        ->and(json_decode($tree['props']['refresh_indicator_options'], true))
+        ->toBe(['asset' => 'animations/splash.lottie', 'loop' => true]);
+});
+
+it('accepts the camelCase refresh indicator spellings and the fluent builder', function () {
+    $props = collectList(['refreshIndicator' => 'lottie', 'refreshIndicatorOptions' => ['asset' => 'a.lottie']])['props'];
+    $built = NativeList::make()->refreshIndicator('lottie', ['asset' => 'a.lottie'])->toArray(new CallbackRegistry)['props'];
+
+    expect($props['refresh_indicator'])->toBe('lottie')
+        ->and($props['refresh_indicator_options'])->toBe('{"asset":"a.lottie"}')
+        ->and($built['refresh_indicator'])->toBe('lottie')
+        ->and($built['refresh_indicator_options'])->toBe('{"asset":"a.lottie"}');
+});
+
+it('keeps the stock refresh indicator unless one is named', function () {
+    expect(collectList([])['props'] ?? [])->not->toHaveKey('refresh_indicator')
+        ->and(collectList(['refresh-indicator' => ''])['props'] ?? [])->not->toHaveKey('refresh_indicator')
+        ->and(collectList(['refresh-indicator-options' => ['asset' => 'a.lottie']])['props'] ?? [])->not->toHaveKey('refresh_indicator_options');
+});
+
+it('sends no options for an indicator named without any', function () {
+    expect(collectList(['refresh-indicator' => 'lottie'])['props'])->not->toHaveKey('refresh_indicator_options')
+        ->and(collectList(['refresh-indicator' => 'lottie', 'refresh-indicator-options' => []])['props'])->not->toHaveKey('refresh_indicator_options');
+});
