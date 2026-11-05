@@ -4,6 +4,9 @@ import SwiftUI
 /// SwiftUI's `.sheet` with `presentationDetents` so system drag-to-dismiss
 /// and detent snapping come for free.
 ///
+/// A `title` gives the sheet the system's own bar, as Apple's sheets have
+/// (`SheetTitleBar`). An untitled sheet is the bare panel.
+///
 /// Model 3: container color from `theme.surface`. No per-instance override.
 struct NativeUIBottomSheetRenderer: View {
     let node: NativeUINode
@@ -13,6 +16,9 @@ struct NativeUIBottomSheetRenderer: View {
 
     @State private var isPresented: Bool = false
     @State private var fitHeight: CGFloat?
+    // A titled fit sheet is as tall as its content and its bar together.
+    @State private var contentHeight: CGFloat = 0
+    @State private var barHeight: CGFloat = 0
     @State private var selectedDetent: PresentationDetent = .medium
 
     var body: some View {
@@ -26,6 +32,8 @@ struct NativeUIBottomSheetRenderer: View {
         // behind stays interactive (HIG "sheets with interaction behind").
         let permanent = node.props.getBool("permanent")
         let bgInteraction = node.props.getBool("background_interaction")
+        let title = node.props.getString("title")
+        let closeLabel = node.props.getString("close_label")
 
         Color.clear.frame(width: 0, height: 0)
             .sheet(isPresented: $isPresented, onDismiss: {
@@ -45,10 +53,22 @@ struct NativeUIBottomSheetRenderer: View {
                     }
                     .fixedSize(horizontal: false, vertical: fits)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                        if fits, height > 0 { fitHeight = height }
+                        contentHeight = height
+                        if fits, height > 0 { fitHeight = height + barHeight }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(theme.surface)
+                    .modifier(SheetTitleBar(
+                        title: title,
+                        closeLabel: closeLabel,
+                        closable: !permanent,
+                        background: theme.surface,
+                        close: { isPresented = false },
+                        measured: { height in
+                            barHeight = height
+                            if fits, contentHeight > 0 { fitHeight = contentHeight + height }
+                        }
+                    ))
                 }
                 .onAppear { NativeUIKeyboardAccessoryState.shared.sheetDepth += 1 }
                 .onDisappear { NativeUIKeyboardAccessoryState.shared.sheetDepth -= 1 }
@@ -118,6 +138,65 @@ private struct DetentsModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let selection { content.presentationDetents(detents, selection: selection) }
         else { content.presentationDetents(detents) }
+    }
+}
+
+/// A titled sheet is drawn as Apple's own sheets are (HIG, Sheets): its
+/// content sits in a NavigationStack whose inline bar carries the title and
+/// the system's close button on its leading edge, and the bar keeps the
+/// content clear of the grabber. Closing is the user's dismissal, so it goes
+/// through `isPresented` and onDismiss reports it as `@dismiss`, like a
+/// swipe-down. `measured` hands over the bar's height, which a fit sheet
+/// adds to its content's.
+private struct SheetTitleBar: ViewModifier {
+    let title: String
+    let closeLabel: String
+    let closable: Bool
+    let background: Color
+    let close: () -> Void
+    let measured: (CGFloat) -> Void
+
+    func body(content: Content) -> some View {
+        if title.isEmpty {
+            content
+        } else {
+            NavigationStack {
+                content
+                    .background {
+                        // Reaches up under the bar, so its top inset IS the bar.
+                        background
+                            .ignoresSafeArea()
+                            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { measured($0) }
+                    }
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(.hidden, for: .navigationBar)
+                    .toolbar {
+                        if closable {
+                            ToolbarItem(placement: .cancellationAction) { closeButton }
+                        }
+                    }
+            }
+        }
+    }
+
+    /// The system's close button: `role: .close` on iOS 26, the filled
+    /// circle sheets used before it. `close_label` replaces the system's
+    /// VoiceOver label, so an app can pass its own translation.
+    @ViewBuilder
+    private var closeButton: some View {
+        if #available(iOS 26.0, *) {
+            Button(role: .close, action: close)
+                .modifier(A11yLabelModifier(label: closeLabel))
+        } else {
+            Button(action: close) {
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityLabel(closeLabel.isEmpty ? "Close" : closeLabel)
+        }
     }
 }
 
