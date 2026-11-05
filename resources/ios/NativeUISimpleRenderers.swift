@@ -23,6 +23,13 @@ struct NativeUIPressableRenderer: View {
                 NativeUIColumnRenderer(node: node, children: content)
                     .contentShape(Rectangle())
             }
+            // Core skips its accessibility modifier for `:menu` pressables
+            // (the Menu owns the tap), so the label and hint go on the Menu
+            // here. Without them an icon-only menu reads as "pop up button".
+            .modifier(PressableMenuAccessibility(
+                label: node.props.getString("a11y_label"),
+                hint: node.props.getString("a11y_hint")
+            ))
         } else if node.props.getBool("has_context_menu") {
             // `:context-menu` attached — the same items, opened by a long
             // press. The tap stays core's `@press`. SwiftUI's context menu
@@ -37,6 +44,25 @@ struct NativeUIPressableRenderer: View {
                 }
         } else {
             NativeUIColumnRenderer(node: node, children: content)
+        }
+    }
+}
+
+/// Gives a `:menu` pressable's Menu its `a11y-label` and `a11y-hint`.
+private struct PressableMenuAccessibility: ViewModifier {
+    let label: String
+    let hint: String
+
+    func body(content: Content) -> some View {
+        switch (label.isEmpty, hint.isEmpty) {
+        case (true, true):
+            content
+        case (false, true):
+            content.accessibilityLabel(Text(label))
+        case (true, false):
+            content.accessibilityHint(Text(hint))
+        case (false, false):
+            content.accessibilityLabel(Text(label)).accessibilityHint(Text(hint))
         }
     }
 }
