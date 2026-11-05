@@ -1,5 +1,14 @@
 <?php
 
+test('leaves the iOS grabber to the system, so only a resizable sheet shows one', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIBottomSheetRenderer.swift');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/\.presentationDragIndicator\(\.automatic\)/')
+        ->not->toContain('.presentationDragIndicator(.visible)');
+});
+
 test('keeps the Android bottom sheet composed until hiding it has slid it away', function () {
     $rendererPath = dirname(__DIR__).'/resources/android/BottomSheetRenderer.kt';
 
