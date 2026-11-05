@@ -26,3 +26,13 @@ test('copies the status bar appearance of the activity to the Android modal wind
         ->toMatch('/WindowCompat\.getInsetsController\(dialogWindow, dialogView\)\.isAppearanceLightStatusBars =\s*'
             .'WindowCompat\.getInsetsController\(screenWindow, screenWindow\.decorView\)\.isAppearanceLightStatusBars/');
 });
+
+test('sends no dismissal to PHP when PHP closes the iOS modal', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIModalRenderer.swift');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/\.fullScreenCover\(isPresented: \.constant\(visible\)\) \{/')
+        ->not->toMatch('/onDismiss: \{/')
+        ->toMatch('/Button\(action: fireDismiss\)/');
+});

@@ -54,3 +54,14 @@ test('keeps an iOS fit sheet on its fit detent when the content height changes',
         ->toMatch('/\.onChange\(of: fitHeight\) \{ old, _ in\s*'
             .'if selectedDetent == Self\.fitDetent\(for: old\) \{ selectedDetent = fitDetent \}/s');
 });
+
+test('reports only the user\'s dismissals of an iOS sheet to PHP', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIBottomSheetRenderer.swift');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/@State private var closedByPhp: Bool = false/')
+        ->toMatch('/private func present\(_ visible: Bool\) \{.*?if !visible && isPresented \{ closedByPhp = true \}\s*isPresented = visible/s')
+        ->toMatch('/\.sheet\(isPresented: \$isPresented, onDismiss: \{\s*(?:\/\/[^\n]*\n\s*)*if closedByPhp \{\s*closedByPhp = false\s*return\s*\}\s*if onDismissCb != 0 \{/')
+        ->toMatch('/\.onAppear \{\s*NativeUIKeyboardAccessoryState\.shared\.sheetDepth \+= 1\s*(?:\/\/[^\n]*\n\s*)*closedByPhp = false\s*\}/');
+});
