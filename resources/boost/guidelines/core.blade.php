@@ -75,6 +75,10 @@ paths serialize to the same wire tree.
   translated strings. `min`/`max` are NOT supported for `mode="time"` (they
   throw), and sync-mode modifiers (`native:model.blur`) throw too — a picker
   always commits on selection.
+- Add `clearable` for the X inside a compact picker that holds a value. Tapping
+  it sends `''` to `@change` / `native:model`, so don't hand-roll a Clear
+  button beside the picker; pass a translated `clear-label` for its
+  screen-reader label.
 - In tests, drive pickers with the `pickDate()` / `pickTime()` /
   `pickDateTime()` / `clearPicker()` macros and assert with
   `assertPicker()` / `assertPickerValue()` / `assertPickerEmpty()`.

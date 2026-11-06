@@ -1,15 +1,19 @@
 package com.nativephp.plugins.native_ui.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SelectableDates
@@ -25,7 +29,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.MaterialIcon
@@ -81,6 +90,8 @@ object DatePickerRenderer {
         val title        = p.getString("title")
         val confirmLabel = p.getString("confirm_label", "OK")
         val cancelLabel  = p.getString("cancel_label", "Cancel")
+        val clearable    = p.getBool("clearable")
+        val clearLabel   = p.getString("clear_label", "Clear")
         val minRaw       = p.getString("min")
         val maxRaw       = p.getString("max")
         val hourFormat   = p.getString("hour_format", "auto")
@@ -152,58 +163,88 @@ object DatePickerRenderer {
                     onCommit = commit,
                 )
             } else {
-                // Trigger. An OutlinedTextField can't take clicks while
-                // readOnly, so a transparent sibling Box in the same layout
-                // slot captures them — keeps the field's normal (non-disabled)
-                // colors, which `enabled = false` would grey out.
-                Box {
-                    OutlinedTextField(
-                        value = shown,
-                        onValueChange = {},
-                        readOnly = true,
-                        enabled = !disabled,
-                        isError = isError,
-                        supportingText = supportingSlot(supporting),
-                        placeholder = if (placeholder.isNotEmpty()) {
-                            { Text(placeholder, fontFamily = nuiDefaultFontFamily()) }
-                        } else null,
-                        trailingIcon = {
-                            MaterialIcon(
-                                name = if (mode == "time") "clock" else "calendar",
-                                contentDescription = null,
-                                tint = theme.onSurfaceVariant,
-                            )
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = TextStyle(color = theme.onSurface),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            errorBorderColor = theme.destructive,
-                            errorSupportingTextColor = theme.destructive,
-                            errorTrailingIconColor = theme.destructive,
-                            focusedTextColor = theme.onSurface,
-                            unfocusedTextColor = theme.onSurface,
-                            focusedBorderColor = theme.primary,
-                            unfocusedBorderColor = theme.outline,
-                            disabledBorderColor = theme.outline.copy(alpha = 0.5f),
-                            focusedPlaceholderColor = theme.onSurfaceVariant,
-                            unfocusedPlaceholderColor = theme.onSurfaceVariant,
-                            focusedTrailingIconColor = theme.onSurfaceVariant,
-                            unfocusedTrailingIconColor = theme.onSurfaceVariant,
-                        ),
-                    )
-                    Box(
-                        Modifier
-                            .matchParentSize()
-                            .clickable(enabled = !disabled) {
-                                // The trigger consumes the tap, so drop the
-                                // keyboard here unless the focused field
-                                // keeps focus (mobile-air #335).
-                                KeyboardFocusPolicy.dismissForInteractiveTap()
-                                pendingDate = null
-                                showDialog = true
-                            }
-                    )
+                val openDialog = {
+                    // The trigger consumes the tap, so drop the keyboard
+                    // here unless the focused field keeps focus
+                    // (mobile-air #335).
+                    KeyboardFocusPolicy.dismissForInteractiveTap()
+                    pendingDate = null
+                    showDialog = true
                 }
+                // Trigger. An OutlinedTextField can't take clicks while
+                // readOnly, so the tap is read off its own interaction source
+                // rather than a sibling laid over it, which would swallow the
+                // clear button in the trailing slot too. A tap on that button
+                // is consumed by the button and never presses the field.
+                val interactionSource = remember { MutableInteractionSource() }
+                LaunchedEffect(interactionSource) {
+                    interactionSource.interactions.collect { interaction ->
+                        if (interaction is PressInteraction.Release) openDialog()
+                    }
+                }
+                val showClear = clearable && value.isNotEmpty() && !disabled
+
+                OutlinedTextField(
+                    value = shown,
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = !disabled,
+                    interactionSource = interactionSource,
+                    isError = isError,
+                    supportingText = supportingSlot(supporting),
+                    placeholder = if (placeholder.isNotEmpty()) {
+                        { Text(placeholder, fontFamily = nuiDefaultFontFamily()) }
+                    } else null,
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (showClear) {
+                                IconButton(
+                                    onClick = { commit("") },
+                                    modifier = Modifier.semantics { contentDescription = clearLabel },
+                                ) {
+                                    MaterialIcon(
+                                        name = "cancel",
+                                        contentDescription = null,
+                                        size = 20.dp,
+                                        tint = theme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            // Sized like the IconButton beside it, so the icon
+                            // keeps the inset it has alone in the slot.
+                            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                                MaterialIcon(
+                                    name = if (mode == "time") "clock" else "calendar",
+                                    contentDescription = null,
+                                    tint = theme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Never focused, so a tap leaves the field in its
+                        // resting colors.
+                        .focusProperties { canFocus = false }
+                        // TalkBack's click goes through semantics, not the
+                        // interaction source.
+                        .then(if (disabled) Modifier else Modifier.semantics { onClick { openDialog(); true } }),
+                    textStyle = TextStyle(color = theme.onSurface),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        errorBorderColor = theme.destructive,
+                        errorSupportingTextColor = theme.destructive,
+                        errorTrailingIconColor = theme.destructive,
+                        focusedTextColor = theme.onSurface,
+                        unfocusedTextColor = theme.onSurface,
+                        focusedBorderColor = theme.primary,
+                        unfocusedBorderColor = theme.outline,
+                        disabledBorderColor = theme.outline.copy(alpha = 0.5f),
+                        focusedPlaceholderColor = theme.onSurfaceVariant,
+                        unfocusedPlaceholderColor = theme.onSurfaceVariant,
+                        focusedTrailingIconColor = theme.onSurfaceVariant,
+                        unfocusedTrailingIconColor = theme.onSurfaceVariant,
+                    ),
+                )
             }
         }
 

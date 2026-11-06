@@ -2,7 +2,8 @@
 
 This standalone Robolectric/Compose module compiles the production filled and
 outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list and pager renderers.
+the production gesture area, list, virtual list, pager and date picker
+renderers.
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
 from an explicit checkout, not substituted by test implementations.
@@ -48,4 +49,9 @@ the list doesn't repeat an applied request, disabling then restoring an index
 re-arms it, and saved-state restoration keeps the reader's position unless the
 request changed while it was saved. Assertions check which row is at the
 viewport's top, not just that a scroll was invoked.
+
+`DatePickerClearTest` taps the X of a clearable compact picker and checks it
+sends `''` with the dialog left closed, that a tap elsewhere on the field and
+an accessibility click both open the dialog, and that no X is drawn without a
+value, without `clearable` or on a disabled picker.
 These are JVM checks; SwiftUI and native device behaviour need separate testing.
