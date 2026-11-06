@@ -45,6 +45,8 @@ struct NativeUIDatePickerRenderer: View {
         let maxRaw      = p.getString("max")
         let onChangeCb  = p.getCallbackId("on_change")
         let disabled    = p.getBool("disabled")
+        let clearable   = p.getBool("clearable")
+        let clearLabel  = p.getString("clear_label", default: "Clear")
         let a11yLabel   = p.getString("a11y_label")
         let a11yHint    = p.getString("a11y_hint")
         let isError     = p.getBool("is_error")
@@ -94,7 +96,7 @@ struct NativeUIDatePickerRenderer: View {
                 .disabled(disabled)
                 .opacity(disabled ? 0.6 : 1.0)
             } else {
-                picker(
+                let styledPicker = picker(
                     mode: mode,
                     minDate: minDate,
                     maxDate: maxDate
@@ -112,6 +114,23 @@ struct NativeUIDatePickerRenderer: View {
                 // VoiceOver reads the formatted selection as the control's
                 // value, so a bare a11y-label still announces what's picked.
                 .accessibilityValue(displayString(mode: mode, locale: locale, calendar: calendar))
+
+                // The compact button shows the picked date with no calendar
+                // icon, so the X sits right beside it.
+                if clearable && hasSelection && display == "compact" && !disabled {
+                    HStack(spacing: 8) {
+                        styledPicker
+                        Button {
+                            clear(onChangeCb: onChangeCb)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(theme.onSurfaceVariant)
+                        }
+                        .accessibilityLabel(clearLabel)
+                    }
+                } else {
+                    styledPicker
+                }
             }
 
             if !supporting.isEmpty {
@@ -193,6 +212,19 @@ struct NativeUIDatePickerRenderer: View {
 
         if onChangeCb != 0 {
             NativeElementBridge.sendSelectChangeEvent(onChangeCb, nodeId: node.id, value: iso)
+        }
+    }
+
+    /// Drop the selection and dispatch the empty wire value. `selected` goes
+    /// back to now, so the placeholder chip adopts the current instant again
+    /// on its next tap, as it does before any pick.
+    private func clear(onChangeCb: Int) {
+        hasSelection = false
+        selected = Date()
+        lastSentValue = ""
+
+        if onChangeCb != 0 {
+            NativeElementBridge.sendSelectChangeEvent(onChangeCb, nodeId: node.id, value: "")
         }
     }
 
