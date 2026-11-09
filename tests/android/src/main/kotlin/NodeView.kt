@@ -21,3 +21,7 @@ fun NodeView(node: NativeUINode, overrideModifier: Modifier? = null) {
     }
     Box(modifier)
 }
+
+/** Stands in for core's `RenderNode`, which the bottom sheet draws its children with. */
+@Composable
+fun RenderNode(node: NativeUINode, modifier: Modifier? = null) = NodeView(node, modifier)
