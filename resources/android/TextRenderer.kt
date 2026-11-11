@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import android.content.Context
@@ -64,6 +65,7 @@ object TextRenderer {
         val density = LocalDensity.current.density
         val lineHeight = nuiLineHeightUnit(p.getFloat("line_height_px", 0f), p.getFloat("line_height", 0f), fontSize)
         val maxLines = p.getInt("max_lines")
+        val minScale = p.getFloat("min_scale", 1f)
         val textAlign = resolveTextAlign(p.getInt("text_align"))
 
         val isDark = isSystemInDarkTheme()
@@ -73,6 +75,10 @@ object TextRenderer {
             text = text,
             modifier = modifier,
             color = argbToComposeColor(textArgb),
+            // `min-scale`: text too wide for its lines shrinks, down to this
+            // share of its size, before it truncates. It takes over from
+            // `fontSize`, which stays the largest size.
+            autoSize = if (minScale < 1f) TextAutoSize.StepBased(minFontSize = (fontSize * minScale).sp, maxFontSize = fontSize.sp) else null,
             fontSize = fontSize.sp,
             fontWeight = fontWeight,
             fontStyle = fontStyle,
