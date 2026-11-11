@@ -63,6 +63,12 @@ pair to give it a body of its own — `input-fill` paints the box, `on-input`
 recolors everything inside it (typed text, placeholder, icons,
 prefix/suffix). Leave them unset and nothing changes.
 
+`<native:toggle>` draws the track of a switch that is on in `primary`. iOS
+always draws the knob white, so a white `primary` (common in a dark theme)
+turns it into a white bar with no knob. Declare the optional `toggle` token
+to give the switch a color of its own, on both platforms. Leave it unset and
+the switch keeps `primary`.
+
 Icons accept platform enum overrides in Blade, matching the fluent API:
 
 ```blade

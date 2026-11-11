@@ -55,10 +55,11 @@ object ToggleRenderer {
             }
         }
 
+        val onTrack = theme.toggle ?: theme.primary
         val colors = SwitchDefaults.colors(
             checkedThumbColor = theme.onPrimary,
-            checkedTrackColor = theme.primary,
-            checkedBorderColor = theme.primary,
+            checkedTrackColor = onTrack,
+            checkedBorderColor = onTrack,
             uncheckedThumbColor = theme.outline,
             uncheckedTrackColor = theme.surfaceVariant,
             uncheckedBorderColor = theme.outline,
