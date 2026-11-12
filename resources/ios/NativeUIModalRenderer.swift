@@ -3,7 +3,7 @@ import SwiftUI
 /// Full-screen modal overlay. Visibility driven by the `visible` prop.
 ///
 /// Dismiss semantics: the `@dismiss` callback fires only from explicit user
-/// actions (close button tap, system swipe-to-dismiss when dismissible).
+/// actions (the close button tap; a full-screen cover has no swipe-to-dismiss).
 /// Programmatic `visible = false` from PHP does NOT fire dismiss — that
 /// would double-invoke the callback that just set the flag.
 ///
@@ -30,13 +30,10 @@ struct NativeUIModalRenderer: View {
 
         Color.clear
             .frame(width: 0, height: 0)
-            .fullScreenCover(isPresented: .constant(visible), onDismiss: {
-                // Fired by system swipe-to-dismiss (iOS sheets) or when the
-                // parent flips `visible` false via its own action. Intentional:
-                // system-driven dismissals still need to notify PHP so the
-                // component's boolean stays in sync.
-                fireDismiss()
-            }) {
+            // No onDismiss: on a constant binding the cover only goes away
+            // because PHP set `visible` to false, so onDismiss could only
+            // send that close back to PHP as a dismissal.
+            .fullScreenCover(isPresented: .constant(visible)) {
                 VStack(spacing: 0) {
                     if dismissible {
                         HStack {
