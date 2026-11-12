@@ -1,5 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -9,6 +10,7 @@ import com.nativephp.mobile.ui.nativerender.LocalBackgroundLayerPresent
 import com.nativephp.mobile.ui.nativerender.NativeRendererRegistry
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
+import com.nativephp.mobile.ui.nativerender.nodeStyle
 
 /**
  * Renders the `background_layer` sentinel BENEATH the screen content —
@@ -43,11 +45,11 @@ fun NativeUIBackgroundLayerHost(
         // which would discard the subtree and recreate the native view.
         // Direct dispatch keys the renderer to THIS stable call site, so
         // its remembered state (a MapView, a player) survives any publish.
-        // The layer needs no gesture/style modifier chain, so skipping
-        // NodeView loses nothing.
+        // NodeView is also the only caller of `nodeStyle`, so it is applied
+        // here: without it the child's `bg-*` or gradient is never painted.
         val renderer = NativeRendererRegistry.get(child.type)
         if (renderer != null) {
-            renderer.Render(child, Modifier.fillMaxSize())
+            renderer.Render(child, Modifier.fillMaxSize().nodeStyle(child.style, child.props, isSystemInDarkTheme()))
         } else {
             NodeView(node = child, overrideModifier = Modifier.fillMaxSize())
         }
