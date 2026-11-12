@@ -21,10 +21,21 @@ import SwiftUI
 /// Compose doesn't have this problem — Material 3 widgets honor
 /// `Modifier.fillMaxWidth()` from their modifier chain directly, so
 /// `NodeLayoutModifier`'s `Modifier.fillMaxWidth()` flows through.
+///
+/// The host gives a node a width of its own for `w-full`, for a fixed or
+/// percentage width (`w-[120px]`, `w-1/2`), and for flex growth (`flex-1`
+/// in a row), so the primitive fills it in each of those cases.
 extension View {
     func fillWidthIfRequested(_ node: NativeUINode) -> some View {
-        modifier(FillWidthIfRequestedModifier(widthMode: node.layout?.widthMode))
+        modifier(FillWidthIfRequestedModifier(fills: hostAllocatesWidth(node.layout)))
     }
+}
+
+private func hostAllocatesWidth(_ layout: NodeLayout?) -> Bool {
+    guard let layout else { return false }
+    if layout.widthMode == SizeMode.fill || layout.flexGrow > 0 { return true }
+    return (layout.widthMode == SizeMode.fixed || layout.widthMode == SizeMode.percent)
+        && layout.width > 0
 }
 
 /// `SizeMode` in this codebase is a static-Int container (not a Swift
@@ -32,10 +43,10 @@ extension View {
 /// is `SizeMode.fill` (Int = 2). Avoid `.fill` shorthand because Swift
 /// will infer it as SwiftUI's `ContentMode.fill` and the build breaks.
 private struct FillWidthIfRequestedModifier: ViewModifier {
-    let widthMode: Int?
+    let fills: Bool
 
     func body(content: Content) -> some View {
-        if widthMode == SizeMode.fill {
+        if fills {
             content.frame(maxWidth: .infinity)
         } else {
             content
