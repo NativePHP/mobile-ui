@@ -136,6 +136,10 @@ paths serialize to the same wire tree.
   `input-fill` / `on-input` token pair to give it one; `on-input` recolors
   everything drawn inside the box. Do not reach for `surface` / `surface-variant`
   for this, or every card moves with the field.
+- `<native:toggle>` draws a switch that is on in `primary`, and iOS always
+  draws its knob white. When `primary` is white or very light (often in the
+  `dark` block), declare the optional `toggle` token for the switch's own
+  color instead of changing `primary`.
 - Buttons render their variant token solid; for a softer tonal fill set
   opacity on the token itself (e.g. `'secondary' => 'fuchsia-500/70'`).
 - `<native:icon>` accepts platform enum overrides as attributes —

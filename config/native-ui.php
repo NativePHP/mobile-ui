@@ -83,6 +83,15 @@ return [
             // The label and supporting text sit outside the box and keep
             // taking their color from the surface behind it.
 
+            // Track of a switch (`<native:toggle>`) that is on. Unset on
+            // purpose, and unset means `primary`. iOS always draws the knob
+            // white, so a white or very light `primary` (common in a `dark`
+            // block) turns a switch that is on into a white bar with no
+            // knob. Declare it to give the switch a color of its own, on
+            // iOS and Android:
+            //
+            //   'toggle' => '#22C55E',
+
             // Outline = neutral borders (text fields, dividers, cards).
             // outline-variant = softer edges: hairline dividers, card seams.
             'outline' => '#CBD5E1',
