@@ -57,6 +57,8 @@ grabs it while it slides away. `RenderNode` here draws each child as
 
 `BackgroundLayerStyleTest` puts a column with a background colour, a gradient
 and a dark-mode background at the top of a background layer and checks the
-pixels drawn. The column's renderer here draws only the modifier it is given;
-core's `nodeStyle` is compiled from the Mobile checkout.
+pixels drawn, then checks a top element's padding and safe-area insets leave
+its background showing around its content. The renderers here draw only the
+modifier they are given; core's `nodeStyle` and `nodeLayout` are compiled from
+the Mobile checkout.
 These are JVM checks; SwiftUI and native device behaviour need separate testing.

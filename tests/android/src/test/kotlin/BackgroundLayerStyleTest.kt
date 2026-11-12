@@ -4,7 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.nativephp.mobile.ui.nativerender.*
@@ -25,6 +29,10 @@ class BackgroundLayerStyleTest {
 
     @Before fun registerColumn() {
         NativeRendererRegistry.register("column", NodeRenderer { _, modifier -> Box(modifier) })
+        // Its content is blue, so the padding shows as the background around it.
+        NativeRendererRegistry.register("filled", NodeRenderer { _, modifier ->
+            Box(modifier) { Box(Modifier.fillMaxSize().background(Color.Blue)) }
+        })
     }
 
     @Test fun theTopElementPaintsItsBackground() {
@@ -44,8 +52,23 @@ class BackgroundLayerStyleTest {
         assertNear(Color.Green, pixel(0.5f))
     }
 
-    private fun show(child: NativeUINode) = compose.setContent {
-        NativeUIBackgroundLayerHost(NativeUINode(1, "background_layer", null, null, GenericProps(), 0, 0, listOf(child))) {}
+    @Test fun theTopElementKeepsItsPadding() {
+        show(filled(NodeLayout.EMPTY.copy(paddingTop = 100f)))
+        assertNear(Color.Red, pixel(0.05f))
+        assertNear(Color.Blue, pixel(0.5f))
+    }
+
+    @Test fun theTopElementInsetsItsContentFromTheSafeArea() {
+        show(filled(NodeLayout.EMPTY.copy(safeArea = 1)), safeAreaTop = 100f, safeAreaBottom = 100f)
+        assertNear(Color.Red, pixel(0.05f))
+        assertNear(Color.Blue, pixel(0.5f))
+        assertNear(Color.Red, pixel(0.95f))
+    }
+
+    private fun show(child: NativeUINode, safeAreaTop: Float = 0f, safeAreaBottom: Float = 0f) = compose.setContent {
+        CompositionLocalProvider(LocalSafeAreaTop provides safeAreaTop, LocalSafeAreaBottom provides safeAreaBottom) {
+            NativeUIBackgroundLayerHost(NativeUINode(1, "background_layer", null, null, GenericProps(), 0, 0, listOf(child))) {}
+        }
     }
 
     /**
@@ -69,4 +92,8 @@ class BackgroundLayerStyleTest {
 
     private fun column(bg: Int = 0, props: Map<String, Any> = emptyMap()) =
         NativeUINode(2, "column", null, NodeStyle.EMPTY.copy(bgColor = bg), GenericProps(props), 0, 0, emptyList())
+
+    /** A red element whose content is blue, laid out with [layout]. */
+    private fun filled(layout: NodeLayout) =
+        NativeUINode(2, "filled", layout, NodeStyle.EMPTY.copy(bgColor = 0xFFFF0000.toInt()), GenericProps(), 0, 0, emptyList())
 }
