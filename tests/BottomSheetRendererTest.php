@@ -19,8 +19,25 @@ test('keeps the Android bottom sheet composed until hiding it has slid it away',
     expect($renderer)
         ->toBeString()
         ->not->toMatch('/if \(!visible\) return/')
-        ->toMatch('/LaunchedEffect\(visible\) \{.*?sheetState\.hide\(\)\s*shown = false/s')
+        ->toMatch('/LaunchedEffect\(visible\) \{.*?sheetState\.hide\(\).*?shown = false/s')
         ->toMatch('/if \(!shown\) return/');
+});
+
+test('takes an Android bottom sheet away even when hiding it is cancelled', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/android/BottomSheetRenderer.kt');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/try \{\s*if \(!permanent\) sheetState\.hide\(\)\s*\} finally \{\s*shown = false\s*\}/');
+});
+
+test('keeps the detents an Android bottom sheet opened with while it closes', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/android/BottomSheetRenderer.kt');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/var detentsStr by remember \{ mutableStateOf\(requestedDetents\) \}\s*if \(visible\) detentsStr = requestedDetents/')
+        ->not->toMatch('/val detentsStr = p\.getString/');
 });
 
 test('wraps an Android fit sheet around its content, opened in full', function () {

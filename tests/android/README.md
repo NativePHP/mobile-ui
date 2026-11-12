@@ -2,7 +2,7 @@
 
 This standalone Robolectric/Compose module compiles the production filled and
 outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list and pager renderers.
+the production gesture area, list, virtual list, pager and bottom sheet renderers.
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
 from an explicit checkout, not substituted by test implementations.
@@ -48,4 +48,9 @@ the list doesn't repeat an applied request, disabling then restoring an index
 re-arms it, and saved-state restoration keeps the reader's position unless the
 request changed while it was saved. Assertions check which row is at the
 viewport's top, not just that a scroll was invoked.
+
+`BottomSheetCloseTest` closes an open sheet and checks its content leaves
+composition: when its detents change in the same render, and when a finger
+grabs it while it slides away. `RenderNode` here draws each child as
+`NodeView` does.
 These are JVM checks; SwiftUI and native device behaviour need separate testing.

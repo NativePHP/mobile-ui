@@ -13,5 +13,6 @@ object NativeUIBridge {
     fun sendPressEvent(callbackId: Int, nodeId: Int) { events += "press:$callbackId" }
     fun sendSliderChangeEvent(callbackId: Int, nodeId: Int, value: Float) { events += "slider:$callbackId:$value" }
     fun sendTabChangeEvent(callbackId: Int, nodeId: Int, index: Int) { events += "tab:$callbackId:$index" }
+    fun sendSheetDismissEvent(callbackId: Int, nodeId: Int) { events += "dismiss:$callbackId" }
 }
 fun argbToComposeColor(argb: Int) = Color(argb)

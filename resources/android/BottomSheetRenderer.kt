@@ -59,7 +59,11 @@ object BottomSheetRenderer {
         val p = node.props
         val visible = p.getBool("visible")
         val onDismissCb = p.getCallbackId("on_dismiss")
-        val detentsStr = p.getString("detents", "medium,large")
+        // A closing sheet keeps the detents it opened with: new ones would get
+        // it a new SheetState, and ModalBottomSheet shows every new state.
+        val requestedDetents = p.getString("detents", "medium,large")
+        var detentsStr by remember { mutableStateOf(requestedDetents) }
+        if (visible) detentsStr = requestedDetents
         val a11yLabel = p.getString("a11y_label")
         // Counterpart of iOS `.interactiveDismissDisabled`: block drag-to-hide
         // and back-press, and swallow scrim-tap dismiss requests. NOTE:
@@ -84,8 +88,12 @@ object BottomSheetRenderer {
             if (visible) {
                 shown = true
             } else if (shown) {
-                if (!permanent) sheetState.hide()
-                shown = false
+                // A drag or M3's own show() cancels hide(); the sheet still goes.
+                try {
+                    if (!permanent) sheetState.hide()
+                } finally {
+                    shown = false
+                }
             }
         }
 
