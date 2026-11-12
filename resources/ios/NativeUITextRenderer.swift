@@ -36,6 +36,7 @@ struct NativeUITextRenderer: View {
         let color: Int = (colorScheme == .dark && darkArgb != 0) ? darkArgb : lightArgb
         let textAlign = resolveTextAlign(p.getInt("text_align"))
         let maxLines = p.getInt("max_lines")
+        let minScale = CGFloat(p.getFloat("min_scale", default: 1))
         let isItalic = p.getInt("font_style") == 1
         let isUnderline = p.getInt("underline") == 1
         let isStrikethrough = p.getInt("line_through") == 1
@@ -93,6 +94,10 @@ struct NativeUITextRenderer: View {
                 .modifier(NUIOutlinedText(width: outlineWidth))
                 .multilineTextAlignment(textAlign)
                 .lineLimit(maxLines > 0 ? maxLines : nil)
+                // `min-scale`: text too wide for its lines shrinks, down to
+                // this share of its size, before it truncates. SwiftUI only
+                // shrinks text that has a line limit.
+                .minimumScaleFactor(minScale)
                 // `truncationMode` only applies when there IS a lineLimit; we
                 // therefore skip it in the unlimited case so SwiftUI doesn't
                 // decide (on some iOS versions) that our `.frame(maxWidth:)`
@@ -166,6 +171,8 @@ struct NativeUITextRenderer: View {
             .lineSpacing(lineSpacingValue)
             .multilineTextAlignment(resolveTextAlign(p.getInt("text_align")))
             .lineLimit(maxLines > 0 ? maxLines : nil)
+            // Same `min-scale` as the leaf path; it scales every run alike.
+            .minimumScaleFactor(CGFloat(p.getFloat("min_scale", default: 1)))
             .modifier(TruncateIfLimited(maxLines: maxLines))
             // Same fill + fixedSize policy as the leaf path so the composed
             // string wraps at the container width and grows vertically.
