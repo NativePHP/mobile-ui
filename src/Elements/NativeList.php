@@ -54,6 +54,11 @@ class NativeList extends Element
         if (isset($attrs['on-refresh']) || isset($attrs['onRefresh'])) {
             $this->onRefresh($attrs['on-refresh'] ?? $attrs['onRefresh']);
         }
+        $refreshIndicator = $attrs['refresh-indicator'] ?? $attrs['refreshIndicator'] ?? null;
+        if (is_string($refreshIndicator) && $refreshIndicator !== '') {
+            $options = $attrs['refresh-indicator-options'] ?? $attrs['refreshIndicatorOptions'] ?? [];
+            $this->refreshIndicator($refreshIndicator, is_array($options) ? $options : []);
+        }
         if (isset($attrs['on-end-reached']) || isset($attrs['onEndReached'])) {
             $this->onEndReached($attrs['on-end-reached'] ?? $attrs['onEndReached']);
         }
@@ -143,6 +148,26 @@ class NativeList extends Element
     public function onRefresh(string $method): static
     {
         $this->refreshCallback = $method;
+
+        return $this;
+    }
+
+    /**
+     * Replace the platform pull-to-refresh spinner with the indicator a
+     * plugin registered under $name, handing it $options (an asset path, a
+     * colour…). The list keeps the platform spinner when no plugin
+     * registered that name, so a screen can name an indicator whether or
+     * not the app ships it.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    public function refreshIndicator(string $name, array $options = []): static
+    {
+        $this->listProps['refresh_indicator'] = $name;
+        if ($options !== []) {
+            // Props carry no maps, so the options travel as a JSON object.
+            $this->listProps['refresh_indicator_options'] = json_encode($options, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        }
 
         return $this;
     }
