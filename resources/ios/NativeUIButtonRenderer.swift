@@ -48,6 +48,9 @@ struct NativeUIButtonRenderer: View {
     @ObservedObject private var themeStore = NativeUITheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Apple's minimum touch target.
+    static let minimumTarget: CGFloat = 44
+
     var body: some View {
         let hasMenu = node.props.getBool("has_menu")
         if hasMenu {
@@ -320,7 +323,15 @@ struct NativeUIButtonRenderer: View {
                 .modifier(A11yHintModifier(hint: a11yHint))
 
         case "ghost":
-            Button(action: action) { content.fillWidthIfRequested(node) }
+            // `.plain` takes taps only on the label's glyphs, about 19 pt
+            // tall. The shape and minimum height give the whole row a 44 pt
+            // target, as Apple's HIG asks; the other styles already have one.
+            Button(action: action) {
+                content
+                    .fillWidthIfRequested(node)
+                    .frame(minHeight: Self.minimumTarget)
+                    .contentShape(Rectangle())
+            }
                 .buttonStyle(.plain)
                 .foregroundStyle(enabled ? theme.primary : theme.onSurfaceVariant)
                 .controlSize(metrics.controlSize)
