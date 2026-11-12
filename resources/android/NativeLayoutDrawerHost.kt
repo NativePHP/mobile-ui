@@ -1,9 +1,12 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -26,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.RenderNode
+import com.nativephp.mobile.ui.nativerender.SizeMode
 import kotlinx.coroutines.launch
 
 /**
@@ -103,13 +107,41 @@ fun NativeLayoutDrawerHost(
 
 @Composable
 private fun DrawerChildren(drawerNode: NativeUINode) {
-    Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-    ) {
-        drawerNode.children.forEach { child ->
-            RenderNode(child)
+    // A `fill` / `h-full` DIRECT child is at least as tall as the drawer, so
+    // `justify-between` can pin a footer to the bottom. The scroll measures
+    // its children with an unbounded height, so `fillMaxHeight()` alone has
+    // nothing to fill and the child hugs its content. The drawer's height is
+    // handed over as a MINIMUM, the same rule as ScrollViewRenderer: content
+    // taller than the drawer still grows and scrolls.
+    BoxWithConstraints(Modifier.fillMaxHeight()) {
+        val viewport = maxHeight.takeIf { it.value.isFinite() && it.value > 0f }
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
+        ) {
+            drawerNode.children.forEach { child ->
+                val layout = child.layout
+                if (viewport != null && layout?.heightMode == SizeMode.FILL) {
+                    // Width is reproduced because the modifier replaces
+                    // NodeView's own sizing, as in ScrollViewRenderer.
+                    var childMod: Modifier = Modifier.heightIn(min = viewport)
+                    when (layout.widthMode) {
+                        SizeMode.FILL -> childMod = childMod.fillMaxWidth()
+                        SizeMode.FIXED -> if (layout.width > 0f) {
+                            childMod = childMod.width(layout.width.dp)
+                        }
+                        SizeMode.PERCENT -> if (layout.width > 0f) {
+                            childMod = childMod.fillMaxWidth(
+                                (layout.width / 100f).coerceIn(0f, 1f)
+                            )
+                        }
+                    }
+                    RenderNode(child, childMod)
+                } else {
+                    RenderNode(child)
+                }
+            }
         }
     }
 }

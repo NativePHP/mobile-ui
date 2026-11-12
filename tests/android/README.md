@@ -2,7 +2,8 @@
 
 This standalone Robolectric/Compose module compiles the production filled and
 outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list, pager and bottom sheet renderers.
+the production gesture area, list, virtual list, pager and bottom sheet renderers
+and the layout drawer host.
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
 from an explicit checkout, not substituted by test implementations.
@@ -53,4 +54,10 @@ viewport's top, not just that a scroll was invoked.
 composition: when its detents change in the same render, and when a finger
 grabs it while it slides away. `RenderNode` here draws each child as
 `NodeView` does.
+
+`DrawerFillHeightTest` opens a modal drawer from its menu button and checks
+an `h-full` child reaches the bottom of the drawer, a sibling without it
+keeps its own height, and a child taller than the drawer still scrolls.
+`NodeView` here wraps its box in the modifier the drawer passes, so these
+check the sizes the drawer hands out, not `justify-between` itself.
 These are JVM checks; SwiftUI and native device behaviour need separate testing.
