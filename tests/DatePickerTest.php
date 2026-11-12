@@ -197,6 +197,19 @@ it('keeps the locale from affecting the wire value', function () {
     expect($props['value'])->toBe('2026-07-25');
 });
 
+// ── Clearing ─────────────────────────────────────────────────────────────────
+
+it('serializes a clearable picker with the label of its X', function () {
+    $props = pickerProps(DatePicker::make()->clearable()->clearLabel('Remove date'));
+
+    expect($props['clearable'])->toBeTrue();
+    expect($props['clear_label'])->toBe('Remove date');
+});
+
+it('leaves a picker without an X unless it asks for one', function () {
+    expect(pickerProps(DatePicker::make()))->not->toHaveKeys(['clearable', 'clear_label']);
+});
+
 // ── Blade attributes ─────────────────────────────────────────────────────────
 
 it('applies kebab-case attributes from Blade', function () {
@@ -211,6 +224,8 @@ it('applies kebab-case attributes from Blade', function () {
         'hour-format' => '24',
         'confirm-label' => 'Übernehmen',
         'cancel-label' => 'Abbrechen',
+        'clearable' => true,
+        'clear-label' => 'Löschen',
         'title' => 'Termin wählen',
         'label' => 'Termin',
         'placeholder' => 'Datum wählen',
@@ -227,6 +242,8 @@ it('applies kebab-case attributes from Blade', function () {
     expect($props['hour_format'])->toBe('24');
     expect($props['confirm_label'])->toBe('Übernehmen');
     expect($props['cancel_label'])->toBe('Abbrechen');
+    expect($props['clearable'])->toBeTrue();
+    expect($props['clear_label'])->toBe('Löschen');
     expect($props['title'])->toBe('Termin wählen');
     expect($props['label'])->toBe('Termin');
     expect($props['placeholder'])->toBe('Datum wählen');
@@ -238,11 +255,13 @@ it('accepts camelCase variants of the hyphenated attributes', function () {
         'hourFormat' => '12',
         'confirmLabel' => 'Done',
         'cancelLabel' => 'Dismiss',
+        'clearLabel' => 'Remove date',
     ]);
 
     expect($props['hour_format'])->toBe('12');
     expect($props['confirm_label'])->toBe('Done');
     expect($props['cancel_label'])->toBe('Dismiss');
+    expect($props['clear_label'])->toBe('Remove date');
 });
 
 // ── Accessibility ────────────────────────────────────────────────────────────
