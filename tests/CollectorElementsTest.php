@@ -557,6 +557,38 @@ it('parses string booleans on the new sheet props via filter_var', function () {
     expect($tree['props']['background_interaction'])->toBeFalse();
 });
 
+it('applies the sheet title and close label', function () {
+    NativeElementCollector::leaf('bottom_sheet', [
+        'title' => 'Filters',
+        'close-label' => 'Sulje',
+    ]);
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['title'])->toBe('Filters');
+    expect($tree['props']['close_label'])->toBe('Sulje');
+});
+
+it('accepts the camelCase close label and the fluent sheet title', function () {
+    NativeElementCollector::leaf('bottom_sheet', ['closeLabel' => 'Fermer']);
+
+    expect(NativeElementCollector::collect()->toArray(new CallbackRegistry)['props']['close_label'])->toBe('Fermer');
+
+    $props = BottomSheet::make()->title('Filters')->closeLabel('Close')->toArray(new CallbackRegistry)['props'];
+
+    expect($props['title'])->toBe('Filters');
+    expect($props['close_label'])->toBe('Close');
+});
+
+it('leaves a sheet untitled when no title is given', function () {
+    NativeElementCollector::leaf('bottom_sheet', ['visible' => true]);
+
+    $props = NativeElementCollector::collect()->toArray(new CallbackRegistry)['props'];
+
+    expect($props)->not->toHaveKey('title');
+    expect($props)->not->toHaveKey('close_label');
+});
+
 // ── autocapitalize (mobile-air #304) ─────────────────────────────────────────
 
 it('serializes autocapitalization via both fluent APIs', function () {
