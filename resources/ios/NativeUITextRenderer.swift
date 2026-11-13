@@ -27,13 +27,20 @@ struct NativeUITextRenderer: View {
         let fontWeight = resolveFontWeight(p.getInt("font_weight"))
         let fontDesign = resolveFontDesign(p.getInt("font_family"))
         let fontName = p.getString("font_name")
-        let lightArgb = p.getColor("color", default: 0xFF000000)
+        // default light color to 0 (unset) so text without an
+        // explicit color class inherits SwiftUI `.primary`, which auto-flips
+        // with the color scheme set by nativephp-color-scheme. Original vendor
+        // default of 0xFF000000 (pure black) rendered invisible on dark surfaces.
+        let lightArgb = p.getColor("color", default: 0)
         let darkArgb  = p.getColor("dark_color", default: 0)
         // Pick the dark hex when system is dark AND the theme class supplied
         // one (theme classes auto-emit a `dark` companion). Fall through to
         // the light value otherwise — matches NodeStyleModifier's bg/border
         // dark resolution semantics.
         let color: Int = (colorScheme == .dark && darkArgb != 0) ? darkArgb : lightArgb
+        // 0 = no colour set: `.primary`, for the fill, the decorations and
+        // the outline alike.
+        let textColor: Color = color == 0 ? .primary : Color(argb: color)
         let textAlign = resolveTextAlign(p.getInt("text_align"))
         let maxLines = p.getInt("max_lines")
         let minScale = CGFloat(p.getFloat("min_scale", default: 1))
@@ -61,8 +68,8 @@ struct NativeUITextRenderer: View {
                 if isItalic { t = t.italic() }
                 // In the text colour explicitly, because outlined text (below)
                 // draws its glyphs see-through.
-                if isUnderline { t = t.underline(color: Color(argb: color)) }
-                if isStrikethrough { t = t.strikethrough(color: Color(argb: color)) }
+                if isUnderline { t = t.underline(color: textColor) }
+                if isStrikethrough { t = t.strikethrough(color: textColor) }
                 if letterSpacingEm != 0, #available(iOS 16.0, *) {
                     t = t.kerning(CGFloat(letterSpacingEm) * CGFloat(fontSize))
                 }
@@ -78,7 +85,7 @@ struct NativeUITextRenderer: View {
                     let italic = isItalic && (name.isEmpty || !NativeUIFontResolver.needsSyntheticOblique(name))
                     t = t.customAttribute(NUITextOutline(
                         width: outlineWidth,
-                        color: Color(argb: color),
+                        color: textColor,
                         text: text,
                         font: outlineFont(name: name, size: fontSize, weight: p.getInt("font_weight"), family: p.getInt("font_family"), italic: italic),
                         kern: CGFloat(letterSpacingEm) * CGFloat(fontSize)
@@ -90,7 +97,7 @@ struct NativeUITextRenderer: View {
             styledText
                 .nuiScaledFont(size: CGFloat(fontSize), weight: fontWeight, design: fontDesign, fontName: fontName.isEmpty ? nil : fontName, italic: isItalic)
                 .lineSpacing(lineSpacingValue)
-                .foregroundColor(Color(argb: color))
+                .foregroundColor(textColor)
                 .modifier(NUIOutlinedText(width: outlineWidth))
                 .multilineTextAlignment(textAlign)
                 .lineLimit(maxLines > 0 ? maxLines : nil)
@@ -136,11 +143,13 @@ struct NativeUITextRenderer: View {
         var pressCallbackId: Int
         var pressNodeId: Int
 
-        /// Root defaults — mirror the leaf path (16pt, regular, black, no dark
-        /// override, no custom font, no decoration/kerning/transform/outline).
+        /// Root defaults — mirror the leaf path (16pt, regular, no color set →
+        /// falls through to SwiftUI `.primary` via the `fg != 0` guard in
+        /// makeRun so text auto-flips with the color scheme; no dark override,
+        /// no custom font, no decoration/kerning/transform/outline).
         static let root = RunContext(
             fontSize: 16, fontWeightInt: 0, fontFamilyInt: 0, fontName: "",
-            colorArgb: 0xFF000000, darkColorArgb: 0, italic: false,
+            colorArgb: 0, darkColorArgb: 0, italic: false,
             letterSpacingEm: 0, textTransform: 0, outlineWidth: 0, pressCallbackId: 0, pressNodeId: 0
         )
     }
@@ -250,18 +259,20 @@ struct NativeUITextRenderer: View {
 
             if ctx.outlineWidth > 0 {
                 let fg = (colorScheme == .dark && ctx.darkColorArgb != 0) ? ctx.darkColorArgb : ctx.colorArgb
+                // 0 = no colour set: `.primary`, as for a filled run.
+                let fgColor: Color = fg == 0 ? .primary : Color(argb: fg)
                 if #available(iOS 18.0, *) {
                     // As in the leaf path: see-through glyphs under the
                     // stroke, so the background chip, underline and
                     // strikethrough stay solid, as on Android.
                     run.foregroundColor = Color.clear
-                    if p.getInt("underline") == 1 { run.underlineStyle = Text.LineStyle(color: Color(argb: fg)) }
-                    if p.getInt("line_through") == 1 { run.strikethroughStyle = Text.LineStyle(color: Color(argb: fg)) }
+                    if p.getInt("underline") == 1 { run.underlineStyle = Text.LineStyle(color: fgColor) }
+                    if p.getInt("line_through") == 1 { run.strikethroughStyle = Text.LineStyle(color: fgColor) }
                 }
 
                 let outline = NUITextOutline(
                     width: CGFloat(ctx.outlineWidth),
-                    color: Color(argb: fg),
+                    color: fgColor,
                     text: String(run.characters),
                     font: outlineFont(
                         name: effectiveFontName(ctx.fontName, family: ctx.fontFamilyInt),
@@ -309,7 +320,12 @@ struct NativeUITextRenderer: View {
 
         // Foreground — dark hex wins when in dark mode and one was supplied.
         let fg = (colorScheme == .dark && ctx.darkColorArgb != 0) ? ctx.darkColorArgb : ctx.colorArgb
-        run.foregroundColor = Color(argb: fg)
+        // when no color prop is set (fg == 0), leave foreground
+        // unset so SwiftUI's AttributedString uses `.primary`, auto-flipping
+        // with the nativephp-color-scheme override.
+        if fg != 0 {
+            run.foregroundColor = Color(argb: fg)
+        }
 
         // Run background = the inline-code chip. bg_color lives on style;
         // dark_bg_color on props (matches NodeStyleModifier's split). Per-run,
