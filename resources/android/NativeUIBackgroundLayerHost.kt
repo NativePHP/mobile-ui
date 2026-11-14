@@ -1,14 +1,21 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import com.nativephp.mobile.ui.nativerender.LocalAvailableHeight
+import com.nativephp.mobile.ui.nativerender.LocalAvailableWidth
 import com.nativephp.mobile.ui.nativerender.LocalBackgroundLayerPresent
+import com.nativephp.mobile.ui.nativerender.LocalSafeAreaBottom
+import com.nativephp.mobile.ui.nativerender.LocalSafeAreaTop
 import com.nativephp.mobile.ui.nativerender.NativeRendererRegistry
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.NodeView
+import com.nativephp.mobile.ui.nativerender.nodeLayout
+import com.nativephp.mobile.ui.nativerender.nodeStyle
 
 /**
  * Renders the `background_layer` sentinel BENEATH the screen content —
@@ -43,11 +50,25 @@ fun NativeUIBackgroundLayerHost(
         // which would discard the subtree and recreate the native view.
         // Direct dispatch keys the renderer to THIS stable call site, so
         // its remembered state (a MapView, a player) survives any publish.
-        // The layer needs no gesture/style modifier chain, so skipping
-        // NodeView loses nothing.
+        // NodeView is also the only caller of `nodeStyle` and `nodeLayout`,
+        // so they are applied here, in NodeView's order (background before
+        // padding): without them the child's `bg-*` or gradient is never
+        // painted and its padding and safe-area insets are dropped.
         val renderer = NativeRendererRegistry.get(child.type)
         if (renderer != null) {
-            renderer.Render(child, Modifier.fillMaxSize())
+            renderer.Render(
+                child,
+                Modifier
+                    .fillMaxSize()
+                    .nodeStyle(child.style, child.props, isSystemInDarkTheme())
+                    .nodeLayout(
+                        child.layout,
+                        LocalSafeAreaTop.current,
+                        LocalSafeAreaBottom.current,
+                        LocalAvailableWidth.current,
+                        LocalAvailableHeight.current,
+                    ),
+            )
         } else {
             NodeView(node = child, overrideModifier = Modifier.fillMaxSize())
         }
