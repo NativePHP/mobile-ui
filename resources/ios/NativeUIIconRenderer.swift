@@ -9,7 +9,11 @@ struct NativeUIIconRenderer: View {
         let p = node.props
         let name = p.getString("name")
         let size = CGFloat(p.getFloat("size", default: 24))
-        let lightArgb = p.getColor("color", default: 0xFF000000)
+        // default light color to 0 (unset) so an icon without an
+        // explicit color class inherits SwiftUI `.primary`, which auto-flips
+        // with the nativephp-color-scheme override. Original vendor default
+        // of 0xFF000000 (pure black) rendered invisible on dark surfaces.
+        let lightArgb = p.getColor("color", default: 0)
         let darkArgb  = p.getColor("dark_color", default: 0)
         let a11yLabel = p.getString("a11y_label")
 
@@ -31,7 +35,7 @@ struct NativeUIIconRenderer: View {
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
-            .foregroundColor(Color(argb: effectiveArgb))
+            .foregroundColor(effectiveArgb == 0 ? .primary : Color(argb: effectiveArgb))
             // Extend clickable icons to a 44pt hit target BEFORE the click
             // handlers attach, so the tap gesture covers the enlarged shape.
             .modifier(IconTapTargetModifier(interactive: interactive))
