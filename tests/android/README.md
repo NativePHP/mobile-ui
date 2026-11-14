@@ -2,7 +2,8 @@
 
 This standalone Robolectric/Compose module compiles the production filled and
 outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list, pager and bottom sheet renderers.
+the production gesture area, list, virtual list, pager and bottom sheet renderers
+and the background layer host.
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
 from an explicit checkout, not substituted by test implementations.
@@ -53,4 +54,11 @@ viewport's top, not just that a scroll was invoked.
 composition: when its detents change in the same render, and when a finger
 grabs it while it slides away. `RenderNode` here draws each child as
 `NodeView` does.
+
+`BackgroundLayerStyleTest` puts a column with a background colour, a gradient
+and a dark-mode background at the top of a background layer and checks the
+pixels drawn, then checks a top element's padding and safe-area insets leave
+its background showing around its content. The renderers here draw only the
+modifier they are given; core's `nodeStyle` and `nodeLayout` are compiled from
+the Mobile checkout.
 These are JVM checks; SwiftUI and native device behaviour need separate testing.
