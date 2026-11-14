@@ -182,6 +182,7 @@ private struct PagerBody: View {
                     PagerChildren(node: besideHeader)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .modifier(NativeUIScrollEdgeExtension())
                 .frame(width: split.leading)
                 Color.clear
                     .frame(width: split.gap)
@@ -197,7 +198,12 @@ private struct PagerBody: View {
                 pager
                     .overlay(alignment: .top) { overlayView }
                     .modifier(PagerA11yLabelModifier(label: a11yLabel))
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        // A page also spans the bar insets at its sides (see `pager`).
+                        let sides = horizontal ? proxy.safeAreaInsets.leading + proxy.safeAreaInsets.trailing : 0
+                        let frame = proxy.frame(in: .global)
+                        return CGRect(x: frame.minX, y: frame.minY, width: frame.width + sides, height: frame.height)
+                    } action: { frame in
                         headerScroll.pageWidth = frame.width
                         headerScroll.pagerMinY = frame.minY
                     }
@@ -238,17 +244,25 @@ private struct PagerBody: View {
             // content as safe area, so a list in a page draws under the
             // bar and still scrolls its last row clear of it. Paging is
             // sideways, so the extra height can't make the pages drift.
-            let bottomInset = horizontal ? geo.safeAreaInsets.bottom : 0
+            //
+            // It runs under a bar at its side (an iPhone Duo's vertical bar)
+            // the same way, so a page's list can put its scroll indicator at
+            // the screen's edge while its rows stay clear of the bar. Each
+            // page spans the insets, so `.paging` still steps by one page.
+            let insets = horizontal
+                ? EdgeInsets(top: 0, leading: geo.safeAreaInsets.leading, bottom: geo.safeAreaInsets.bottom, trailing: geo.safeAreaInsets.trailing)
+                : EdgeInsets()
             ScrollView(axis) {
-                pages(size: CGSize(width: geo.size.width, height: geo.size.height + bottomInset), bottomInset: bottomInset)
+                pages(size: CGSize(width: geo.size.width + insets.leading + insets.trailing, height: geo.size.height + insets.bottom), insets: insets)
                     .scrollTargetLayout()
             }
-            .ignoresSafeArea(.container, edges: horizontal ? .bottom : [])
-            // Beside a sideways bar (an iPhone Duo's rail) the ScrollView
-            // also draws into the bar's inset, so the next page showed
-            // under it. Clip the sides only: the pages still run under a
-            // bar at the bottom.
+            // A ScrollView draws past its sides, so the next page showed
+            // beside the pager. Clip the sides only, at the edges the pages
+            // run to: inside the safe-area extension, which lays this out
+            // over the side insets. The pages still run under a bar at the
+            // bottom.
             .clipShape(PagerSideClip(horizontal: horizontal))
+            .ignoresSafeArea(.container, edges: horizontal ? [.bottom, .horizontal] : [])
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $position)
             // On a non-lazy stack SwiftUI ignores the initial value of
@@ -610,15 +624,15 @@ private struct PagerBody: View {
     /// stack expensive, so they only exist within `placeholderRadius` of
     /// the current page; further slots are clear until scrolled towards.
     @ViewBuilder
-    private func pages(size: CGSize, bottomInset: CGFloat) -> some View {
+    private func pages(size: CGSize, insets: EdgeInsets) -> some View {
         if horizontal {
-            HStack(spacing: 0) { pageViews(size: size, bottomInset: bottomInset) }
+            HStack(spacing: 0) { pageViews(size: size, insets: insets) }
         } else {
-            VStack(spacing: 0) { pageViews(size: size, bottomInset: bottomInset) }
+            VStack(spacing: 0) { pageViews(size: size, insets: insets) }
         }
     }
 
-    private func pageViews(size: CGSize, bottomInset: CGFloat) -> some View {
+    private func pageViews(size: CGSize, insets: EdgeInsets) -> some View {
         ForEach(0..<count, id: \.self) { index in
             Group {
                 if let child = pageByIndex[index] {
@@ -636,7 +650,7 @@ private struct PagerBody: View {
                         .accessibilityHidden(true)
                 }
             }
-            .safeAreaPadding(.bottom, bottomInset)
+            .safeAreaPadding(insets)
             .frame(width: size.width, height: size.height)
             .clipped()
             .id(index)
