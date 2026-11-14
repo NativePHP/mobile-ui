@@ -26,6 +26,11 @@ import SwiftUI
 struct NativeUIPagerRenderer: View {
     let node: NativeUINode
 
+    /// The window width responsive variants resolve against, so the header
+    /// moves beside the pages at the same width an `expanded:` class applies.
+    @Environment(\.windowWidth) private var windowWidth
+    @Environment(\.availableWidth) private var availableWidth
+
     var body: some View {
         let p = node.props
         let horizontal = p.getBool("horizontal")
@@ -49,6 +54,14 @@ struct NativeUIPagerRenderer: View {
             return map
         }()
 
+        // Only a horizontal pager's pages scroll up and down under a header.
+        let header = horizontal ? node.children.first { $0.type == "pager_header" } : nil
+        let besideFrom = CGFloat(p.getFloat("header_beside_from"))
+        // As NodeView resolves the classes: the window has no width yet on
+        // the first frame.
+        let width = windowWidth > 0 ? windowWidth : availableWidth
+        let beside = header != nil && besideFrom > 0 && width >= besideFrom
+
         PagerBody(
             nodeId: node.id,
             count: pageCount,
@@ -60,8 +73,8 @@ struct NativeUIPagerRenderer: View {
             pageByIndex: pageByIndex,
             placeholders: p.getStringList("placeholders"),
             tabs: PagerTabs(props: p),
-            // Only a horizontal pager's pages scroll up and down under a header.
-            header: horizontal ? node.children.first { $0.type == "pager_header" } : nil,
+            header: beside ? nil : header,
+            besideHeader: beside ? header : nil,
             overlay: node.children.first { $0.type == "pager_overlay" },
             background: PagerColor(light: node.style?.bgColor, dark: p.has("dark_bg_color") ? p.getColor("dark_bg_color", default: 0) : nil),
             a11yLabel: p.getString("a11y_label")
@@ -89,6 +102,9 @@ private struct PagerBody: View {
     let tabs: PagerTabs?
     /// The `pager_header`, which each page's list draws above the tabs.
     let header: NativeUINode?
+    /// The `pager_header` instead drawn in a column of its own beside the
+    /// pages, once the window is wide enough (`header_beside_from`).
+    let besideHeader: NativeUINode?
     /// The `pager_overlay`, laid over the pages under the tabs.
     let overlay: NativeUINode?
     /// The pager's own background, behind the tabs a header pins.
@@ -116,6 +132,8 @@ private struct PagerBody: View {
     @State private var progress: PagerProgress
     /// Where the header is, and each page's list, when there's a header.
     @State private var headerScroll = PagerHeaderScroll()
+    /// Where the header beside the pages ends and the pages begin.
+    @State private var split = PagerSplit.even(0)
     /// How a horizontal pager gets back on its page after iOS resizes it
     /// while the app is in the background (see PagerResume).
     @State private var resume: PagerResume
@@ -127,7 +145,7 @@ private struct PagerBody: View {
     /// long feed never fetches stills it may never reach.
     static let placeholderRadius = 4
 
-    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String], tabs: PagerTabs?, header: NativeUINode?, overlay: NativeUINode?, background: PagerColor, a11yLabel: String) {
+    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String], tabs: PagerTabs?, header: NativeUINode?, besideHeader: NativeUINode?, overlay: NativeUINode?, background: PagerColor, a11yLabel: String) {
         self.nodeId = nodeId
         self.count = count
         self.loaded = loaded
@@ -139,6 +157,7 @@ private struct PagerBody: View {
         self.placeholders = placeholders
         self.tabs = tabs
         self.header = header
+        self.besideHeader = besideHeader
         self.overlay = overlay
         self.background = background
         self.a11yLabel = a11yLabel
@@ -150,26 +169,46 @@ private struct PagerBody: View {
         _resume = State(initialValue: PagerResume(page: requestedPage, count: count))
     }
 
+    /// One layout whether the header is beside the pages, in them or absent,
+    /// so crossing `header_beside_from` (unfolding, Split View) shows or
+    /// hides the column and the tab row around the same paging scroll view
+    /// instead of rebuilding it and every page's list.
     var body: some View {
-        if header != nil {
-            // The pages' lists draw the header and the tabs themselves, so
-            // they scroll with the page (see NativeUIPagerHeader).
-            pager
-                .overlay(alignment: .top) { overlayView }
-                .modifier(PagerA11yLabelModifier(label: a11yLabel))
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-                    headerScroll.pageWidth = frame.width
-                    headerScroll.pagerMinY = frame.minY
+        HStack(spacing: 0) {
+            if let besideHeader {
+                // The header scrolls by itself in the leading column, and
+                // the tabs and pages fill the trailing one.
+                ScrollView(.vertical) {
+                    PagerChildren(node: besideHeader)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-        } else {
+                .frame(width: split.leading)
+                Color.clear
+                    .frame(width: split.gap)
+                    .accessibilityHidden(true)
+            }
             VStack(spacing: 0) {
-                if let tabs {
+                // Under a header the pages' lists draw the header and the
+                // tabs themselves, so they scroll with the page (see
+                // NativeUIPagerHeader).
+                if let tabs, header == nil {
                     PagerTabStrip(tabs: tabs, progress: progress, select: selectTab)
                 }
                 pager
                     .overlay(alignment: .top) { overlayView }
                     .modifier(PagerA11yLabelModifier(label: a11yLabel))
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                        headerScroll.pageWidth = frame.width
+                        headerScroll.pagerMinY = frame.minY
+                    }
             }
+        }
+        .onGeometryChange(for: PagerSplit.self) { PagerSplit(in: $0) } action: { split = $0 }
+        // Beside the pages, the header leaves their lists, which stop
+        // reporting where they are but keep their scroll views. Forgotten
+        // now, each is found again where it is once the header is back.
+        .onChange(of: header == nil) { _, gone in
+            if gone { headerScroll.reset() }
         }
     }
 
@@ -584,7 +623,7 @@ private struct PagerBody: View {
             Group {
                 if let child = pageByIndex[index] {
                     NodeView(node: child).equatable()
-                        .environment(\.nativeUIPagerHeader, header.map { pagerHeader(page: index, node: $0) })
+                        .environment(\.nativeUIPagerHeader, (header ?? besideHeader).map { pagerHeader(page: index, node: $0) })
                 } else if index >= loaded {
                     ProgressView()
                         .controlSize(.large)
@@ -606,8 +645,10 @@ private struct PagerBody: View {
 
     /// What page `index` gets of the header: the same object for the life
     /// of the pager, so a render only redraws the parts of it that changed.
+    /// A page gets it beside the pages too, with nothing to draw, so its
+    /// list is the same list either way and keeps its place.
     private func pagerHeader(page index: Int, node: NativeUINode) -> NativeUIPagerHeader {
-        headerScroll.header(page: index, node: node, tabs: tabs, background: background, progress: progress, select: selectTab)
+        headerScroll.header(page: index, node: node, inList: header != nil, tabs: tabs, background: background, progress: progress, select: selectTab)
     }
 
     /// A tap on a tab: scroll there, and the page is reported when the
@@ -957,6 +998,37 @@ private struct PagerTabStrip: View {
 
 // MARK: - Header
 
+/// Where a pager splits into its header and its pages: at a foldable's fold,
+/// for an even split around the hinge. Flat, the columns meet on it. Partly
+/// folded, its division region is active and they stop at its margins,
+/// keeping controls out of the crease. Without a fold across the pager the
+/// columns share the width evenly.
+private struct PagerSplit: Equatable {
+    var leading: CGFloat
+    var gap: CGFloat
+
+    static func even(_ width: CGFloat) -> PagerSplit {
+        PagerSplit(leading: (width / 2).rounded(), gap: 0)
+    }
+
+    init(leading: CGFloat, gap: CGFloat) {
+        self.leading = leading
+        self.gap = gap
+    }
+
+    init(in proxy: GeometryProxy) {
+        let width = proxy.size.width
+        self = .even(width)
+        guard #available(iOS 27.1, *) else { return }
+        let folds = proxy.reservedRegions(kind: .division, options: .includeInactive)
+            .filter { $0.frame.height > $0.frame.width && $0.frame.minX > 0 && $0.frame.maxX < width }
+        guard let fold = folds.min(by: { abs($0.frame.midX - width / 2) < abs($1.frame.midX - width / 2) }) else { return }
+        self = fold.isActive
+            ? PagerSplit(leading: fold.frame.minX, gap: fold.frame.width)
+            : PagerSplit(leading: fold.frame.midX, gap: 0)
+    }
+}
+
 /// A colour as PHP sent it, light and dark, nil where it sent none.
 struct PagerColor: Equatable {
     let light: Int?
@@ -987,15 +1059,19 @@ struct PagerColor: Equatable {
 final class NativeUIPagerHeader {
     let page: Int
     var node: NativeUINode
+    /// Whether the page's list draws the header and the tabs. Beside the
+    /// pages, the pager draws them itself and the list only its own rows.
+    var inList: Bool
     fileprivate var tabs: PagerTabs?
     var background: PagerColor
     fileprivate let progress: PagerProgress
     @ObservationIgnored fileprivate var select: (Int) -> Void
     let scroll: PagerHeaderScroll
 
-    fileprivate init(page: Int, node: NativeUINode, tabs: PagerTabs?, background: PagerColor, progress: PagerProgress, select: @escaping (Int) -> Void, scroll: PagerHeaderScroll) {
+    fileprivate init(page: Int, node: NativeUINode, inList: Bool, tabs: PagerTabs?, background: PagerColor, progress: PagerProgress, select: @escaping (Int) -> Void, scroll: PagerHeaderScroll) {
         self.page = page
         self.node = node
+        self.inList = inList
         self.tabs = tabs
         self.background = background
         self.progress = progress
@@ -1070,15 +1146,16 @@ final class PagerHeaderScroll {
         weak var view: UIScrollView?
     }
 
-    fileprivate func header(page: Int, node: NativeUINode, tabs: PagerTabs?, background: PagerColor, progress: PagerProgress, select: @escaping (Int) -> Void) -> NativeUIPagerHeader {
+    fileprivate func header(page: Int, node: NativeUINode, inList: Bool, tabs: PagerTabs?, background: PagerColor, progress: PagerProgress, select: @escaping (Int) -> Void) -> NativeUIPagerHeader {
         guard let header = headers[page] else {
-            let header = NativeUIPagerHeader(page: page, node: node, tabs: tabs, background: background, progress: progress, select: select, scroll: self)
+            let header = NativeUIPagerHeader(page: page, node: node, inList: inList, tabs: tabs, background: background, progress: progress, select: select, scroll: self)
             headers[page] = header
             return header
         }
 
         // Only what changed, so an unchanged header doesn't redraw.
         if header.node !== node { header.node = node }
+        if header.inList != inList { header.inList = inList }
         if header.tabs != tabs { header.tabs = tabs }
         if header.background != background { header.background = background }
         header.select = select
@@ -1108,9 +1185,25 @@ final class PagerHeaderScroll {
         scrollViews[page] = WeakScrollView(view: scrollView)
         offsets[page] = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
 
-        if page != leading {
+        if page == leading {
+            // The header follows this list from where it is, and any list
+            // found before it is brought level with it.
+            collapse = min(offsets[page] ?? 0, headerHeight)
+            for other in scrollViews.keys where other != page {
+                align(other)
+            }
+        } else if scrollViews[leading]?.view != nil {
             align(page)
         }
+    }
+
+    /// Forget every list and how far the header had gone, so each list is
+    /// found again as it is.
+    func reset() {
+        collapse = 0
+        stripMaxY = [:]
+        offsets = [:]
+        scrollViews = [:]
     }
 
     /// A page's list scrolled to `y`, its distance from its own top.
@@ -1149,17 +1242,27 @@ final class PagerHeaderScroll {
 }
 
 /// The header as a page's list draws it: its first row.
+///
+/// With the header beside the pages the row stays, drawing nothing, as does
+/// the section the tabs head: taking either out reloads the whole list,
+/// which loses its place.
 struct NativeUIPagerHeaderRow: View {
     let header: NativeUIPagerHeader
 
     var body: some View {
-        PagerChildren(node: header.node)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                if header.scroll.headerHeight != height { header.scroll.headerHeight = height }
-            }
-            .background(PagerHeaderScrollViewFinder { header.scroll.attach($0, page: header.page) })
-            .modifier(PagerStationary(header: header))
+        if header.inList {
+            PagerChildren(node: header.node)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if header.scroll.headerHeight != height { header.scroll.headerHeight = height }
+                }
+                .background(PagerHeaderScrollViewFinder { header.scroll.attach($0, page: header.page) })
+                .modifier(PagerStationary(header: header))
+        } else {
+            Color.clear
+                .frame(height: 0)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -1172,6 +1275,16 @@ struct NativeUIPagerHeaderStrip: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        if header.inList {
+            strip
+        } else {
+            Color.clear
+                .frame(height: 0)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var strip: some View {
         header.strip
             .frame(maxWidth: .infinity)
             .background(header.background.resolve(colorScheme, fallback: themeStore.resolve(for: colorScheme).surface))
@@ -1205,10 +1318,13 @@ struct NativeUIPagerHeaderListModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let header {
             content
-                // Section headers get a minimum height and space above.
+                // Section headers get a minimum height and space above, and
+                // rows a minimum height, which the header's row beside the
+                // pages must not have.
                 .environment(\.defaultMinListHeaderHeight, 0)
+                .environment(\.defaultMinListRowHeight, 0)
                 .listSectionSpacing(0)
-                .contentMargins(.bottom, room, for: .scrollContent)
+                .contentMargins(.bottom, header.inList ? room : 0, for: .scrollContent)
                 .onScrollGeometryChange(for: PagerListGeometry.self) { geometry in
                     PagerListGeometry(
                         y: geometry.contentOffset.y + geometry.contentInsets.top,
@@ -1218,6 +1334,8 @@ struct NativeUIPagerHeaderListModifier: ViewModifier {
                         container: geometry.containerSize.height
                     )
                 } action: { _, geometry in
+                    guard header.inList else { return }
+
                     header.scroll.scrolled(page: header.page, y: geometry.y)
 
                     // The room this list needs to scroll the header away, past
