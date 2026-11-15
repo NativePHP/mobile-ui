@@ -36,3 +36,13 @@ test('sends no dismissal to PHP when PHP closes the iOS modal', function () {
         ->not->toMatch('/onDismiss: \{/')
         ->toMatch('/Button\(action: fireDismiss\)/');
 });
+
+test('names the iOS modal without renaming its close button', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIModalRenderer.swift');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/\.accessibilityLabel\("Close"\)/')
+        ->toMatch('/content\.accessibilityElement\(children: \.contain\)\.accessibilityLabel\(label\)/')
+        ->not->toMatch('/else \{ content\.accessibilityLabel\(label\) \}/');
+});
