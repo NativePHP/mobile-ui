@@ -222,6 +222,14 @@
             "self_closing": true
         },
         {
+            "type": "lazy_stack",
+            "element": "Native\\Mobile\\UI\\Elements\\LazyStack",
+            "blade": "Native\\Mobile\\UI\\Components\\LazyStack",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.ScrollViewRenderer",
+            "ios_renderer": "NativeUILazyStackRenderer",
+            "self_closing": false
+        },
+        {
             "type": "modal",
             "element": "Native\\Mobile\\UI\\Elements\\Modal",
             "blade": "Native\\Mobile\\UI\\Components\\Modal",
