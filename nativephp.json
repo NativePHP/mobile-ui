@@ -225,7 +225,7 @@
             "type": "lazy_stack",
             "element": "Native\\Mobile\\UI\\Elements\\LazyStack",
             "blade": "Native\\Mobile\\UI\\Components\\LazyStack",
-            "android_renderer": "com.nativephp.plugins.native_ui.ui.ScrollViewRenderer",
+            "android_renderer": "com.nativephp.plugins.native_ui.ui.LazyStackRenderer",
             "ios_renderer": "NativeUILazyStackRenderer",
             "self_closing": false
         },

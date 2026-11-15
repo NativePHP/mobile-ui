@@ -72,14 +72,14 @@ it('hides the scroll indicator when asked', function () {
     expect($props['shows_indicators'])->toBeFalse();
 });
 
-it('registers a renderer for iOS and falls back to the scroll view on Android', function () {
+it('registers its own renderer on iOS and Android', function () {
     $manifest = json_decode(file_get_contents(dirname(__DIR__).'/nativephp.json'), true);
     $component = collect($manifest['components'])->firstWhere('type', 'lazy_stack');
 
     expect($component)->toMatchArray([
         'element' => LazyStack::class,
         'blade' => LazyStackComponent::class,
-        'android_renderer' => 'com.nativephp.plugins.native_ui.ui.ScrollViewRenderer',
+        'android_renderer' => 'com.nativephp.plugins.native_ui.ui.LazyStackRenderer',
         'ios_renderer' => 'NativeUILazyStackRenderer',
         'self_closing' => false,
     ]);

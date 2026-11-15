@@ -2,7 +2,7 @@
 
 This standalone Robolectric/Compose module compiles the production filled and
 outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list, pager and bottom sheet renderers,
+the production gesture area, list, virtual list, lazy stack, pager and bottom sheet renderers,
 the background layer host and the layout drawer host.
 
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
@@ -50,6 +50,11 @@ the list doesn't repeat an applied request, disabling then restoring an index
 re-arms it, and saved-state restoration keeps the reader's position unless the
 request changed while it was saved. Assertions check which row is at the
 viewport's top, not just that a scroll was invoked.
+
+`LazyStackPositionTest` checks that a reader at the top of a lazy stack sees
+children added above, a reader scrolled down keeps their child in place through
+prepends and trims, content padding and gap place the children, and a stack
+inside a scroll view falls back to a plain column instead of throwing.
 
 `BottomSheetCloseTest` closes an open sheet and checks its content leaves
 composition: when its detents change in the same render, and when a finger
