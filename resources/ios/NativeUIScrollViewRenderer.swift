@@ -469,7 +469,7 @@ private struct BottomProbe: Equatable {
 
 /// Applies a minimum height only when there is one, so children that didn't
 /// ask for viewport height keep the exact modifier chain they always had.
-private struct MinViewportHeightModifier: ViewModifier {
+struct MinViewportHeightModifier: ViewModifier {
     let minHeight: CGFloat?
 
     @ViewBuilder

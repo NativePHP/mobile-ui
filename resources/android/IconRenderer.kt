@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
+import com.nativephp.plugins.native_ui.NativeUITheme
 
 object IconRenderer {
     @Composable
@@ -18,10 +19,13 @@ object IconRenderer {
         val p = node.props
         val name = p.getString("name")
         val a11yLabel = p.getString("a11y_label")
-        val lightArgb = p.getColor("color", 0xFF000000.toInt())
+        // default 0 (unset) → theme onSurface,
+        // so an icon without an explicit colour follows dark mode.
+        val lightArgb = p.getColor("color", 0)
         val darkArgb  = p.getColor("dark_color", 0)
         val isDark = isSystemInDarkTheme()
         val effectiveArgb = if (isDark && darkArgb != 0) darkArgb else lightArgb
+        val theme = if (isDark) NativeUITheme.dark else NativeUITheme.light
 
         com.nativephp.mobile.ui.MaterialIcon(
             name = name,
@@ -31,7 +35,7 @@ object IconRenderer {
             contentDescription = a11yLabel.ifEmpty { null },
             modifier = modifier.then(applyClickModifier(node)),
             size = p.getFloat("size", 24f).dp,
-            tint = Color(effectiveArgb),
+            tint = if (effectiveArgb != 0) Color(effectiveArgb) else theme.onSurface,
         )
     }
 

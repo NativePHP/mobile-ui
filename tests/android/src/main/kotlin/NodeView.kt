@@ -11,11 +11,11 @@ import androidx.compose.ui.unit.dp
 /**
  * Draws a container's children for the gesture area tests: a 300x120 box
  * tagged `node-<id>`, made clickable the way core makes a `pressable` when
- * the node has a press handler.
+ * the node has a press handler. A parent's modifier wraps the box.
  */
 @Composable
 fun NodeView(node: NativeUINode, overrideModifier: Modifier? = null) {
-    var modifier = Modifier.size(300.dp, 120.dp).testTag("node-${node.id}")
+    var modifier = (overrideModifier ?: Modifier).size(300.dp, 120.dp).testTag("node-${node.id}")
     if (node.onPress != 0) {
         modifier = modifier.clickable { NativeUIBridge.sendPressEvent(node.onPress, node.id) }
     }
@@ -25,3 +25,9 @@ fun NodeView(node: NativeUINode, overrideModifier: Modifier? = null) {
 /** Stands in for core's `RenderNode`, which the bottom sheet draws its children with. */
 @Composable
 fun RenderNode(node: NativeUINode, modifier: Modifier? = null) = NodeView(node, modifier)
+
+/** Stands in for core's `NodeRenderer`, which `NativeRendererRegistry` holds. */
+fun interface NodeRenderer {
+    @Composable
+    fun Render(node: NativeUINode, modifier: Modifier)
+}
