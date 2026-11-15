@@ -109,7 +109,10 @@ object ModalRenderer {
                                 .fillMaxWidth()
                                 .statusBarsPadding()
                                 .padding(8.dp),
-                            horizontalArrangement = Arrangement.End,
+                            // Material 3 full-screen dialogs put close at the start of
+                            // the top bar, where the navigation icon goes; it follows
+                            // the layout direction, so it moves to the right in RTL.
+                            horizontalArrangement = Arrangement.Start,
                         ) {
                             IconButton(onClick = {
                                 showModal = false

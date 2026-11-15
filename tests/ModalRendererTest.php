@@ -46,3 +46,12 @@ test('names the iOS modal without renaming its close button', function () {
         ->toMatch('/content\.accessibilityElement\(children: \.contain\)\.accessibilityLabel\(label\)/')
         ->not->toMatch('/else \{ content\.accessibilityLabel\(label\) \}/');
 });
+
+test('puts the Android modal close button at the start of its row', function () {
+    $renderer = file_get_contents(dirname(__DIR__).'/resources/android/ModalRenderer.kt');
+
+    expect($renderer)
+        ->toBeString()
+        ->toMatch('/\.padding\(8\.dp\),\s*(\/\/[^\n]*\n\s*)*horizontalArrangement = Arrangement\.Start,/')
+        ->not->toMatch('/horizontalArrangement = Arrangement\.End/');
+});
