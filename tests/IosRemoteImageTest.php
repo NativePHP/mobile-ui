@@ -17,7 +17,7 @@ it('loads every remote image through NativeUIRemoteImage', function () use ($ios
 
 it('downloads through its own session with a sized URLCache that follows HTTP caching', function () use ($ios) {
     expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
-        ->toContain('configuration.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024, directory: directory)')
+        ->toContain('configuration.urlCache = URLCache(memoryCapacity: 4 * 1024 * 1024, diskCapacity: 50 * 1024 * 1024, directory: directory)')
         ->toContain('configuration.requestCachePolicy = .useProtocolCachePolicy')
         ->toContain('try await session.data(from: url)');
 });
@@ -33,7 +33,15 @@ it('keeps decoded remote images in a cost-limited cache keyed by URL and pixel s
     expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
         ->toContain('private static let cache: NSCache<NSString, Entry>')
         ->toContain('"\(url.absoluteString)#\(Int(size.width))x\(Int(size.height))" as NSString')
-        ->toContain('cache.setObject(entry, forKey: cacheKey(url, size), cost: entry.cost)');
+        ->toContain('cache.setObject(entry, forKey: cacheKey(url, size), cost: entry.cost)')
+        ->toContain('cache.totalCostLimit = 16 * 1024 * 1024');
+});
+
+it('empties decoded remote images on a memory warning and in the background', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('UIApplication.didReceiveMemoryWarningNotification,')
+        ->toContain('UIApplication.didEnterBackgroundNotification,')
+        ->toContain('cache.removeAllObjects()');
 });
 
 it('thumbnails with ImageIO only when the source is well over the drawn size', function () use ($ios) {

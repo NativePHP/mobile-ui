@@ -362,8 +362,8 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
 
 /// Downloaded and decoded remote images.
 ///
-/// Bytes come through one `URLSession` with its own `URLCache` (20 MB in
-/// memory, 200 MB on disk under Caches), which follows the server's HTTP
+/// Bytes come through one `URLSession` with its own `URLCache` (4 MB in
+/// memory, 50 MB on disk under Caches), which follows the server's HTTP
 /// caching: a fresh `max-age` answers from disk without a request, a stale
 /// entry is revalidated with its ETag or Last-Modified. The shared session
 /// `AsyncImage` uses only has about 512 KB of memory and 10 MB of disk, so a
@@ -374,7 +374,11 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
 /// an `NSCache` that costs each entry by its decoded bytes. An entry's key
 /// is the URL plus its decoded pixel size, so a URL drawn as a small
 /// thumbnail in one place and full width in another keeps both. The main
-/// thread only ever looks in memory.
+/// thread only ever looks in memory. The cache is kept small (16 MB, the
+/// screen or two around what's visible) and emptied on a memory warning and
+/// when the app goes to the background: a measured journey through a shop
+/// app ended about 100 MB higher than plain `AsyncImage` with a 64 MB cache
+/// and a 20 MB URLCache memory tier. The disk cache does the real work.
 ///
 /// Every image waiting on the same URL shares one download, which is
 /// cancelled only when none of them is waiting any more.
@@ -383,7 +387,7 @@ enum NativeUIRemoteImageCache {
         let configuration = URLSessionConfiguration.default
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("NativeUIImages", isDirectory: true)
-        configuration.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024, directory: directory)
+        configuration.urlCache = URLCache(memoryCapacity: 4 * 1024 * 1024, diskCapacity: 50 * 1024 * 1024, directory: directory)
         configuration.requestCachePolicy = .useProtocolCachePolicy
 
         return URLSession(configuration: configuration)
@@ -391,12 +395,25 @@ enum NativeUIRemoteImageCache {
 
     private static let cache: NSCache<NSString, Entry> = {
         let cache = NSCache<NSString, Entry>()
-        // The same budget as local files. NSCache also purges itself under
-        // memory pressure.
-        cache.totalCostLimit = 64 * 1024 * 1024
+        // Roughly a screenful of product photos at 3x. NSCache also purges
+        // itself under memory pressure, but not on a warning or when the app
+        // is backgrounded, so `emptied` does that.
+        cache.totalCostLimit = 16 * 1024 * 1024
+        _ = emptied
 
         return cache
     }()
+
+    /// Empties the decoded images on a memory warning and when the app goes
+    /// to the background. Set up once, the first time the cache is used.
+    private static let emptied: [NSObjectProtocol] = [
+        UIApplication.didReceiveMemoryWarningNotification,
+        UIApplication.didEnterBackgroundNotification,
+    ].map { name in
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+            cache.removeAllObjects()
+        }
+    }
 
     /// Decoded sizes put in the cache for each URL. NSCache may have dropped
     /// some since; lookups prune those.
