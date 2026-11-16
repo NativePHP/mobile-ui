@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 /// Where an image `src` actually points.
 ///
@@ -13,7 +14,8 @@ import UIKit
 enum NativeUIImageSource {
     /// A file on this device — load it through `NativeUIImageCache`.
     case local(path: String)
-    /// A remote URL — stream through `AsyncImage`, via `NativeUIRemoteImage`.
+    /// A remote URL — download it through `NativeUIRemoteImageCache`, via
+    /// `NativeUIRemoteImage`.
     case remote(url: URL)
     /// Empty, or a string that isn't a usable URL.
     case unresolvable
@@ -56,8 +58,8 @@ enum NativeUIImageSource {
 /// main thread only ever looks in memory here: `image(atPath:)` is a lookup
 /// by path. Checking the file, reading it and decoding it all happen in
 /// `load(atPath:)`, off the main thread. Android works the same way: Coil
-/// keys a file by its path and decodes it on an IO thread. Remote images get
-/// `URLCache` via `AsyncImage`; this is the local-file equivalent.
+/// keys a file by its path and decodes it on an IO thread. Remote images go
+/// through `NativeUIRemoteImageCache`, which works the same way.
 ///
 /// Each entry remembers the file's modification date and size, and `load`
 /// compares them before trusting it. `NativeUILocalImage` calls `load` each
@@ -358,62 +360,458 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
     }
 }
 
-/// `AsyncImage` that tries again when a download fails. On its own, an
-/// `AsyncImage` whose download fails stays on its failure phase until its
-/// view is rebuilt, so one dropped request or 503 leaves the image blank.
+/// Downloaded and decoded remote images.
 ///
-/// A cancelled download comes back as a failure too, and #157 reports images
-/// left blank that way on screens that re-render while they load. So a
-/// cancelled download starts again straight away and doesn't count as a
-/// failure. Any other failure is tried again after 0.5 s and then 1.5 s.
-/// After that the image stays failed until it next comes on screen. Each try
-/// is a new `AsyncImage`, so a download still stops when its image goes off
-/// screen, and the bytes still go through the shared `URLCache`.
+/// Bytes come through one `URLSession` with its own `URLCache` (20 MB in
+/// memory, 200 MB on disk under Caches), which follows the server's HTTP
+/// caching: a fresh `max-age` answers from disk without a request, a stale
+/// entry is revalidated with its ETag or Last-Modified. The shared session
+/// `AsyncImage` uses only has about 512 KB of memory and 10 MB of disk, so a
+/// grid of product photos pushed itself out of it.
+///
+/// Decoded images are kept in memory the way `NativeUIImageCache` keeps
+/// local files: decoded off the main thread, at the size they're drawn, in
+/// an `NSCache` that costs each entry by its decoded bytes. An entry's key
+/// is the URL plus its decoded pixel size, so a URL drawn as a small
+/// thumbnail in one place and full width in another keeps both. The main
+/// thread only ever looks in memory.
+///
+/// Every image waiting on the same URL shares one download, which is
+/// cancelled only when none of them is waiting any more.
+enum NativeUIRemoteImageCache {
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("NativeUIImages", isDirectory: true)
+        configuration.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024, directory: directory)
+        configuration.requestCachePolicy = .useProtocolCachePolicy
+
+        return URLSession(configuration: configuration)
+    }()
+
+    private static let cache: NSCache<NSString, Entry> = {
+        let cache = NSCache<NSString, Entry>()
+        // The same budget as local files. NSCache also purges itself under
+        // memory pressure.
+        cache.totalCostLimit = 64 * 1024 * 1024
+
+        return cache
+    }()
+
+    /// Decoded sizes put in the cache for each URL. NSCache may have dropped
+    /// some since; lookups prune those.
+    @MainActor private static var sizes: [URL: [CGSize]] = [:]
+
+    /// Downloads in progress, so images showing the same URL share one.
+    @MainActor private static var downloads: [URL: Download] = [:]
+
+    /// Decodes in progress, by URL and the size they fill.
+    @MainActor private static var decodes: [String: Task<Entry?, Never>] = [:]
+
+    /// The best decode of `url` in memory for `pixels`: the smallest one that
+    /// fills it, or the biggest there is when none does (or when `pixels` is
+    /// zero, before the first layout). Never touches the disk or network.
+    @MainActor
+    static func image(for url: URL, filling pixels: CGSize) -> UIImage? {
+        entry(for: url, filling: pixels)?.image
+    }
+
+    /// The image at `url`, decoded big enough to fill `pixels` (or at its own
+    /// size, if that's smaller). Throws when the download fails or the bytes
+    /// aren't an image, and `CancellationError` when the calling task is
+    /// cancelled.
+    @MainActor
+    static func load(_ url: URL, filling pixels: CGSize) async throws -> UIImage {
+        if let entry = entry(for: url, filling: pixels), entry.fills(pixels) {
+            return entry.image
+        }
+
+        let data = try await data(for: url)
+        try Task.checkCancellation()
+
+        // Another image may have decoded a big enough copy meanwhile.
+        if let entry = entry(for: url, filling: pixels), entry.fills(pixels) {
+            return entry.image
+        }
+
+        let key = "\(url.absoluteString)#\(pixels.width)x\(pixels.height)"
+        let decode = decodes[key] ?? {
+            let task = Task.detached(priority: .userInitiated) { decodeImage(data, filling: pixels) }
+            decodes[key] = task
+
+            return task
+        }()
+        let entry = await decode.value
+        if decodes[key] == decode {
+            decodes[key] = nil
+        }
+        guard let entry else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        store(entry, for: url)
+
+        return entry.image
+    }
+
+    @MainActor
+    private static func entry(for url: URL, filling pixels: CGSize) -> Entry? {
+        guard let known = sizes[url] else {
+            return nil
+        }
+        var live: [CGSize] = []
+        var smallestFilling: Entry?
+        var biggest: Entry?
+        for size in known {
+            guard let entry = cache.object(forKey: cacheKey(url, size)) else {
+                continue
+            }
+            live.append(size)
+            if entry.fills(pixels), smallestFilling.map({ entry.area < $0.area }) ?? true {
+                smallestFilling = entry
+            }
+            if biggest.map({ entry.area > $0.area }) ?? true {
+                biggest = entry
+            }
+        }
+        if live.count != known.count {
+            sizes[url] = live.isEmpty ? nil : live
+        }
+        if pixels.width <= 0 && pixels.height <= 0 {
+            return biggest
+        }
+
+        return smallestFilling ?? biggest
+    }
+
+    @MainActor
+    private static func store(_ entry: Entry, for url: URL) {
+        let size = entry.pixels
+        cache.setObject(entry, forKey: cacheKey(url, size), cost: entry.cost)
+        var known = sizes[url] ?? []
+        if !known.contains(size) {
+            known.append(size)
+        }
+        sizes[url] = known
+    }
+
+    private static func cacheKey(_ url: URL, _ size: CGSize) -> NSString {
+        "\(url.absoluteString)#\(Int(size.width))x\(Int(size.height))" as NSString
+    }
+
+    /// The bytes at `url`, through the shared download for it.
+    @MainActor
+    private static func data(for url: URL) async throws -> Data {
+        let download: Download
+        if let existing = downloads[url] {
+            download = existing
+        } else {
+            download = Download(url: url)
+            downloads[url] = download
+            download.start()
+        }
+        let id = download.nextID()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    download.join(id, continuation)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in download.leave(id) }
+        }
+    }
+
+    /// Runs off the main thread.
+    nonisolated private static func fetch(_ url: URL) async throws -> Data {
+        let (data, response) = try await session.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+
+        return data
+    }
+
+    /// Decodes `data` at the smallest size that still fills `pixels`. Runs off
+    /// the main thread.
+    ///
+    /// ImageIO thumbnails straight from the compressed bytes, so a big photo
+    /// in a small frame is never in memory at full size. On the simulator a
+    /// thumbnail costs more time per photo than a plain decode, so it's only
+    /// used when the source is more than 1.5 times the size it's drawn at,
+    /// where the memory it saves is worth it. Otherwise the whole image is
+    /// decoded. Either way it comes back already decoded, so drawing it on
+    /// the main thread doesn't decode it there. Animated images give their
+    /// first frame, as `AsyncImage` did.
+    nonisolated private static func decodeImage(_ data: Data, filling pixels: CGSize) -> Entry? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0 else {
+            return nil
+        }
+
+        if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat($0.doubleValue) }),
+           let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat($0.doubleValue) }),
+           width > 0, height > 0 {
+            // EXIF orientations 5 to 8 turn the image on its side.
+            let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+            let oriented = orientation >= 5 ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+            let fill = max(pixels.width / oriented.width, pixels.height / oriented.height)
+
+            if fill < 1 / 1.5 {
+                let options = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceThumbnailMaxPixelSize: (max(oriented.width, oriented.height) * fill).rounded(.up),
+                ] as CFDictionary
+                if let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) {
+                    // Drawn at the same size in points as the whole image
+                    // would be (one point per pixel, as AsyncImage drew it),
+                    // so an image laid out at its natural size doesn't move.
+                    let scale = CGFloat(thumbnail.width) / oriented.width
+
+                    return Entry(image: UIImage(cgImage: thumbnail, scale: scale, orientation: .up), isFullSize: false)
+                }
+            }
+        }
+
+        guard let image = UIImage(data: data) else {
+            return nil
+        }
+
+        return Entry(image: image.preparingForDisplay() ?? image, isFullSize: true)
+    }
+
+    private final class Entry: @unchecked Sendable {
+        let image: UIImage
+        /// Decoded at the image's own size, so there's nothing bigger to
+        /// decode.
+        let isFullSize: Bool
+
+        init(image: UIImage, isFullSize: Bool) {
+            self.image = image
+            self.isFullSize = isFullSize
+        }
+
+        /// Decoded size in pixels, oriented as drawn.
+        var pixels: CGSize {
+            CGSize(width: (image.size.width * image.scale).rounded(), height: (image.size.height * image.scale).rounded())
+        }
+
+        var area: CGFloat {
+            pixels.width * pixels.height
+        }
+
+        /// Whether this decode fills `target` without being scaled up. A
+        /// pixel short is close enough: decoded sizes are rounded.
+        func fills(_ target: CGSize) -> Bool {
+            isFullSize || (pixels.width + 1 >= target.width && pixels.height + 1 >= target.height)
+        }
+
+        /// Decoded footprint, in bytes.
+        var cost: Int {
+            Int(area) * 4
+        }
+    }
+
+    /// One download, shared by every image waiting on its URL.
+    ///
+    /// When the last of them stops waiting, the request carries on for a
+    /// moment before it's cancelled. A screen that re-renders while it loads
+    /// rebuilds its images, and the new image asks for the same URL straight
+    /// after the old one gave up: it joins this request rather than starting
+    /// another. A fast scroll still cancels the rows it left behind.
+    @MainActor
+    private final class Download {
+        let url: URL
+        private var task: Task<Void, Never>?
+        private var waiters: [Int: CheckedContinuation<Data, Error>] = [:]
+        private var lastID = 0
+        private var finished = false
+
+        init(url: URL) {
+            self.url = url
+        }
+
+        func start() {
+            let url = url
+            task = Task {
+                let result: Result<Data, Error>
+                do {
+                    result = .success(try await NativeUIRemoteImageCache.fetch(url))
+                } catch {
+                    result = .failure(error)
+                }
+                self.finish(result)
+            }
+        }
+
+        func nextID() -> Int {
+            lastID += 1
+
+            return lastID
+        }
+
+        func join(_ id: Int, _ continuation: CheckedContinuation<Data, Error>) {
+            waiters[id] = continuation
+        }
+
+        func leave(_ id: Int) {
+            guard let continuation = waiters.removeValue(forKey: id) else {
+                return
+            }
+            continuation.resume(throwing: CancellationError())
+            guard waiters.isEmpty else {
+                return
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard self.waiters.isEmpty, !self.finished else {
+                    return
+                }
+                self.task?.cancel()
+                self.forget()
+            }
+        }
+
+        private func finish(_ result: Result<Data, Error>) {
+            finished = true
+            forget()
+            let waiting = waiters
+            waiters = [:]
+            for continuation in waiting.values {
+                continuation.resume(with: result)
+            }
+        }
+
+        private func forget() {
+            if NativeUIRemoteImageCache.downloads[url] === self {
+                NativeUIRemoteImageCache.downloads[url] = nil
+            }
+        }
+    }
+}
+
+/// A remote image drawn through `NativeUIRemoteImageCache`. Callers get an
+/// `AsyncImagePhase`, as they did from `AsyncImage`: `.empty` while it
+/// loads, `.success` with the image, `.failure` once it has run out of tries.
+/// An image already in memory draws on the first frame, so a row scrolled
+/// back on screen or a screen popped back to doesn't flash its placeholder.
+///
+/// The image is decoded at the size this view is laid out at, measured the
+/// way `NativeUILocalImage` measures it. `fullSize` decodes the whole image
+/// instead, for an image drawn at its own size (`object-none`).
+///
+/// A failed download is tried again after 0.5 s and then 1.5 s. After that
+/// the image stays failed until it next comes on screen. A load cancelled
+/// because this view went away or changed its request isn't tried again
+/// from here: the view that replaces it starts its own, and joins the
+/// download if it's still running.
 struct NativeUIRemoteImage<Content: View>: View {
     // Computed: a generic type can't have a stored static.
     private static var retryDelays: [Duration] { [.milliseconds(500), .milliseconds(1500)] }
 
     private let url: URL
+    private let fullSize: Bool
     private let content: (AsyncImagePhase) -> Content
 
-    /// Changed to throw a failed `AsyncImage` away and start a new one.
-    @State private var attempt = 0
+    @Environment(\.displayScale) private var displayScale
 
-    /// Failed tries so far. Back to zero when the URL changes, or when an
-    /// image that has run out of tries goes off screen.
-    @State private var failures = 0
+    /// What the last load gave, held so an image the cache drops while it's
+    /// on screen keeps drawing.
+    @State private var loaded: (url: URL, image: UIImage)?
 
-    init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+    /// The error once the image has run out of tries.
+    @State private var failure: (url: URL, error: Error)?
+
+    /// Laid-out size in points. Zero until the first layout.
+    @State private var size: CGSize = .zero
+
+    init(url: URL, fullSize: Bool = false, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
         self.url = url
+        self.fullSize = fullSize
         self.content = content
     }
 
     var body: some View {
-        AsyncImage(url: url) { phase in
-            if case .failure(let error) = phase {
-                if Self.isCancellation(error) {
-                    content(.empty).task { attempt += 1 }
-                } else if failures < Self.retryDelays.count {
-                    content(.empty).task {
-                        try? await Task.sleep(for: Self.retryDelays[failures])
-                        if !Task.isCancelled {
-                            failures += 1
-                            attempt += 1
-                        }
+        let request = Request(url: url, size: fullSize ? CGSize(width: CGFloat.infinity, height: .infinity) : size, scale: displayScale)
+
+        // A ZStack rather than a Group: a Group would hand `.task` to each
+        // branch, so swapping in the image would start a second load.
+        ZStack {
+            content(phase(filling: request.pixels))
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        .task(id: request) {
+            // Nothing to fill before the first layout.
+            guard request.pixels.width > 0 || request.pixels.height > 0 else {
+                return
+            }
+            failure = nil
+            var failures = 0
+            while !Task.isCancelled {
+                do {
+                    let image = try await NativeUIRemoteImageCache.load(url, filling: request.pixels)
+                    if !Task.isCancelled, image !== held {
+                        loaded = (url, image)
                     }
-                } else {
-                    content(phase).onDisappear { failures = 0 }
+
+                    return
+                } catch {
+                    if Task.isCancelled {
+                        return
+                    }
+                    if failures == Self.retryDelays.count {
+                        failure = (url, error)
+
+                        return
+                    }
+                    try? await Task.sleep(for: Self.retryDelays[failures])
+                    failures += 1
                 }
-            } else {
-                content(phase)
             }
         }
-        .id(attempt)
-        .onChange(of: url) { failures = 0 }
     }
 
-    private static func isCancellation(_ error: Error) -> Bool {
-        error is CancellationError || (error as? URLError)?.code == .cancelled
+    private func phase(filling pixels: CGSize) -> AsyncImagePhase {
+        let cached = NativeUIRemoteImageCache.image(for: url, filling: pixels)
+        let image: UIImage?
+        if let cached, Self.fills(cached, pixels) {
+            image = cached
+        } else {
+            image = held ?? cached
+        }
+        if let image {
+            return .success(Image(uiImage: image))
+        }
+        if let failure, failure.url == url {
+            return .failure(failure.error)
+        }
+
+        return .empty
+    }
+
+    private static func fills(_ image: UIImage, _ pixels: CGSize) -> Bool {
+        image.size.width * image.scale + 1 >= pixels.width && image.size.height * image.scale + 1 >= pixels.height
+    }
+
+    /// The URL and the pixels it has to fill. Whole pixels, so a size that
+    /// moves by a fraction of one doesn't start another load.
+    private struct Request: Equatable {
+        let url: URL
+        let pixels: CGSize
+
+        init(url: URL, size: CGSize, scale: CGFloat) {
+            self.url = url
+            self.pixels = CGSize(width: (size.width * scale).rounded(.up), height: (size.height * scale).rounded(.up))
+        }
+    }
+
+    private var held: UIImage? {
+        loaded?.url == url ? loaded?.image : nil
     }
 }
 

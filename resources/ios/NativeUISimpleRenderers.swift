@@ -216,9 +216,11 @@ struct NativeUIImageRenderer: View {
                 Color.clear
             }
         case .remote(let url):
-            // Remote URL (http/https) — load asynchronously, and try again
-            // if the download fails.
-            NativeUIRemoteImage(url: url) { phase in
+            // Remote URL (http/https) — downloaded through an HTTP cache,
+            // decoded off the main thread at the size it's drawn, and tried
+            // again if the download fails. None draws the image at its own
+            // size, so it needs the whole image.
+            NativeUIRemoteImage(url: url, fullSize: fit == .none) { phase in
                 switch phase {
                 case .success(let image):
                     tinted(image, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius, ref: ref)

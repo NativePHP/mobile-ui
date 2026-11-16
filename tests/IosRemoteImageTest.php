@@ -8,26 +8,47 @@ it('loads every remote image through NativeUIRemoteImage', function () use ($ios
         $uses += preg_match_all('/\bAsyncImage\(url:/', file_get_contents($file));
     }
 
-    // The one AsyncImage left is the one inside NativeUIRemoteImage.
-    expect($uses)->toBe(1)
+    // No plain AsyncImage: it uses the small shared URLCache and decodes at full size.
+    expect($uses)->toBe(0)
         ->and(file_get_contents($ios.'/NativeUIImageSource.swift'))->toContain('NativeUIRemoteImage(url: url) { phase in')
-        ->and(file_get_contents($ios.'/NativeUISimpleRenderers.swift'))->toContain('NativeUIRemoteImage(url: url) { phase in')
+        ->and(file_get_contents($ios.'/NativeUISimpleRenderers.swift'))->toContain('NativeUIRemoteImage(url: url, fullSize: fit == .none) { phase in')
         ->and(file_get_contents($ios.'/NativeUIPagerRenderer.swift'))->toContain('NativeUIRemoteImage(url: url) { phase in');
 });
 
-it('tries a failed download again with a new AsyncImage', function () use ($ios) {
+it('downloads through its own session with a sized URLCache that follows HTTP caching', function () use ($ios) {
     expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('configuration.urlCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024, directory: directory)')
+        ->toContain('configuration.requestCachePolicy = .useProtocolCachePolicy')
+        ->toContain('try await session.data(from: url)');
+});
+
+it('shares one download per URL and cancels it only when nobody is waiting', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('@MainActor private static var downloads: [URL: Download] = [:]')
+        ->toContain('guard self.waiters.isEmpty, !self.finished else {')
+        ->toContain('self.task?.cancel()');
+});
+
+it('keeps decoded remote images in a cost-limited cache keyed by URL and pixel size', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('private static let cache: NSCache<NSString, Entry>')
+        ->toContain('"\(url.absoluteString)#\(Int(size.width))x\(Int(size.height))" as NSString')
+        ->toContain('cache.setObject(entry, forKey: cacheKey(url, size), cost: entry.cost)');
+});
+
+it('thumbnails with ImageIO only when the source is well over the drawn size', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('if fill < 1 / 1.5 {')
+        ->toContain('kCGImageSourceCreateThumbnailFromImageAlways: true')
+        ->toContain('kCGImageSourceShouldCacheImmediately: true')
+        ->toContain('CGImageSourceCreateThumbnailAtIndex(source, 0, options)');
+});
+
+it('tries a failed download again after a delay, but not a cancelled one', function () use ($ios) {
+    $source = file_get_contents($ios.'/NativeUIImageSource.swift');
+
+    expect($source)
         ->toContain('private static var retryDelays: [Duration] { [.milliseconds(500), .milliseconds(1500)] }')
-        ->toContain('.id(attempt)');
-});
-
-it('starts a cancelled download again without counting it as a failure', function () use ($ios) {
-    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
-        ->toContain('if Self.isCancellation(error) {')
-        ->toContain('content(.empty).task { attempt += 1 }');
-});
-
-it('lets an image that ran out of tries load again when it next comes on screen', function () use ($ios) {
-    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
-        ->toContain('content(phase).onDisappear { failures = 0 }');
+        ->toContain('try? await Task.sleep(for: Self.retryDelays[failures])')
+        ->not->toContain('content(.empty).task { attempt += 1 }');
 });
