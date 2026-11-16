@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -214,6 +215,12 @@ object BottomNavRenderer {
                         .padding(vertical = 8.dp)
                         .let { m ->
                             if (!showLabel && label.isNotEmpty()) m.semantics { contentDescription = label } else m
+                        }
+                        // PHP `ref` → testTag, seen by UiAutomator / Maestro as
+                        // the resource-id (core sets testTagsAsResourceId).
+                        .let { m ->
+                            val ref = item.props.getString("ref", "")
+                            if (ref.isNotEmpty()) m.semantics { testTag = ref } else m
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {

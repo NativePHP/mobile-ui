@@ -196,6 +196,8 @@ struct NativeUIBottomNavRenderer: View {
                 // visible text, and expose the active state to VoiceOver.
                 .modifier(A11yLabelModifier(label: label))
                 .accessibilityAddTraits(active ? .isSelected : [])
+                // PHP `ref` → accessibility identifier for XCUITest.
+                .accessibilityIdentifier(item.props.getString("ref", default: ""))
             }
         }
         .frame(maxWidth: .infinity)
