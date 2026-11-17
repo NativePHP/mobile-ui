@@ -140,8 +140,8 @@ it('drives the iOS tab row from the pager position, not PHP', function () {
 
     expect($source)
         // The unrounded position, written every frame into an observable only the row reads.
-        ->toContain('.onScrollGeometryChange(for: CGFloat?.self)')
-        ->toContain('progress.value = value')
+        ->toContain('.onScrollGeometryChange(for: PagerPosition?.self)')
+        ->toContain('progress.value = value.pages')
         ->toContain('@Observable')
         // Highlight: the nearest page. Indicator: between the labels either side.
         ->toContain('Int(progress.value.rounded())')
@@ -156,7 +156,7 @@ it('scrolls the iOS pager on a tab tap and sends a reselect to PHP', function ()
     $source = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIPagerRenderer.swift');
 
     expect($source)
-        ->toMatch('/if index == leading, abs\(progress\.value - CGFloat\(index\)\) < 0\.01 \{\s*if let cb = tabs\?\.reselectCbId, cb != 0 \{\s*NativeElementBridge\.sendTabChangeEvent\(cb, nodeId: nodeId, index: index\)/')
+        ->toMatch('/if index == leading, abs\(progress\.value - CGFloat\(index\)\) < 0\.01, resume\.position\?\.isOn\(index\) == true \{\s*resume\.settled\(\)\s*if let cb = tabs\?\.reselectCbId, cb != 0 \{\s*NativeElementBridge\.sendTabChangeEvent\(cb, nodeId: nodeId, index: index\)/')
         ->toContain('withAnimation { position = index }');
 });
 
