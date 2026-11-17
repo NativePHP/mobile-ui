@@ -197,6 +197,11 @@ private struct PagerBody: View {
                     .scrollTargetLayout()
             }
             .ignoresSafeArea(.container, edges: horizontal ? .bottom : [])
+            // Beside a sideways bar (an iPhone Duo's rail) the ScrollView
+            // also draws into the bar's inset, so the next page showed
+            // under it. Clip the sides only: the pages still run under a
+            // bar at the bottom.
+            .clipShape(PagerSideClip(horizontal: horizontal))
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: $position)
             // On a non-lazy stack SwiftUI ignores the initial value of
@@ -207,14 +212,16 @@ private struct PagerBody: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
             .contentMargins(0)
-            // `visibleRect` is inset-adjusted: its origin is 0 on page 0
-            // and its length is the viewport, whatever the bar insets are.
+            // `visibleRect` is inset-adjusted: its origin is 0 on page 0.
+            // Its width is not a page, though: beside a sideways bar it
+            // takes in the bar's inset too, so horizontally a page is the
+            // ScrollView's own width, which `.paging` steps by.
             // Before the first layout the pager has no size. That is no
             // page yet, not page 0: reported as page 0, PHP would think the
             // user had left the start page.
             .onScrollGeometryChange(for: Int?.self) { geometry in
                 let visible = geometry.visibleRect
-                let length = horizontal ? visible.width : visible.height
+                let length = horizontal ? geometry.bounds.width : visible.height
                 guard length > 0, count > 0 else { return nil }
                 let offset = horizontal ? visible.minX : visible.minY
                 return min(count - 1, max(0, Int((offset / length).rounded())))
@@ -236,7 +243,7 @@ private struct PagerBody: View {
             // pager has a size, so the row doesn't flash the first tab.
             .onScrollGeometryChange(for: CGFloat?.self) { geometry in
                 let visible = geometry.visibleRect
-                let length = horizontal ? visible.width : visible.height
+                let length = horizontal ? geometry.bounds.width : visible.height
                 guard length > 0 else { return nil }
                 return (horizontal ? visible.minX : visible.minY) / length
             } action: { _, value in
@@ -503,6 +510,7 @@ private struct PagerTabStrip: View {
                     row(theme)
                         .padding(.horizontal, tabs.edgePadding)
                 }
+                .clipShape(PagerSideClip(horizontal: true))
                 .scrollIndicators(.hidden)
                 .scrollPosition($rowPosition)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewportWidth = $0 }
@@ -1015,5 +1023,18 @@ private struct PagerHeaderScrollViewFinder: UIViewRepresentable {
                 view = current.superview
             }
         }
+    }
+}
+
+/// Clips a horizontal pager at its sides only, leaving a page's height of
+/// room above and below, so its pages can still draw under a bar at the
+/// bottom. A vertical pager gets that much room on every side as well.
+private struct PagerSideClip: Shape {
+    let horizontal: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(horizontal
+            ? rect.insetBy(dx: 0, dy: -rect.height)
+            : rect.insetBy(dx: -rect.width, dy: -rect.height))
     }
 }

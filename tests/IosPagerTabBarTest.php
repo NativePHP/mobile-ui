@@ -14,3 +14,12 @@ it('gives the bar inset back to the page content as safe area', function () {
 
     expect($source)->toMatch('/\.safeAreaPadding\(\.bottom, bottomInset\)\s*\.frame\(width: size\.width, height: size\.height\)\s*\.clipped\(\)/');
 });
+
+it('pages a horizontal pager by its own width and clips its sides beside a sideways bar', function () {
+    $source = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIPagerRenderer.swift');
+
+    expect($source)
+        ->toContain('let length = horizontal ? geometry.bounds.width : visible.height')
+        ->toContain('.clipShape(PagerSideClip(horizontal: horizontal))')
+        ->toContain('.clipShape(PagerSideClip(horizontal: true))');
+});
