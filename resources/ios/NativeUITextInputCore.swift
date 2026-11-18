@@ -91,6 +91,10 @@ struct NativeUITextInputCore: View {
     // `NativeUIFocusRegistry`); nil when the element carries no ref.
     @State private var focusRegistryToken: UUID? = nil
 
+    // What the UITextView behind a multiline field says about its text,
+    // which sizes the field (see NativeUITextEditorSizer).
+    @State private var editorSize = NativeUITextEditorSize()
+
     // Stable identity of this field's claim on the shared keyboard
     // accessory bar (pad keyboards only — see NativeUIKeyboardAccessoryBar).
     @State private var accessoryToken = UUID()
@@ -284,52 +288,45 @@ struct NativeUITextInputCore: View {
                 // (developer.apple.com/forums/thread/760511). TextEditor's
                 // return key inserts a line break on every keyboard.
                 //
-                // The invisible Text mirror re-creates the auto-growing
-                // `lineLimit(min...max)` window the vertical TextField had:
-                // it sizes the branch (the trailing space keeps a just-typed
-                // empty last line measurable — Text collapses a trailing
-                // newline on its own), and the editor fills the overlay.
+                // The editor is sized by the UITextView behind it (see
+                // NativeUITextEditorSizer): as tall as its own text, in whole
+                // lines of its own line height, from min-lines up to
+                // max-lines, and then it scrolls. An invisible Text mirror
+                // used to size it, but Text and UITextView lay a custom
+                // font's lines out at different heights, so the cap was never
+                // a whole number of the editor's lines. Past max-lines the
+                // editor scrolled the caret line to the bottom of a frame
+                // that held, say, 5.4 lines, and the top line showed cut in
+                // half (more or less, depending on the Dynamic Type size).
+                // The text view's own insets are taken off as well, so
+                // nothing it scrolls is drawn outside the frame.
                 let lower = max(minLines, 1)
                 let upper = maxLines > 0 ? max(maxLines, lower) : max(5, lower)
-                Text(text + " ")
-                    .lineLimit(lower...upper)
-                    .opacity(0)
-                    // Sizing-only: without this VoiceOver reads the typed
-                    // text twice (mirror + editor).
-                    .accessibilityHidden(true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay {
-                        Group {
-                            // The iOS 18 `selection:` binding exists on
-                            // TextEditor too. Parallel branches so the
-                            // feature-off path carries no selection state.
-                            if selectionBound {
-                                TextEditor(text: $text, selection: $selection)
-                            } else {
-                                TextEditor(text: $text)
-                            }
-                        }
-                        // Let the variant chrome paint the background.
-                        .scrollContentBackground(.hidden)
-                        .foregroundColor(contentColor)
-                        // Pull back UITextView's internal text-container
-                        // padding (5pt line-fragment + ~8pt vertical inset)
-                        // so the typed text lines up with the single-line
-                        // variants inside the same chrome — and with the
-                        // sizing mirror above.
-                        .padding(.horizontal, -5)
-                        .padding(.vertical, -8)
-                        .focused($isFocused)
+                Group {
+                    // The iOS 18 `selection:` binding exists on
+                    // TextEditor too. Parallel branches so the
+                    // feature-off path carries no selection state.
+                    if selectionBound {
+                        TextEditor(text: $text, selection: $selection)
+                    } else {
+                        TextEditor(text: $text)
                     }
-                    .overlay(alignment: .topLeading) {
-                        // TextEditor has no placeholder slot. Match the prompt
-                        // used by the single-line and secure fields.
-                        if text.isEmpty && !placeholder.isEmpty {
-                            Text(placeholder)
-                                .foregroundStyle(resolvedPlaceholderColor)
-                                .allowsHitTesting(false)
-                        }
+                }
+                // Let the variant chrome paint the background.
+                .scrollContentBackground(.hidden)
+                .foregroundColor(contentColor)
+                .frame(height: editorSize.height(minLines: lower, maxLines: upper, fallbackLineHeight: textSize * 1.3))
+                .background(NativeUITextEditorSizer(size: $editorSize))
+                .focused($isFocused)
+                .overlay(alignment: .topLeading) {
+                    // TextEditor has no placeholder slot. Match the prompt
+                    // used by the single-line and secure fields.
+                    if text.isEmpty && !placeholder.isEmpty {
+                        Text(placeholder)
+                            .foregroundStyle(resolvedPlaceholderColor)
+                            .allowsHitTesting(false)
                     }
+                }
             } else {
                 if selectionBound {
                     TextField(placeholder, text: $text, selection: $selection, prompt: prompt)
@@ -1078,6 +1075,127 @@ private struct RevealToggleModifier: ViewModifier {
             }
         } else {
             content
+        }
+    }
+}
+
+/// What the UITextView behind a multiline field reports about its text: how
+/// tall it is, and the height of one of its lines.
+struct NativeUITextEditorSize: Equatable {
+    var contentHeight: CGFloat = 0
+    var lineHeight: CGFloat = 0
+    var lineSpacing: CGFloat = 0
+
+    /// The field's height: its text's lines, at least `minLines` and at most
+    /// `maxLines`, each the text view's own line height. Before the text view
+    /// has reported, `minLines` of an estimated line.
+    func height(minLines: Int, maxLines: Int, fallbackLineHeight: CGFloat) -> CGFloat {
+        guard lineHeight > 0 else {
+            return CGFloat(minLines) * fallbackLineHeight
+        }
+
+        let step = lineHeight + lineSpacing
+        let lines = Int(((contentHeight + lineSpacing) / step).rounded())
+        let shown = CGFloat(min(max(lines, minLines), maxLines))
+
+        return shown * lineHeight + (shown - 1) * lineSpacing
+    }
+}
+
+/// Finds the UITextView behind a multiline field's TextEditor, takes its text
+/// container insets off, and reports its content height and line height
+/// whenever they change, so the field is sized by the view that draws its
+/// text rather than by a guess at it. It sits in the editor's `.background`,
+/// so it has the editor's frame, and the text view is the one under its
+/// centre.
+struct NativeUITextEditorSizer: UIViewRepresentable {
+    @Binding var size: NativeUITextEditorSize
+
+    func makeUIView(context: Context) -> Probe {
+        let probe = Probe()
+        probe.isUserInteractionEnabled = false
+        probe.report = { new in if size != new { size = new } }
+        return probe
+    }
+
+    func updateUIView(_ probe: Probe, context: Context) {
+        probe.report = { new in if size != new { size = new } }
+        DispatchQueue.main.async { probe.hook() }
+    }
+
+    final class Probe: UIView {
+        var report: ((NativeUITextEditorSize) -> Void)?
+        private weak var textView: UITextView?
+        private var observation: NSKeyValueObservation?
+        private var lastSize: CGSize = .zero
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // Matching by frame finds nothing before there is one.
+            if textView == nil {
+                DispatchQueue.main.async { [weak self] in self?.hook() }
+            } else if bounds.size != lastSize, let tv = textView, tv.isFirstResponder {
+                // The field changes height a moment after its text does. When
+                // the text shrinks (a smaller text size, say), the text view
+                // has already pulled its scroll back to fit the old height,
+                // which leaves the caret's line below the new one.
+                DispatchQueue.main.async { tv.scrollRangeToVisible(tv.selectedRange) }
+            }
+            lastSize = bounds.size
+        }
+
+        func hook() {
+            guard window != nil, let tv = findTextView() else { return }
+
+            if textView !== tv {
+                textView = tv
+                observation = tv.observe(\.contentSize, options: [.new]) { [weak self] tv, _ in
+                    DispatchQueue.main.async { self?.send(tv) }
+                }
+            }
+
+            send(tv)
+        }
+
+        /// SwiftUI can put the insets back when it updates the editor, so
+        /// they come off again before every report.
+        private func send(_ tv: UITextView) {
+            if tv.textContainerInset != .zero {
+                tv.textContainerInset = .zero
+            }
+            if tv.textContainer.lineFragmentPadding != 0 {
+                tv.textContainer.lineFragmentPadding = 0
+            }
+
+            // The typing font, which SwiftUI sets even while the field is
+            // empty and `font` has nothing to report, so the field doesn't
+            // change height as the first character goes in.
+            let font = (tv.typingAttributes[.font] as? UIFont) ?? tv.font ?? UIFont.preferredFont(forTextStyle: .body)
+            let spacing = (tv.typingAttributes[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing ?? 0
+
+            report?(NativeUITextEditorSize(contentHeight: tv.contentSize.height, lineHeight: font.lineHeight, lineSpacing: spacing))
+        }
+
+        private func findTextView() -> UITextView? {
+            let frame = convert(bounds, to: nil)
+            let centre = CGPoint(x: frame.midX, y: frame.midY)
+            var ancestor = superview
+            for _ in 0..<6 {
+                guard let a = ancestor else { return nil }
+                if let tv = Self.textView(in: a, under: centre) { return tv }
+                ancestor = a.superview
+            }
+            return nil
+        }
+
+        private static func textView(in view: UIView, under point: CGPoint) -> UITextView? {
+            if let tv = view as? UITextView {
+                return tv.convert(tv.bounds, to: nil).insetBy(dx: -1, dy: -1).contains(point) ? tv : nil
+            }
+            for sub in view.subviews {
+                if let tv = textView(in: sub, under: point) { return tv }
+            }
+            return nil
         }
     }
 }
