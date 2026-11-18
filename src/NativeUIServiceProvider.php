@@ -7,6 +7,7 @@ use Illuminate\View\View;
 use Native\Mobile\Edge\ChromeContributorRegistry;
 use Native\Mobile\Edge\Element;
 use Native\Mobile\Edge\Layouts\NativeLayout;
+use Native\Mobile\Edge\NativeElementCollector;
 use Native\Mobile\Edge\NativeComponent;
 use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\Testing\TestableComponent;
@@ -84,6 +85,13 @@ class NativeUIServiceProvider extends ServiceProvider
 
             return is_string($value) ? $value : null;
         });
+
+        // `<native:image revalidate>`: the image element lives in core, so
+        // its opt-out from the immutable remote image cache rides through as
+        // a captured attribute. The iOS image renderer reads the prop.
+        if (method_exists(NativeElementCollector::class, 'captureAttribute')) {
+            NativeElementCollector::captureAttribute('revalidate', 'revalidate');
+        }
 
         $this->registerLayoutDrawer();
         $this->registerFloatingOverlay();

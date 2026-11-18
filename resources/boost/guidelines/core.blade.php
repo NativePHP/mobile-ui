@@ -39,6 +39,14 @@ paths serialize to the same wire tree.
   `public/img/logo.png`. Unlike the web, a leading slash means a device
   filesystem path, NOT the public root: write `img/logo.png`, never
   `/img/logo.png`.
+- Remote images are cached on disk and a URL is treated as immutable: once
+  downloaded it's shown from the cache without asking the server again, even
+  after its `max-age` runs out (responses sent with `Cache-Control: no-store`
+  are never cached). If a URL's content changes, give it a new URL (add a
+  version or hash). Where you can't, add `revalidate` (`<native:image
+  src="…" revalidate />`, or `->setProp('revalidate', true)` on
+  `Image::make()`) to follow the server's HTTP caching for that image. iOS
+  only; Android's image cache already treats URLs as immutable and ignores it.
 - Text inputs also take `@selectionChange` for caret / selection reporting:
   the handler is called as `method(string $text, int $selectionStart, int
   $selectionEnd)` with offsets in Unicode code points (`start === end` for a
