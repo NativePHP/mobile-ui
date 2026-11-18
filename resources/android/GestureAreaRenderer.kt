@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -120,6 +121,20 @@ import kotlin.math.abs
  *   - `content-ratio`  (float) — the content's width over height,
  *                                fitted inside the area, for `bounded`
  *                                (0 = the content fills the area).
+ *   - `zoom-pan-x-id` /
+ *     `zoom-pan-y-id`  (int)   — the pan a zoom moves while no pan is
+ *                                bound (`-initial` seeds each): a pinch
+ *                                keeps the point between the fingers in
+ *                                place and a double tap aims at the
+ *                                tapped point, but one-finger drags are
+ *                                left to whatever is around the area. A
+ *                                bound pan takes their place.
+ *   - `double-tap-zoom` (float)— the scale a double tap zooms the pinch
+ *                                to from 1, bringing the tapped point to
+ *                                the middle as far as `bounded` allows; a
+ *                                double tap past 1 goes back to 1.
+ *                                Animated, then `on_pinch_end` reports
+ *                                the new scale.
  *
  * Per-frame value updates happen on the Compose render thread; PHP is
  * only involved on the discrete events.
@@ -139,6 +154,12 @@ object GestureAreaRenderer {
         val onPinchEnd = node.props.getInt("on_pinch_end", 0)
         val onSwipe = node.props.getInt("on_swipe", 0)
         val swipeFingers = node.props.getInt("swipe-fingers", 1)
+        val zoomPanXId = node.props.getInt("zoom-pan-x-id", 0)
+        val zoomPanYId = node.props.getInt("zoom-pan-y-id", 0)
+        val doubleTapZoom = node.props.getFloat("double-tap-zoom", 0f)
+        // The pan a zoom moves: the drag's own, or failing that the zoom's.
+        val zoomX = if (panXId != 0) panXId else zoomPanXId
+        val zoomY = if (panYId != 0) panYId else zoomPanYId
 
         // `bounded` only: the area's size in dp (pan values are dp), and the
         // two-finger state and spring back the drag and pinch share.
@@ -179,6 +200,8 @@ object GestureAreaRenderer {
         SyncBinding(panXId, panXInitial, if (snapX.isEmpty && triggerX.isEmpty) null else { value -> snapping.to(panXId, value, scope) })
         SyncBinding(panYId, panYInitial, if (snapY.isEmpty && triggerY.isEmpty) null else { value -> snapping.to(panYId, value, scope) })
         SyncBinding(pinchId, pinchInitial)
+        if (zoomPanXId != panXId) SyncBinding(zoomPanXId, node.props.getFloat("zoom-pan-x-initial", 0f))
+        if (zoomPanYId != panYId) SyncBinding(zoomPanYId, node.props.getFloat("zoom-pan-y-initial", 0f))
 
         Box(
             modifier = modifier
@@ -351,7 +374,7 @@ object GestureAreaRenderer {
                         }
                     }
                 }
-                .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax, bounds) {
+                .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax, bounds, zoomX, zoomY) {
                     if (pinchId == 0 && onPinchEnd == 0) return@pointerInput
                     awaitEachGesture {
                         // The zoom factor is dimensionless — no px/dp
@@ -399,13 +422,13 @@ object GestureAreaRenderer {
                                         val cy = centroid.y.toDp().value - bounds.area.height / 2
                                         val lastX = cx - move.x.toDp().value
                                         val lastY = cy - move.y.toDp().value
-                                        if (panXId != 0) {
-                                            val pan = SharedValueStore.valueOf(panXId)
-                                            SharedValueStore.set(panXId, cx - applied * (lastX - pan))
+                                        if (zoomX != 0) {
+                                            val pan = SharedValueStore.valueOf(zoomX)
+                                            SharedValueStore.set(zoomX, cx - applied * (lastX - pan))
                                         }
-                                        if (panYId != 0) {
-                                            val pan = SharedValueStore.valueOf(panYId)
-                                            SharedValueStore.set(panYId, cy - applied * (lastY - pan))
+                                        if (zoomY != 0) {
+                                            val pan = SharedValueStore.valueOf(zoomY)
+                                            SharedValueStore.set(zoomY, cy - applied * (lastY - pan))
                                         }
                                     }
                                 }
@@ -416,10 +439,52 @@ object GestureAreaRenderer {
                         }
                         settle.pinching = false
                         if ((zoomed || moved) && bounds.enabled) {
-                            settle.into(bounds, scope, panXId, panYId, pinchId)
+                            settle.into(bounds, scope, zoomX, zoomY, pinchId)
                         }
                         if (zoomed && onPinchEnd != 0) {
                             NativeUIBridge.sendSliderChangeEvent(onPinchEnd, node.id, scale)
+                        }
+                    }
+                }
+                .pointerInput(doubleTapZoom, pinchId, pinchMin, pinchMax, bounds, zoomX, zoomY, onPinchEnd) {
+                    if (doubleTapZoom <= 1f || pinchId == 0) return@pointerInput
+                    // Two taps close together in time and place. Nothing is
+                    // consumed, so a pinch, a pan, a pager or a drag to close
+                    // around the area work as before; a tap that moves past
+                    // touch slop isn't a tap, and leaves the drag to them.
+                    awaitEachGesture {
+                        val first = awaitTap(awaitFirstDown(requireUnconsumed = false)) ?: return@awaitEachGesture
+                        val second = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+                            awaitFirstDown(requireUnconsumed = false)
+                        } ?: return@awaitEachGesture
+                        if ((second.position - first).getDistance() > viewConfiguration.touchSlop * 4) return@awaitEachGesture
+                        val at = awaitTap(second) ?: return@awaitEachGesture
+                        // Zoom as on iOS: from 1, to the double-tap zoom with
+                        // the tapped point brought to the middle as far as the
+                        // bounds let the pan go; past 1, back to 1 and the
+                        // middle. A point at c from the middle shows the
+                        // content point (c - pan) / scale, which sits in the
+                        // middle once the pan is -zoom times it.
+                        val scale = SharedValueStore.valueOf(pinchId)
+                        val panX = if (zoomX != 0) SharedValueStore.valueOf(zoomX) else 0f
+                        val panY = if (zoomY != 0) SharedValueStore.valueOf(zoomY) else 0f
+                        val zoomedIn = scale > 1.01f
+                        var target = if (zoomedIn) 1f else doubleTapZoom
+                        if (pinchMin > 0f) target = maxOf(pinchMin, target)
+                        if (pinchMax > 0f) target = minOf(pinchMax, target)
+                        var toX = 0f
+                        var toY = 0f
+                        if (!zoomedIn && scale > 0f) {
+                            val pointX = (at.x.toDp().value - bounds.area.width / 2 - panX) / scale
+                            val pointY = (at.y.toDp().value - bounds.area.height / 2 - panY) / scale
+                            toX = bounds.settled(-target * pointX, horizontal = true, scale = target)
+                            toY = bounds.settled(-target * pointY, horizontal = false, scale = target)
+                        }
+                        val zoomTo = target
+                        settle.zoom(scope, listOf(Triple(pinchId, scale, zoomTo), Triple(zoomX, panX, toX), Triple(zoomY, panY, toY))) {
+                            if (onPinchEnd != 0) {
+                                NativeUIBridge.sendSliderChangeEvent(onPinchEnd, node.id, zoomTo)
+                            }
                         }
                     }
                 }
@@ -508,6 +573,21 @@ object GestureAreaRenderer {
             node.children.forEach { child ->
                 NodeView(node = child)
             }
+        }
+    }
+
+    /**
+     * Follows a press to its release and says where it lifted, or null when
+     * it wasn't a tap: it moved past touch slop, or a second finger came down.
+     */
+    private suspend fun AwaitPointerEventScope.awaitTap(down: PointerInputChange): Offset? {
+        val slop = viewConfiguration.touchSlop
+        while (true) {
+            val event = awaitPointerEvent()
+            if (event.changes.count { it.pressed } > 1) return null
+            val change = event.changes.firstOrNull { it.id == down.id } ?: return null
+            if ((change.position - down.position).getDistance() > slop) return null
+            if (!change.pressed) return change.position
         }
     }
 
@@ -646,6 +726,25 @@ object GestureAreaRenderer {
         fun stop() {
             job?.cancel()
             job = null
+        }
+
+        /**
+         * Animates a double tap's zoom: each (id, from, to) in step, then
+         * [landed]. A pinch or a drag stopping it first means it never lands.
+         */
+        fun zoom(scope: CoroutineScope, moves: List<Triple<Int, Float, Float>>, landed: () -> Unit) {
+            stop()
+            val moving = moves.filter { (id, from, to) -> id != 0 && abs(to - from) > 0.01f }
+            if (moving.isEmpty()) {
+                landed()
+                return
+            }
+            job = scope.launch {
+                animate(0f, 1f, animationSpec = tween(SettleMillis, easing = EaseOutCubic)) { progress, _ ->
+                    moving.forEach { (id, from, to) -> SharedValueStore.set(id, from + (to - from) * progress) }
+                }
+                landed()
+            }
         }
 
         /**

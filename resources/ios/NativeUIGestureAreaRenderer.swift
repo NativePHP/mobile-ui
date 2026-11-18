@@ -73,6 +73,20 @@ import UIKit
 ///   - `content-ratio`  (float) — the content's width over height,
 ///                                fitted inside the area, for `bounded`
 ///                                (0 = the content fills the area).
+///   - `zoom-pan-x-id` /
+///     `zoom-pan-y-id`  (int)   — the pan a zoom moves while no pan is
+///                                bound (`-initial` seeds each): a pinch
+///                                keeps the point between the fingers in
+///                                place and a double tap aims at the
+///                                tapped point, but one-finger drags are
+///                                left to whatever is around the area.
+///                                A bound pan takes their place.
+///   - `double-tap-zoom` (float)— the scale a double tap zooms the pinch
+///                                to from 1, bringing the tapped point
+///                                to the middle as far as `bounded`
+///                                allows; a double tap past 1 goes back
+///                                to 1. Animated, then `on_pinch_end`
+///                                reports the new scale.
 ///
 /// On gesture end, each anchor is reset so subsequent gestures continue
 /// from the current value rather than snapping back.
@@ -124,6 +138,12 @@ struct NativeUIGestureAreaRenderer: View {
         let triggerX = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-x-trigger", default: 0)))
         let triggerY = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-y-trigger", default: 0)))
         let onTrigger = node.props.getInt("on_trigger", default: 0)
+        let zoomPanXInitial = CGFloat(node.props.getFloat("zoom-pan-x-initial", default: 0))
+        let zoomPanYInitial = CGFloat(node.props.getFloat("zoom-pan-y-initial", default: 0))
+        let doubleTapZoom = CGFloat(node.props.getFloat("double-tap-zoom", default: 0))
+        // The pan a zoom moves: the drag's own, or failing that the zoom's.
+        let zoomX = panXId != 0 ? panXId : node.props.getInt("zoom-pan-x-id", default: 0)
+        let zoomY = panYId != 0 ? panYId : node.props.getInt("zoom-pan-y-id", default: 0)
         // One bound axis and nothing else moving the pan: a UIKit pan that
         // only takes drags along that axis, so an enclosing scroll view
         // keeps the other (see AxisPanRecognizer). SwiftUI's drag below
@@ -231,17 +251,23 @@ struct NativeUIGestureAreaRenderer: View {
             minScale: pinchMin,
             maxScale: pinchMax,
             bounds: bounds,
-            panXId: panXId,
-            panYId: panYId,
+            panXId: zoomX,
+            panYId: zoomY,
             onBoundedBegin: {
                 settle.stop()
                 pinching = true
             },
             onBoundedEnd: {
                 pinching = false
-                settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+                settleIntoBounds(panXId: zoomX, panYId: zoomY, pinchId: pinchId, bounds: bounds)
             }
         ))
+        .modifier(DoubleTapModifier(enabled: doubleTapZoom > 1 && pinchId != 0) { location in
+            zoomOnDoubleTap(
+                at: location, to: doubleTapZoom, pinchId: pinchId, panXId: zoomX, panYId: zoomY,
+                minScale: pinchMin, maxScale: pinchMax, bounds: bounds, onPinchEnd: onPinchEnd
+            )
+        })
         .modifier(SwipeModifier(
             nodeId: node.id,
             onSwipe: onSwipe,
@@ -251,6 +277,8 @@ struct NativeUIGestureAreaRenderer: View {
             seedPanX(panXId, initial: panXInitial)
             seedPan(panYId, initial: panYInitial)
             seedPinch(pinchId, initial: pinchInitial)
+            seedPinch(zoomX, initial: zoomX == panXId ? panXInitial : zoomPanXInitial)
+            seedPinch(zoomY, initial: zoomY == panYId ? panYInitial : zoomPanYInitial)
         }
         // Two distinct re-publish situations to handle while this view
         // stays alive (onAppear won't re-fire):
@@ -276,6 +304,12 @@ struct NativeUIGestureAreaRenderer: View {
         }
         .onChange(of: pinchId) { _, newId in
             seedPinch(newId, initial: pinchInitial)
+        }
+        .onChange(of: zoomX) { _, newId in
+            seedPinch(newId, initial: newId == panXId ? panXInitial : zoomPanXInitial)
+        }
+        .onChange(of: zoomY) { _, newId in
+            seedPinch(newId, initial: newId == panYId ? panYInitial : zoomPanYInitial)
         }
         .onChange(of: panYInitial) { _, newInitial in
             guard panYId != 0 else { return }
@@ -309,6 +343,10 @@ struct NativeUIGestureAreaRenderer: View {
         // SwiftUI's drag follows one finger; while two are down the pinch
         // moves the pan with both of them.
         guard !pinching else { return }
+        // A finger that hasn't moved leaves whatever is moving the content
+        // alone: a tap is a drag that goes nowhere, and a double tap's zoom
+        // would otherwise stop as its second tap lifts.
+        guard step != .zero else { return }
         settle.stop()
         let scale = pinchId != 0 ? store.value(for: pinchId) : 1
         if panXId != 0 {
@@ -329,6 +367,48 @@ struct NativeUIGestureAreaRenderer: View {
         }
     }
 
+    /// A double tap: from 1, zoom to `zoom` with the tapped point brought
+    /// to the middle, as far as the bounds let the pan go; past 1, back to
+    /// 1 and the middle. A point at c from the area's middle shows the
+    /// content point (c - pan) / scale, which sits in the middle once the
+    /// pan is -zoom times it. Animated through the store like the spring
+    /// back, which a pinch or a drag stops, and reported as a pinch end
+    /// once it lands.
+    private func zoomOnDoubleTap(
+        at location: CGPoint, to zoom: CGFloat, pinchId: Int, panXId: Int, panYId: Int,
+        minScale: CGFloat, maxScale: CGFloat, bounds: NativeUIPanBounds, onPinchEnd: Int
+    ) {
+        let scale = store.value(for: pinchId)
+        let panX = panXId != 0 ? store.value(for: panXId) : 0
+        let panY = panYId != 0 ? store.value(for: panYId) : 0
+        let zoomedIn = scale > 1.01
+        var target = zoomedIn ? 1 : zoom
+        if minScale > 0 { target = max(minScale, target) }
+        if maxScale > 0 { target = min(maxScale, target) }
+        var toX: CGFloat = 0
+        var toY: CGFloat = 0
+        if !zoomedIn, scale > 0 {
+            let pointX = (location.x - areaSize.width / 2 - panX) / scale
+            let pointY = (location.y - areaSize.height / 2 - panY) / scale
+            toX = bounds.settled(-target * pointX, axis: .horizontal, scale: target)
+            toY = bounds.settled(-target * pointY, axis: .vertical, scale: target)
+        }
+        // A drag that isn't bounded carries on from where its last one
+        // ended, which is now where the zoom puts it.
+        if panXId != 0 { dragStartX = toX }
+        if panYId != 0 { dragStart = toY }
+        let nodeId = node.id
+        settle.run([
+            .init(id: pinchId, from: scale, to: target),
+            .init(id: panXId, from: panX, to: toX),
+            .init(id: panYId, from: panY, to: toY),
+        ]) {
+            if onPinchEnd != 0 {
+                NativeElementBridge.sendSliderChangeEvent(onPinchEnd, nodeId: nodeId, value: Float(target))
+            }
+        }
+    }
+
     /// Springs each bound axis back inside the bounds at the current zoom.
     private func settleIntoBounds(panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
         let scale = pinchId != 0 ? store.value(for: pinchId) : 1
@@ -341,6 +421,10 @@ struct NativeUIGestureAreaRenderer: View {
             let from = store.value(for: panYId)
             moves.append(.init(id: panYId, from: from, to: bounds.settled(from, axis: .vertical, scale: scale)))
         }
+        // Already in place: leave whatever is moving it alone. A tap ends a
+        // drag that went nowhere, and the second tap of a double tap would
+        // otherwise stop the zoom it just started.
+        guard moves.contains(where: { abs($0.to - $0.from) > 0.01 }) else { return }
         settle.run(moves)
     }
 
@@ -596,11 +680,17 @@ final class NativeUIPanSettle: NSObject {
     private var link: CADisplayLink?
     private var startedAt: CFTimeInterval = 0
     private var moves: [Move] = []
+    /// Run once the moves land; dropped if something stops them first.
+    private var landed: (() -> Void)?
 
-    func run(_ moves: [Move]) {
+    func run(_ moves: [Move], landed: (() -> Void)? = nil) {
         stop()
         self.moves = moves.filter { $0.id != 0 && abs($0.to - $0.from) > 0.01 }
-        guard !self.moves.isEmpty else { return }
+        guard !self.moves.isEmpty else {
+            landed?()
+            return
+        }
+        self.landed = landed
         startedAt = CACurrentMediaTime()
         let link = CADisplayLink(target: self, selector: #selector(step(_:)))
         link.add(to: .main, forMode: .common)
@@ -610,6 +700,7 @@ final class NativeUIPanSettle: NSObject {
     func stop() {
         link?.invalidate()
         link = nil
+        landed = nil
     }
 
     @objc private func step(_ link: CADisplayLink) {
@@ -620,7 +711,9 @@ final class NativeUIPanSettle: NSObject {
             SharedValueStore.shared.set(move.from + (move.to - move.from) * eased, for: move.id)
         }
         if progress >= 1 {
+            let landed = landed
             stop()
+            landed?()
         }
     }
 }
@@ -844,6 +937,27 @@ private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
                 responder = current.next
             }
             return nil
+        }
+    }
+}
+
+// MARK: - Double tap (conditional)
+
+/// A double tap that says where it landed, in the area's own space, when
+/// the area zooms on a double tap. Simultaneous, so a pinch, a pan, a
+/// pager or a drag to close around the area work as before; a tap moves
+/// nothing, so none of them start on it.
+private struct DoubleTapModifier: ViewModifier {
+    let enabled: Bool
+    let tapped: (CGPoint) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.simultaneousGesture(
+                SpatialTapGesture(count: 2).onEnded { tapped($0.location) }
+            )
+        } else {
+            content
         }
     }
 }
