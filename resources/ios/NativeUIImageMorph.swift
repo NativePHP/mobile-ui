@@ -99,7 +99,11 @@ struct NativeUIImageMorphReport: ViewModifier {
         } else {
             content
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
-                    NativeUIImageMorph.shared.report(ref, .init(rect: rect, image: image, radius: radius))
+                    // rounded-full sends a huge radius; past half the shorter
+                    // side it's a circle anyway, and a copy that shrinks from
+                    // one should start rounding off straight away.
+                    let rounded = min(radius, min(rect.width, rect.height) / 2)
+                    NativeUIImageMorph.shared.report(ref, .init(rect: rect, image: image, radius: rounded))
                 }
                 .onDisappear { NativeUIImageMorph.shared.forget(ref) }
         }

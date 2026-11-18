@@ -98,7 +98,11 @@ object NativeUIImageMorph {
         val metrics = Resources.getSystem().displayMetrics
         val screen = Rect(0f, 0f, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
         if (!rect.overlaps(screen)) return null
-        return Drawn(rect, image, source.radiusDp)
+        // rounded-full sends a huge radius; past half the shorter side it's a
+        // circle anyway, and a copy that shrinks from one should start
+        // rounding off straight away.
+        val radius = minOf(source.radiusDp, minOf(rect.width, rect.height) / 2f / metrics.density)
+        return Drawn(rect, image, radius)
     }
 
     /** Where `ref` is drawn, waiting a frame at a time up to [timeoutMillis] for it to load. */
