@@ -28,6 +28,7 @@ import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.RenderNode
 import com.nativephp.plugins.native_ui.NativeUITheme
+import kotlinx.coroutines.isActive
 
 /**
  * Material3 ModalBottomSheet. Visibility driven by `visible`; drag-down and
@@ -84,15 +85,30 @@ object BottomSheetRenderer {
         // Leaving composition the moment `visible` turns false would skip the
         // slide-down, so the sheet stays until hide() has played it out.
         var shown by remember { mutableStateOf(visible) }
+        // Shown again before hide() has played out, the sheet stays composed
+        // and the hide stops wherever it got to. ModalBottomSheet only plays
+        // show() when it first composes, so without this the sheet would stay
+        // down there, off screen, with its window still over the app.
+        var hiding by remember { mutableStateOf(false) }
         LaunchedEffect(visible) {
             if (visible) {
                 shown = true
+                if (hiding) {
+                    hiding = false
+                    sheetState.show()
+                }
             } else if (shown) {
-                // A drag or M3's own show() cancels hide(); the sheet still goes.
+                hiding = true
                 try {
                     if (!permanent) sheetState.hide()
                 } finally {
-                    shown = false
+                    // A drag or M3's own show() cancels hide(); the sheet still
+                    // goes. Being shown again cancels this effect instead, and
+                    // the effect that cancelled it brings the sheet back up.
+                    if (isActive) {
+                        hiding = false
+                        shown = false
+                    }
                 }
             }
         }

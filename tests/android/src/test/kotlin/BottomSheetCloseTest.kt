@@ -7,6 +7,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.nativephp.mobile.ui.nativerender.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -40,6 +42,22 @@ class BottomSheetCloseTest {
         compose.mainClock.advanceTimeBy(1000)
         compose.onNodeWithTag("node-2").assertDoesNotExist()
     }
+
+    @Test fun aSheetShownAgainWhileSlidingAwayComesBackUp() {
+        val openTop = sheetTop()
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { sheet.value = sheet(visible = false, detents = "large") }
+        advanceFrames(150)
+        assertTrue(sheetTop()!! > openTop!!)
+        compose.runOnIdle { sheet.value = sheet(visible = true, detents = "large") }
+        advanceFrames(2000)
+        assertEquals(openTop, sheetTop())
+    }
+
+    /** Steps the clock a frame at a time, reading the tree, so each frame's effects run before the next. */
+    private fun advanceFrames(millis: Long) = repeat((millis / 50).toInt()) { compose.mainClock.advanceTimeBy(50); sheetTop() }
+
+    private fun sheetTop(): Float? = compose.onAllNodesWithTag("node-2").fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top
 
     private fun sheet(visible: Boolean, detents: String) = NativeUINode(
         1, "bottom_sheet", null, null, GenericProps(mapOf("visible" to visible, "detents" to detents, "on_dismiss" to 9)), 0, 0,
