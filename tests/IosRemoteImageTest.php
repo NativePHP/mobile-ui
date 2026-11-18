@@ -43,17 +43,17 @@ it('shares one download per URL and cancels it only when nobody is waiting', fun
         ->toContain('self.task?.cancel()');
 });
 
-it('keeps no decoded remote images in memory beyond what each view shows', function () use ($ios) {
-    $source = file_get_contents($ios.'/NativeUIImageSource.swift');
-    $remote = substr($source, strpos($source, 'enum NativeUIRemoteImageCache'));
-
-    expect($remote)
-        ->not->toContain('NSCache')
-        ->not->toContain('totalCostLimit');
+it('keeps only a small cache of decoded remote images', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('private static let decodedCapacity = 4 * 1024 * 1024')
+        ->toContain('cache.totalCostLimit = decodedCapacity')
+        ->toContain('if entry.cost <= decodedCapacity / 2 {')
+        ->toContain('decoded.setObject(entry, forKey: url as NSURL, cost: entry.cost)');
 });
 
-it('empties the URLCache memory tier on a memory warning and in the background', function () use ($ios) {
+it('empties the decoded cache and the URLCache memory tier on a memory warning and in the background', function () use ($ios) {
     expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('decoded.removeAllObjects()')
         ->toContain('UIApplication.didReceiveMemoryWarningNotification,')
         ->toContain('UIApplication.didEnterBackgroundNotification,')
         ->toContain('urlCache.memoryCapacity = 0');

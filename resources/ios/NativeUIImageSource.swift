@@ -379,18 +379,31 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
 /// which goes through URLSession's normal policy: fresh entries come from
 /// disk, stale ones are revalidated or downloaded again.
 ///
-/// Decoding is off the main thread, at the size the image is drawn. There's
-/// no decoded-image cache here: each view holds the image it's showing, and
-/// one it rebuilds decodes again from the disk cache, which takes a few
-/// milliseconds. A 16 MB decoded cache cost about 30 MB of footprint on a
-/// measured shop journey and its second pass still missed it. The URLCache
-/// memory tier is emptied on a memory warning and when the app goes to the
-/// background.
+/// Decoding is off the main thread, at the size the image is drawn. Each
+/// view holds the image it's showing. Decoded images are otherwise kept only
+/// in a small cache (4 MB, the last few card-sized images), so a screen
+/// popped back to or a tab switched back to draws on its first frame rather
+/// than flashing its placeholder while it decodes again from disk. A 16 MB
+/// decoded cache cost about 30 MB of footprint on a measured shop journey,
+/// and its second pass still missed it. Both the decoded cache and the
+/// URLCache memory tier are emptied on a memory warning and when the app
+/// goes to the background.
 ///
 /// Every image waiting on the same URL shares one download, which is
 /// cancelled only when none of them is waiting any more.
 enum NativeUIRemoteImageCache {
     private static let memoryCapacity = 2 * 1024 * 1024
+
+    private static let decodedCapacity = 4 * 1024 * 1024
+
+    /// The last decode of each URL, costed by its decoded bytes.
+    private static let decoded: NSCache<NSURL, Decoded> = {
+        let cache = NSCache<NSURL, Decoded>()
+        cache.totalCostLimit = decodedCapacity
+        _ = trimmed
+
+        return cache
+    }()
 
     static let urlCache: URLCache = {
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -408,14 +421,16 @@ enum NativeUIRemoteImageCache {
         return URLSession(configuration: configuration)
     }()
 
-    /// Empties the URLCache memory tier on a memory warning and when the app
-    /// goes to the background. Setting the capacity to zero drops what's in
-    /// memory and leaves the disk alone. Set up once, with the session.
+    /// Empties the decoded cache and the URLCache memory tier on a memory
+    /// warning and when the app goes to the background. Setting the URLCache
+    /// capacity to zero drops what's in memory and leaves the disk alone.
+    /// Set up once, with whichever cache is used first.
     private static let trimmed: [NSObjectProtocol] = [
         UIApplication.didReceiveMemoryWarningNotification,
         UIApplication.didEnterBackgroundNotification,
     ].map { name in
         NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+            decoded.removeAllObjects()
             urlCache.memoryCapacity = 0
             urlCache.memoryCapacity = memoryCapacity
         }
@@ -425,7 +440,22 @@ enum NativeUIRemoteImageCache {
     @MainActor private static var downloads: [DownloadKey: Download] = [:]
 
     /// Decodes in progress, by URL and the size they fill.
-    @MainActor private static var decodes: [String: Task<UIImage?, Never>] = [:]
+    @MainActor private static var decodes: [String: Task<Decoded?, Never>] = [:]
+
+    /// The last decode of `url` still in memory, and whether it fills
+    /// `pixels` (zero before the first layout, which anything fills). Never
+    /// touches the disk or network.
+    @MainActor
+    static func image(for url: URL, filling pixels: CGSize) -> (image: UIImage, fills: Bool)? {
+        guard let entry = decoded.object(forKey: url as NSURL) else {
+            return nil
+        }
+        let fills = entry.isFullSize
+            || (pixels.width <= 0 && pixels.height <= 0)
+            || (entry.pixels.width + 1 >= pixels.width && entry.pixels.height + 1 >= pixels.height)
+
+        return (entry.image, fills)
+    }
 
     /// The image at `url`, decoded big enough to fill `pixels` (or at its own
     /// size, if that's smaller). `revalidate` follows the server's HTTP
@@ -444,15 +474,19 @@ enum NativeUIRemoteImageCache {
 
             return task
         }()
-        let image = await decode.value
+        let entry = await decode.value
         if decodes[key] == decode {
             decodes[key] = nil
         }
-        guard let image else {
+        guard let entry else {
             throw URLError(.cannotDecodeContentData)
         }
+        // A full-screen photo would push out every card the cache holds.
+        if entry.cost <= decodedCapacity / 2 {
+            decoded.setObject(entry, forKey: url as NSURL, cost: entry.cost)
+        }
 
-        return image
+        return entry.image
     }
 
     /// The bytes for `key`, through the shared download for it.
@@ -517,7 +551,7 @@ enum NativeUIRemoteImageCache {
     /// decoded. Either way it comes back already decoded, so drawing it on
     /// the main thread doesn't decode it there. Animated images give their
     /// first frame, as `AsyncImage` did.
-    nonisolated private static func decodeImage(_ data: Data, filling pixels: CGSize) -> UIImage? {
+    nonisolated private static func decodeImage(_ data: Data, filling pixels: CGSize) -> Decoded? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetCount(source) > 0 else {
             return nil
@@ -545,7 +579,7 @@ enum NativeUIRemoteImageCache {
                     // so an image laid out at its natural size doesn't move.
                     let scale = CGFloat(thumbnail.width) / oriented.width
 
-                    return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+                    return Decoded(image: UIImage(cgImage: thumbnail, scale: scale, orientation: .up), isFullSize: false)
                 }
             }
         }
@@ -554,7 +588,29 @@ enum NativeUIRemoteImageCache {
             return nil
         }
 
-        return image.preparingForDisplay() ?? image
+        return Decoded(image: image.preparingForDisplay() ?? image, isFullSize: true)
+    }
+
+    private final class Decoded: @unchecked Sendable {
+        let image: UIImage
+        /// Decoded at the image's own size, so there's nothing bigger to
+        /// decode.
+        let isFullSize: Bool
+
+        init(image: UIImage, isFullSize: Bool) {
+            self.image = image
+            self.isFullSize = isFullSize
+        }
+
+        /// Decoded size in pixels, oriented as drawn.
+        var pixels: CGSize {
+            CGSize(width: (image.size.width * image.scale).rounded(), height: (image.size.height * image.scale).rounded())
+        }
+
+        /// Decoded footprint, in bytes.
+        var cost: Int {
+            Int(pixels.width * pixels.height) * 4
+        }
     }
 
     /// A URL and how its cache is used. Strict and immutable loads of one URL
@@ -645,6 +701,7 @@ enum NativeUIRemoteImageCache {
 /// A remote image drawn through `NativeUIRemoteImageCache`. Callers get an
 /// `AsyncImagePhase`, as they did from `AsyncImage`: `.empty` while it
 /// loads, `.success` with the image, `.failure` once it has run out of tries.
+/// An image still in the small decoded cache draws on the first frame.
 ///
 /// The image is decoded at the size this view is laid out at, measured the
 /// way `NativeUILocalImage` measures it. `fullSize` decodes the whole image
@@ -698,8 +755,15 @@ struct NativeUIRemoteImage<Content: View>: View {
             guard request.pixels.width > 0 || request.pixels.height > 0 else {
                 return
             }
-            if let held, Self.fills(held, request.pixels) {
-                return
+            if !revalidate {
+                if let held, Self.fills(held, request.pixels) {
+                    return
+                }
+                if let cached = NativeUIRemoteImageCache.image(for: url, filling: request.pixels), cached.fills {
+                    loaded = (url, cached.image)
+
+                    return
+                }
             }
             failure = nil
             var failures = 0
@@ -727,9 +791,12 @@ struct NativeUIRemoteImage<Content: View>: View {
         }
     }
 
+    /// What this view holds, or else the last decode in memory, so a view
+    /// rebuilt on screen draws on its first frame. A strict (`revalidate`)
+    /// image still loads after showing it.
     private var phase: AsyncImagePhase {
-        if let held {
-            return .success(Image(uiImage: held))
+        if let image = held ?? NativeUIRemoteImageCache.image(for: url, filling: .zero)?.image {
+            return .success(Image(uiImage: image))
         }
         if let failure, failure.url == url {
             return .failure(failure.error)
