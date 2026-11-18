@@ -99,6 +99,16 @@ it('thumbnails with ImageIO only when the source is well over the drawn size', f
         ->toContain('CGImageSourceCreateThumbnailAtIndex(source, 0, options)');
 });
 
+it('leaves a full-size remote decode in ImageIO\'s purgeable cache', function () use ($ios) {
+    $source = file_get_contents($ios.'/NativeUIImageSource.swift');
+    $decode = substr($source, strpos($source, 'func decodeImage('), 4000);
+
+    expect($decode)
+        ->toContain('guard let image = CGImageSourceCreateImageAtIndex(source, 0, options) else {')
+        ->toContain('kCGImageSourceShouldCache: true,')
+        ->not->toContain('preparingForDisplay()');
+});
+
 it('tries a failed download again after a delay, but not a cancelled one', function () use ($ios) {
     $source = file_get_contents($ios.'/NativeUIImageSource.swift');
 

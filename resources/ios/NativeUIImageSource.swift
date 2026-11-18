@@ -379,8 +379,9 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
 /// which goes through URLSession's normal policy: fresh entries come from
 /// disk, stale ones are revalidated or downloaded again.
 ///
-/// Decoding is off the main thread, at the size the image is drawn. There's
-/// no decoded-image cache here: each view holds the image it's showing, and
+/// Decoding is off the main thread, at the size the image is drawn, and a
+/// full-size decode is left in ImageIO's purgeable cache (see `decodeImage`).
+/// There's no decoded-image cache here: each view holds the image it's showing, and
 /// one it rebuilds decodes again from the disk cache, which takes a few
 /// milliseconds. A 16 MB decoded cache cost about 30 MB of footprint on a
 /// measured shop journey and its second pass still missed it. The URLCache
@@ -517,19 +518,28 @@ enum NativeUIRemoteImageCache {
     /// decoded. Either way it comes back already decoded, so drawing it on
     /// the main thread doesn't decode it there. Animated images give their
     /// first frame, as `AsyncImage` did.
+    ///
+    /// A full decode stays in ImageIO's own cache, as it does for the lazy
+    /// image `AsyncImage` draws. That memory is purgeable: the system can take
+    /// it back, and it doesn't count toward the app's footprint. Core
+    /// Animation keeps its own copy of what it draws either way. Decoding
+    /// into a bitmap of our own (`preparingForDisplay()`) made the same pixels
+    /// dirty memory the app owns, about 38 MB more footprint on a shop's Home.
     nonisolated private static func decodeImage(_ data: Data, filling pixels: CGSize) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
               CGImageSourceGetCount(source) > 0 else {
             return nil
         }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)
+            .flatMap { CGImagePropertyOrientation(rawValue: $0.uint32Value) } ?? .up
 
-        if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+        if let properties,
            let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat($0.doubleValue) }),
            let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat($0.doubleValue) }),
            width > 0, height > 0 {
             // EXIF orientations 5 to 8 turn the image on its side.
-            let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-            let oriented = orientation >= 5 ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+            let oriented = orientation.rawValue >= 5 ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
             let fill = max(pixels.width / oriented.width, pixels.height / oriented.height)
 
             if fill < 1 / 1.5 {
@@ -550,11 +560,17 @@ enum NativeUIRemoteImageCache {
             }
         }
 
-        guard let image = UIImage(data: data) else {
+        // Decoded now, into ImageIO's cache, so drawing it doesn't wait.
+        let options = [
+            kCGImageSourceShouldCache: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, options) else {
             return nil
         }
 
-        return image.preparingForDisplay() ?? image
+        // One point per pixel, turned the way UIImage(data:) would turn it.
+        return UIImage(cgImage: image, scale: 1, orientation: UIImage.Orientation(orientation))
     }
 
     /// A URL and how its cache is used. Strict and immutable loads of one URL
@@ -797,6 +813,23 @@ struct NativeUIRowImage<Placeholder: View>: View {
             }
         case .unresolvable:
             placeholder()
+        }
+    }
+}
+
+private extension UIImage.Orientation {
+    /// The UIKit orientation for an EXIF one, as `UIImage(data:)` reads it.
+    init(_ exif: CGImagePropertyOrientation) {
+        switch exif {
+        case .up: self = .up
+        case .upMirrored: self = .upMirrored
+        case .down: self = .down
+        case .downMirrored: self = .downMirrored
+        case .leftMirrored: self = .leftMirrored
+        case .right: self = .right
+        case .rightMirrored: self = .rightMirrored
+        case .left: self = .left
+        @unknown default: self = .up
         }
     }
 }
