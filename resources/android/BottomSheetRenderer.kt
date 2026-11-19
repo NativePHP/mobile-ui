@@ -3,11 +3,15 @@ package com.nativephp.plugins.native_ui.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,8 +20,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import com.nativephp.mobile.ui.nativerender.NativeUIBridge
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.RenderNode
@@ -43,6 +49,8 @@ import com.nativephp.plugins.native_ui.NativeUITheme
  * content's height, capped below the status bar. M3's partial stop sits
  * at half the screen whatever the content, so the other detents listed
  * beside `fit` have nothing to snap to and are ignored.
+ *
+ * A `title` is Material heading text under the drag handle (`SheetHeading`).
  */
 object BottomSheetRenderer {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -51,7 +59,11 @@ object BottomSheetRenderer {
         val p = node.props
         val visible = p.getBool("visible")
         val onDismissCb = p.getCallbackId("on_dismiss")
-        val detentsStr = p.getString("detents", "medium,large")
+        // A closing sheet keeps the detents it opened with: new ones would get
+        // it a new SheetState, and ModalBottomSheet shows every new state.
+        val requestedDetents = p.getString("detents", "medium,large")
+        var detentsStr by remember { mutableStateOf(requestedDetents) }
+        if (visible) detentsStr = requestedDetents
         val a11yLabel = p.getString("a11y_label")
         // Counterpart of iOS `.interactiveDismissDisabled`: block drag-to-hide
         // and back-press, and swallow scrim-tap dismiss requests. NOTE:
@@ -60,6 +72,7 @@ object BottomSheetRenderer {
         // touches; a Maps-style pane over a live background is what
         // `sheet_pane` is for.
         val permanent = p.getBool("permanent")
+        val title = p.getString("title")
 
         val fits = hasDetent(detentsStr, "fit")
         val skipPartial = fits || !hasPartialDetent(detentsStr)
@@ -75,8 +88,12 @@ object BottomSheetRenderer {
             if (visible) {
                 shown = true
             } else if (shown) {
-                if (!permanent) sheetState.hide()
-                shown = false
+                // A drag or M3's own show() cancels hide(); the sheet still goes.
+                try {
+                    if (!permanent) sheetState.hide()
+                } finally {
+                    shown = false
+                }
             }
         }
 
@@ -109,10 +126,31 @@ object BottomSheetRenderer {
             // current detent's height, leaving drag-room to the next one.
             // A fit sheet wants exactly that content-sized default.
             Column(modifier = if (fits) sheetModifier else sheetModifier.fillMaxHeight()) {
+                if (title.isNotEmpty()) {
+                    SheetHeading(title = title, color = theme.onSurface)
+                }
                 node.children.forEach { RenderNode(it) }
             }
         }
     }
+}
+
+/**
+ * A titled sheet's heading under the drag handle. Material's modal bottom
+ * sheet has no top bar or close button — it closes on a swipe down, a tap
+ * on the scrim or back — so the title is plain heading text.
+ */
+@Composable
+private fun SheetHeading(title: String, color: Color) {
+    Text(
+        text = title,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+        style = MaterialTheme.typography.titleLarge,
+        fontFamily = nuiDefaultFontFamily(),
+        color = color,
+    )
 }
 
 /**

@@ -232,6 +232,7 @@ struct NativeUIScrollViewRenderer: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .modifier(ScrollViewBackgroundModifier(node: node))
+            .modifier(NativeUIScrollEdgeExtension())
             // Whether the reader is at the bottom, from where the scroll view
             // actually is. The anchor's onAppear / onDisappear can't tell on
             // their own: a lazy stack keeps the anchor alive a little past the
@@ -469,7 +470,7 @@ private struct BottomProbe: Equatable {
 
 /// Applies a minimum height only when there is one, so children that didn't
 /// ask for viewport height keep the exact modifier chain they always had.
-private struct MinViewportHeightModifier: ViewModifier {
+struct MinViewportHeightModifier: ViewModifier {
     let minHeight: CGFloat?
 
     @ViewBuilder
@@ -528,5 +529,23 @@ struct ScrollViewBackgroundModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Lets a vertical scroll view run under the horizontal safe area beside it
+/// (an iPhone Duo's vertical bar) and hands that area back to its content as
+/// safe area. The indicator sits at the screen's edge, as in Apple's lists,
+/// while rows stay where they were and only their backgrounds reach under.
+struct NativeUIScrollEdgeExtension: ViewModifier {
+    @State private var insets = EdgeInsets()
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaPadding(.leading, insets.leading)
+            .safeAreaPadding(.trailing, insets.trailing)
+            .ignoresSafeArea(.container, edges: .horizontal)
+            .onGeometryChange(for: EdgeInsets.self) { proxy in
+                EdgeInsets(top: 0, leading: proxy.safeAreaInsets.leading, bottom: 0, trailing: proxy.safeAreaInsets.trailing)
+            } action: { insets = $0 }
     }
 }

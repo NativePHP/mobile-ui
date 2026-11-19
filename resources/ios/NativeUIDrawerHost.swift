@@ -255,18 +255,30 @@ struct NativeDrawerHost<Content: View>: View {
 
     @ViewBuilder
     private func drawerView(_ drawerNode: NativeUINode, width: CGFloat) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(drawerNode.children) { child in
-                    NodeView(node: child).equatable()
+        // Nothing inside the ScrollView knows how tall the panel is, so an
+        // `h-full` child (a `justify-between` column pinning a footer) would
+        // hug its content. The panel's height, less the top inset, goes to
+        // those direct children as a minimum, as in the scroll-view renderer:
+        // taller content still grows and scrolls.
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(drawerNode.children) { child in
+                        NodeView(node: child).equatable()
+                            .modifier(MinViewportHeightModifier(
+                                minHeight: child.layout?.heightMode == SizeMode.fill
+                                    ? geometry.size.height - windowSafeAreaTop
+                                    : nil
+                            ))
+                    }
                 }
+                // The panel ignores the safe area so its background reaches the top
+                // of the screen; without this inset the CONTENT does too, and the
+                // first row slides under the status bar. An app that pins
+                // UIUserInterfaceStyle sees this at every launch, not just on a
+                // notched device in landscape.
+                .padding(.top, windowSafeAreaTop)
             }
-            // The panel ignores the safe area so its background reaches the top
-            // of the screen; without this inset the CONTENT does too, and the
-            // first row slides under the status bar. An app that pins
-            // UIUserInterfaceStyle sees this at every launch, not just on a
-            // notched device in landscape.
-            .padding(.top, windowSafeAreaTop)
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)

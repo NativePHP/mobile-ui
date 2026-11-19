@@ -2,7 +2,9 @@
 
 This standalone Robolectric/Compose module compiles the production filled and
 outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list and pager renderers.
+the production gesture area, list, virtual list, pager and bottom sheet renderers,
+the background layer host and the layout drawer host.
+
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
 from an explicit checkout, not substituted by test implementations.
@@ -28,6 +30,13 @@ scroll container, and a bound pan still follows the finger. `NodeView` here
 stands in for core's: each child is a fixed-size box, clickable like a core
 `pressable` when it has a press handler.
 
+`GestureAreaTriggerTest` pulls a pan with a trigger point (`pan-x-trigger`):
+let go past the point it fires `@trigger` and springs back, short of it or
+after coming back under it it only springs back, the haptic plays each time
+the pull goes out past the point, the pan follows the finger to the point
+and resists past it, and a drag the other way is left to an enclosing
+scroll container.
+
 `TextInputCaretTest` pushes a new value into the outlined, filled and bare
 editors and checks where the caret lands: where the `selection` props say
 (code points, clamped), at the end when they don't, never on an echo of what
@@ -41,4 +50,23 @@ the list doesn't repeat an applied request, disabling then restoring an index
 re-arms it, and saved-state restoration keeps the reader's position unless the
 request changed while it was saved. Assertions check which row is at the
 viewport's top, not just that a scroll was invoked.
+
+`BottomSheetCloseTest` closes an open sheet and checks its content leaves
+composition: when its detents change in the same render, and when a finger
+grabs it while it slides away. `RenderNode` here draws each child as
+`NodeView` does.
+
+`DrawerFillHeightTest` opens a modal drawer from its menu button and checks
+an `h-full` child reaches the bottom of the drawer, a sibling without it
+keeps its own height, and a child taller than the drawer still scrolls.
+`NodeView` here wraps its box in the modifier the drawer passes, so these
+check the sizes the drawer hands out, not `justify-between` itself.
+
+`BackgroundLayerStyleTest` puts a column with a background colour, a gradient
+and a dark-mode background at the top of a background layer and checks the
+pixels drawn, then checks a top element's padding and safe-area insets leave
+its background showing around its content. The renderers here draw only the
+modifier they are given; core's `nodeStyle` and `nodeLayout` are compiled from
+the Mobile checkout.
+
 These are JVM checks; SwiftUI and native device behaviour need separate testing.

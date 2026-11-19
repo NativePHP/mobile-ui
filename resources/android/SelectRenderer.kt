@@ -86,7 +86,7 @@ object SelectRenderer {
                 modifier = Modifier
                     .then(if (node.layout?.widthMode == SizeMode.FILL) Modifier.fillMaxWidth() else Modifier)
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-                textStyle = TextStyle(color = theme.onSurface),
+                textStyle = TextStyle(color = theme.onSurface, fontFamily = nuiDefaultFontFamily()),
                 colors = OutlinedTextFieldDefaults.colors(
                     errorBorderColor = theme.destructive,
                     errorLabelColor = theme.destructive,

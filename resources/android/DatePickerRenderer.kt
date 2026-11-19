@@ -175,7 +175,7 @@ object DatePickerRenderer {
                             )
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        textStyle = TextStyle(color = theme.onSurface),
+                        textStyle = TextStyle(color = theme.onSurface, fontFamily = nuiDefaultFontFamily()),
                         colors = OutlinedTextFieldDefaults.colors(
                             errorBorderColor = theme.destructive,
                             errorSupportingTextColor = theme.destructive,

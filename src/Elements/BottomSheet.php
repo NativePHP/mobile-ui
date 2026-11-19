@@ -9,6 +9,15 @@ use Native\Mobile\Edge\Element;
  * Bottom sheet — dismissible panel that slides up from the bottom. Visibility
  * driven by `visible`; `@dismiss` fires on drag-down or tap-outside.
  *
+ * A `title` draws the sheet the way each platform designs its own. iOS
+ * puts the content in a navigation stack whose inline bar carries the
+ * title and the system's close button (Apple's HIG, Sheets); the close
+ * button reports `@dismiss` like a swipe-down. Android shows the title as
+ * Material heading text under the drag handle, with no close button:
+ * Material's sheet closes on a swipe down, a tap outside or back.
+ *
+ *   <native:bottom-sheet :visible="$open" title="Filters" @dismiss="close">
+ *
  * Model 3: container colors from theme. No per-instance `backgroundColor`
  * override — wrap content in `<column class="bg-...">` if a
  * non-standard surface is truly needed, but prefer the theme.
@@ -41,6 +50,14 @@ class BottomSheet extends Element
         foreach (['background-interaction', 'backgroundInteraction'] as $key) {
             if (isset($attrs[$key])) {
                 $this->backgroundInteraction(filter_var($attrs[$key], FILTER_VALIDATE_BOOLEAN));
+            }
+        }
+        if (isset($attrs['title'])) {
+            $this->title((string) $attrs['title']);
+        }
+        foreach (['close-label', 'closeLabel'] as $key) {
+            if (isset($attrs[$key])) {
+                $this->closeLabel((string) $attrs[$key]);
             }
         }
 
@@ -99,6 +116,31 @@ class BottomSheet extends Element
     public function backgroundInteraction(bool $value = true): static
     {
         $this->sheetProps['background_interaction'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * The sheet's title. iOS shows it in the sheet's own navigation bar,
+     * beside the system's close button (left out on a `permanent` sheet);
+     * Android shows it as heading text under the drag handle. An empty
+     * title leaves the sheet untitled.
+     */
+    public function title(string $title): static
+    {
+        $this->sheetProps['title'] = $title;
+
+        return $this;
+    }
+
+    /**
+     * What VoiceOver reads for the close button of a titled iOS sheet. The
+     * system's own label when unset; pass your app's translation of
+     * "Close" if the system's language may differ from your app's.
+     */
+    public function closeLabel(string $label): static
+    {
+        $this->sheetProps['close_label'] = $label;
 
         return $this;
     }

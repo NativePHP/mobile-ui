@@ -187,6 +187,11 @@ paths serialize to the same wire tree.
   `leading-[…px]`) is exact, but tightening below the font's natural line height
   (`none`/`tight`) is limited — measured against the actual font, so custom
   fonts aren't over-spaced. Android is exact both ways.
+- **Shrink to fit.** `min-scale` (0–1) on `<native:text>` lets text that is
+  too wide for its lines shrink, down to that share of its size, before it
+  truncates. Pair it with `max-lines="1"` to keep a value like a big number on
+  one line at large system text sizes: `max-lines="1" min-scale="0.5"`. On
+  Android, text with inline runs keeps its size.
 
 @verbatim
 <code-snippet name="Custom font + line height" lang="blade">
