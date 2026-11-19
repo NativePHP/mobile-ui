@@ -6,3 +6,6 @@ composer.lock
 /tests/android/.gradle/
 /tests/android/build/
 /tests/android/local.properties
+/tests/ios/.build/
+/tests/ios/.swiftpm/
+/tests/ios/Package.resolved
