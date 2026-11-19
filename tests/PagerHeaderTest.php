@@ -68,6 +68,28 @@ it('builds the same pager fluently', function () {
         ->and(array_column($tree['children'], 'type'))->toBe(['pager_header', 'column', 'column', 'pager_overlay']);
 });
 
+it('sends the width from which the header moves beside the pages', function () {
+    NativeElementCollector::open('pager', ['horizontal' => true, 'header-beside' => 'expanded']);
+    NativeElementCollector::close();
+
+    $tree = NativeElementCollector::collect()->toArray(new CallbackRegistry);
+
+    expect($tree['props']['header_beside_from'])->toBe(840.0)
+        ->and(Pager::make()->headerBeside(700)->toArray(new CallbackRegistry)['props']['header_beside_from'])->toBe(700.0)
+        ->and(Pager::make()->toArray(new CallbackRegistry)['props'])->not->toHaveKey('header_beside_from');
+});
+
+it('rejects a header-beside breakpoint it does not know', function () {
+    Pager::make()->headerBeside('enormous');
+})->throws(InvalidArgumentException::class, 'Unknown breakpoint [enormous] for header-beside.');
+
+it('draws the header beside the pages on iOS once the window reaches that width', function () {
+    expect(swiftSource('NativeUIPagerRenderer.swift'))
+        ->toContain('let beside = header != nil && besideFrom > 0 && width >= besideFrom')
+        ->toContain('header: beside ? nil : header,')
+        ->toContain('besideHeader: beside ? header : nil,');
+});
+
 it('registers the header and the overlay for the pager to draw', function () {
     $components = collect(json_decode(file_get_contents(dirname(__DIR__).'/nativephp.json'), true)['components'])->keyBy('type');
 
@@ -85,7 +107,7 @@ it('registers the header and the overlay for the pager to draw', function () {
 it('keeps the header and the overlay out of the pages on both platforms', function () {
     expect(swiftSource('NativeUIPagerRenderer.swift'))
         ->toContain('let pages = node.children.filter { $0.type != "pager_header" && $0.type != "pager_overlay" }')
-        ->toContain('header: horizontal ? node.children.first { $0.type == "pager_header" } : nil');
+        ->toContain('let header = horizontal ? node.children.first { $0.type == "pager_header" } : nil');
 
     expect(kotlinSource('PagerRenderer.kt'))
         ->toContain('node.children.filter { it.type != "pager_header" && it.type != "pager_overlay" }')

@@ -26,6 +26,10 @@ use Native\Mobile\Edge\Element;
  * always finds the header at the height it left it. Once the header has
  * gone, each page keeps its own place. A page too short to scroll the
  * header away gets room at its end to do so.
+ *
+ * With `header-beside` on the pager, a wide enough window has the header in
+ * a column of its own beside the pages instead, and the pages' lists draw
+ * only their own rows (see {@see Pager::headerBeside()}).
  */
 class PagerHeader extends Element
 {
