@@ -174,7 +174,7 @@ It has none of a list's extras: no separators, swipe actions, pull-to-refresh, s
 
 Give each child a stable `key`. A child added above the screen then doesn't move what the reader is looking at, and a reader at the very top sees new children come in.
 
-It's iOS only for now. On Android it falls back to the `native:scroll-view` renderer, which ignores `content-padding`.
+iOS draws it with a `LazyVStack` and Android with a Compose `LazyColumn`. Android has no scroll indicator for it, so `shows-indicators` only matters on iOS.
 
 ## Popovers
 

@@ -27,8 +27,8 @@ use Native\Mobile\Edge\Element;
  * element; {@see contentPadding()} (the `content-padding` attribute, which
  * a server screen sends as `contentPadding`) pads the scrolled content.
  *
- * iOS only for now. Android draws it with the scroll view's renderer, which
- * ignores the content padding.
+ * iOS draws it with a LazyVStack, Android with a LazyColumn. A LazyColumn
+ * has no scroll indicator, so `shows-indicators` does nothing there.
  */
 class LazyStack extends Element
 {
