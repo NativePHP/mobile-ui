@@ -19,9 +19,8 @@ use Native\Mobile\Edge\Element;
  * doesn't move what's on it, and a reader at the very top sees it come in.
  *
  *   <native:lazy-stack class="w-full flex-1 gap-2" :content-padding="16">
- *       @foreach ($events as $event)
- *           <native:list-item :key="$event->id" :headline="$event->title" />
- *       @endforeach
+ *       <native:list-item :key="$event->id" :headline="$event->title" />
+ *       ...one per event, from a foreach over $events
  *   </native:lazy-stack>
  *
  * `gap-*` spaces the children. `p-*` pads the stack's frame, like any
