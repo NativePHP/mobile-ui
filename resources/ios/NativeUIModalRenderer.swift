@@ -66,6 +66,10 @@ private struct A11yLabelModifier: ViewModifier {
     let label: String
     func body(content: Content) -> some View {
         if label.isEmpty { content }
-        else { content.accessibilityLabel(label) }
+        // A label on a plain container is applied to each child, so the close
+        // button was read as the modal's label instead of "Close". Making the
+        // container an element that contains its children names the container
+        // and leaves the children's own labels alone.
+        else { content.accessibilityElement(children: .contain).accessibilityLabel(label) }
     }
 }
