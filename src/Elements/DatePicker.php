@@ -144,6 +144,15 @@ class DatePicker extends Element
             $this->cancelLabel((string) $cancelLabel);
         }
 
+        if (! empty($attrs['clearable'])) {
+            $this->clearable();
+        }
+
+        $clearLabel = $attrs['clear-label'] ?? $attrs['clearLabel'] ?? null;
+        if ($clearLabel !== null) {
+            $this->clearLabel((string) $clearLabel);
+        }
+
         if (! empty($attrs['disabled'])) {
             $this->disabled();
         }
@@ -297,6 +306,30 @@ class DatePicker extends Element
     public function cancelLabel(string $text): static
     {
         $this->pickerProps['cancel_label'] = $text;
+
+        return $this;
+    }
+
+    /**
+     * Draw an X inside the compact trigger while a value is picked. Tapping
+     * it fires the change callback with `''` — the same "nothing chosen"
+     * the wire uses for `value('')` — and leaves the dialog closed. Inline
+     * and wheel pickers always show a date, so they draw no X.
+     */
+    public function clearable(bool $value = true): static
+    {
+        $this->pickerProps['clearable'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * The X's accessibility label, `Clear` when unset. A screen reader
+     * speaks it, so pass a translated string: `->clearLabel(__('Clear'))`.
+     */
+    public function clearLabel(string $text): static
+    {
+        $this->pickerProps['clear_label'] = $text;
 
         return $this;
     }

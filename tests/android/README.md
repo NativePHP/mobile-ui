@@ -1,9 +1,6 @@
 # Android renderer regression tests
 
-This standalone Robolectric/Compose module compiles the production filled and
-outlined editors, their shared dispatcher, the production Button renderer and
-the production gesture area, list, virtual list, lazy stack, pager and bottom sheet renderers,
-the background layer host and the layout drawer host.
+This standalone Robolectric/Compose module compiles a number of component renderers.
 
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
@@ -58,8 +55,9 @@ inside a scroll view falls back to a plain column instead of throwing.
 
 `BottomSheetCloseTest` closes an open sheet and checks its content leaves
 composition: when its detents change in the same render, and when a finger
-grabs it while it slides away. `RenderNode` here draws each child as
-`NodeView` does.
+grabs it while it slides away. It also shows a sheet again while it slides
+away and checks it comes back up to where it opened. `RenderNode` here draws
+each child as `NodeView` does.
 
 `DrawerFillHeightTest` opens a modal drawer from its menu button and checks
 an `h-full` child reaches the bottom of the drawer, a sibling without it
@@ -73,5 +71,10 @@ pixels drawn, then checks a top element's padding and safe-area insets leave
 its background showing around its content. The renderers here draw only the
 modifier they are given; core's `nodeStyle` and `nodeLayout` are compiled from
 the Mobile checkout.
+
+`DatePickerClearTest` taps the X of a clearable compact picker and checks it
+sends `''` with the dialog left closed, that a tap elsewhere on the field and
+an accessibility click both open the dialog, and that no X is drawn without a
+value, without `clearable` or on a disabled picker.
 
 These are JVM checks; SwiftUI and native device behaviour need separate testing.
