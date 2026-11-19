@@ -1,6 +1,7 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -9,9 +10,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
@@ -20,6 +24,7 @@ import androidx.compose.ui.unit.constrainWidth
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.size.SizeResolver
+import coil3.toBitmap
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.mobile.ui.nativerender.nodeShape
@@ -59,6 +64,19 @@ object ImageRenderer {
         // Width over height of the loaded image, 0 until it's known.
         var aspectRatio by remember { mutableFloatStateOf(0f) }
 
+        // A modal can grow a picture out of or into a `ref`'d image (see
+        // NativeUIImageMorph), which needs to know where it's drawn and to
+        // hide it while a copy is in flight.
+        val ref = p.getString("ref")
+        val morph = remember { NativeUIImageMorph.Source() }
+        morph.contain = fit == ImageFit.CONTAIN
+        morph.radiusDp = radius
+        if (ref.isNotEmpty()) {
+            DisposableEffect(ref) {
+                onDispose { NativeUIImageMorph.forget(ref, morph) }
+            }
+        }
+
         // Images need an explicit clip for rounded corners (nodeStyle doesn't
         // clip globally). `nodeShape` is the same resolver containers use, so
         // per-corner radii (`rounded-3xl rounded-br-none`, `rounded-t-2xl`)
@@ -66,9 +84,14 @@ object ImageRenderer {
         // ride the props bag as `radius_tl` etc. with no uniform radius to
         // fall back on, which is why they count as "has a radius" here.
         val sizedModifier = modifier.sizeFromAspectRatio { aspectRatio }
-        val imgModifier = if (radius > 0f || p.has("radius_tl")) {
+        val clippedModifier = if (radius > 0f || p.has("radius_tl")) {
             sizedModifier.clip(nodeShape(radius, p))
         } else sizedModifier
+        val imgModifier = if (ref.isEmpty()) clippedModifier else {
+            clippedModifier
+                .onGloballyPositioned { morph.coordinates = it }
+                .graphicsLayer { alpha = if (NativeUIImageMorph.isHidden(ref)) 0f else 1f }
+        }
 
         if (src.isNotEmpty()) {
             AsyncImage(
@@ -85,6 +108,11 @@ object ImageRenderer {
                     val size = state.painter.intrinsicSize
                     if (size.width > 0f && size.height > 0f) {
                         aspectRatio = size.width / size.height
+                    }
+                    if (ref.isNotEmpty()) {
+                        morph.aspect = aspectRatio
+                        morph.image = state.result.image.toBitmap().asImageBitmap()
+                        NativeUIImageMorph.register(ref, morph)
                     }
                 }
             )

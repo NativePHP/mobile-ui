@@ -187,6 +187,9 @@ struct NativeUIImageRenderer: View {
         let tintArgb = p.getColor("tint_color", default: 0)
         let cornerRadius = CGFloat(node.style?.borderRadius ?? 0)
         let alt = p.getString("alt")
+        // A modal can grow a picture out of or into a `ref`'d image (see
+        // NativeUIImageMorph), which needs to know where it's drawn.
+        let ref = p.getString("ref")
 
         if fit == .contain {
             // Contain (the default, object-contain, object-scale-down): the
@@ -200,23 +203,25 @@ struct NativeUIImageRenderer: View {
             // frame leaves the image in its top-leading corner. Where the
             // proposal leaves a dimension open it takes the image's size, so
             // self-sizing is unchanged.
-            imageContent(src: src, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+            imageContent(src: src, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius, ref: ref)
                 .modifier(ImageAltModifier(alt: alt))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .modifier(NativeUIImageMorphHide(ref: ref))
         } else {
             // Cover, fill and none (object-cover, object-fill, object-none):
             // the image fills its frame, is stretched to it, or keeps its own
             // size, and cover and none can draw past the frame, so clip to it.
             // `ImageFrameLayout` (applied in `tinted`) gives the image view the
             // frame's size and centers the image in it.
-            imageContent(src: src, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+            imageContent(src: src, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius, ref: ref)
                 .clipped()
                 .modifier(ImageAltModifier(alt: alt))
+                .modifier(NativeUIImageMorphHide(ref: ref))
         }
     }
 
     @ViewBuilder
-    private func imageContent(src: String, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat) -> some View {
+    private func imageContent(src: String, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat, ref: String) -> some View {
         switch NativeUIImageSource.resolve(src) {
         case .local(let path):
             // Local device file — camera capture, gallery selection, or an
@@ -229,7 +234,7 @@ struct NativeUIImageRenderer: View {
             // sized image doesn't move anything. None draws the image at its
             // own size, however small the frame, so it needs the whole file.
             NativeUILocalImage(path: path, fullSize: fit == .none) { uiImage in
-                tinted(Image(uiImage: uiImage), fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+                tinted(Image(uiImage: uiImage), fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius, ref: ref)
             } placeholder: {
                 Color.clear
             }
@@ -239,7 +244,7 @@ struct NativeUIImageRenderer: View {
             NativeUIRemoteImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
-                    tinted(image, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius)
+                    tinted(image, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius, ref: ref)
                 case .failure:
                     Color.clear
                 case .empty:
@@ -255,7 +260,7 @@ struct NativeUIImageRenderer: View {
     }
 
     @ViewBuilder
-    private func tinted(_ image: Image, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat) -> some View {
+    private func tinted(_ image: Image, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat, ref: String) -> some View {
         let styled = Group {
             if tintArgb != 0 {
                 sized(image, fit: fit).foregroundStyle(Color(argb: tintArgb))
@@ -271,12 +276,19 @@ struct NativeUIImageRenderer: View {
         // whole frame, so the frame-level rounded clip from NodeStyleModifier
         // already rounds the visible pixels, and none keeps its own size
         // inside that same clip, as on Android.
+        //
+        // A `ref` reports the rect the pixels cover: the frame for the fits
+        // that fill it, and the fitted image for contain.
+        let report = NativeUIImageMorphReport(ref: ref, image: image, radius: cornerRadius)
         if fit != .contain {
             ImageFrameLayout { styled }
+                .modifier(report)
         } else if cornerRadius > 0 {
             styled.clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                .modifier(report)
         } else {
             styled
+                .modifier(report)
         }
     }
 

@@ -32,7 +32,7 @@ test('sends no dismissal to PHP when PHP closes the iOS modal', function () {
 
     expect($renderer)
         ->toBeString()
-        ->toMatch('/\.fullScreenCover\(isPresented: \.constant\(visible\)\) \{/')
+        ->toMatch('/\.fullScreenCover\(isPresented: \.constant\(node\.props\.getBool\("visible"\)\)\) \{/')
         ->not->toMatch('/onDismiss: \{/')
         ->toMatch('/Button\(action: fireDismiss\)/');
 });
