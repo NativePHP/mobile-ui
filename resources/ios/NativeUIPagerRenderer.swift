@@ -1033,14 +1033,38 @@ private struct PagerSplit: Equatable {
     init(in proxy: GeometryProxy) {
         let width = proxy.size.width
         self = .even(width)
+        // reservedRegions is new in the iOS 27.1 SDK, so Xcode 27.0 can't
+        // compile the call even behind #available. Xcode 27.0 and 27.1 both
+        // ship Swift 6.4, so a compiler check can't tell them apart. The SDK's
+        // SwiftUICore version can: 8.0.84 in iOS 27.0, 8.0.85 in iOS 27.1.
+        #if canImport(SwiftUICore, _version: 8.0.85)
         guard #available(iOS 27.1, *) else { return }
-        let folds = proxy.reservedRegions(kind: .division, options: .includeInactive)
-            .filter { $0.frame.height > $0.frame.width && $0.frame.minX > 0 && $0.frame.maxX < width }
-        guard let fold = folds.min(by: { abs($0.frame.midX - width / 2) < abs($1.frame.midX - width / 2) }) else { return }
-        self = fold.isActive
-            ? PagerSplit(leading: fold.frame.minX, gap: fold.frame.width)
-            : PagerSplit(leading: fold.frame.midX, gap: 0)
+        guard let fold = Self.fold(in: proxy) else { return }
+        if fold.isActive {
+            self = PagerSplit(leading: fold.frame.minX, gap: fold.frame.width)
+        } else {
+            self = PagerSplit(leading: fold.frame.midX, gap: 0)
+        }
+        #endif
     }
+
+    #if canImport(SwiftUICore, _version: 8.0.85)
+    /// The upright fold across the pager nearest its middle, active or not.
+    @available(iOS 27.1, *)
+    private static func fold(in proxy: GeometryProxy) -> ReservedRegion? {
+        let width: CGFloat = proxy.size.width
+        let middle: CGFloat = width / 2
+        let regions: [ReservedRegion] = proxy.reservedRegions(kind: .division, options: .includeInactive)
+        let folds: [ReservedRegion] = regions.filter { (region: ReservedRegion) -> Bool in
+            let frame: CGRect = region.frame
+            return frame.height > frame.width && frame.minX > 0 && frame.maxX < width
+        }
+
+        return folds.min { (a: ReservedRegion, b: ReservedRegion) -> Bool in
+            abs(a.frame.midX - middle) < abs(b.frame.midX - middle)
+        }
+    }
+    #endif
 }
 
 /// A colour as PHP sent it, light and dark, nil where it sent none.
