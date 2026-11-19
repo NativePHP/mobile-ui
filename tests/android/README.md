@@ -53,8 +53,9 @@ viewport's top, not just that a scroll was invoked.
 
 `BottomSheetCloseTest` closes an open sheet and checks its content leaves
 composition: when its detents change in the same render, and when a finger
-grabs it while it slides away. `RenderNode` here draws each child as
-`NodeView` does.
+grabs it while it slides away. It also shows a sheet again while it slides
+away and checks it comes back up to where it opened. `RenderNode` here draws
+each child as `NodeView` does.
 
 `DrawerFillHeightTest` opens a modal drawer from its menu button and checks
 an `h-full` child reaches the bottom of the drawer, a sibling without it
