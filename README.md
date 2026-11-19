@@ -158,6 +158,24 @@ use Native\Mobile\UI\Elements\StickyHeader;
 StickyHeader::make($newPostsButton);
 ```
 
+## Lazy stacks
+
+`native:lazy-stack` is a vertical scroll that only builds the children on screen and near it. Use it for long feeds that change often, such as a live log or a chat. A SwiftUI `List` gets slower with every row inserted into it, so a `native:list` taking 60 inserts a second fell well below 60 fps once it had a few hundred. A lazy stack held 60 fps through 3,600 inserts on the iOS simulator.
+
+```blade
+<native:lazy-stack class="w-full flex-1 gap-2" content-padding="16 0">
+    @foreach ($events as $event)
+        <native:list-item :key="$event->id" :headline="$event->title" />
+    @endforeach
+</native:lazy-stack>
+```
+
+It has none of a list's extras: no separators, swipe actions, pull-to-refresh, sections or row callbacks. Each child draws itself. `gap-*` spaces the children, `p-*` pads the stack's frame and `content-padding` pads the scrolled content, taking one to four values like CSS `padding`.
+
+Give each child a stable `key`. A child added above the screen then doesn't move what the reader is looking at, and a reader at the very top sees new children come in.
+
+iOS draws it with a `LazyVStack` and Android with a Compose `LazyColumn`. Android has no scroll indicator for it, so `shows-indicators` only matters on iOS.
+
 ## Popovers
 
 `<native:popover>` floats its children in a small bubble beside the spot it
