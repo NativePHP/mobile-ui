@@ -172,9 +172,10 @@ it('serializes a placeholder estimated height from attributes', function () {
 });
 
 it('opens a list at a row with auto-scroll-to', function () {
-    $tree = collectList(['auto-scroll-to' => '12']);
+    $tree = collectList(['auto-scroll-to' => '12', 'scroll-target' => 'log-following']);
 
-    expect($tree['props']['auto_scroll_to'])->toBe(12);
+    expect($tree['props']['auto_scroll_to'])->toBe(12)
+        ->and($tree['props']['scroll_target'])->toBe('log-following');
 });
 
 it('sends no row to scroll to unless one is asked for', function () {
