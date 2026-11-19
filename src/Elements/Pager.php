@@ -6,6 +6,7 @@ use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Element;
+use Native\Mobile\Edge\TailwindParser;
 use Native\Mobile\UI\Concerns\ResolvesColorValues;
 use Native\Mobile\UI\Theme;
 
@@ -83,6 +84,8 @@ use Native\Mobile\UI\Theme;
  * that scrolls up with the page showing while the tabs pin under the nav
  * bar: see {@see PagerHeader}. A {@see PagerOverlay} hangs under the tabs
  * over the pages. Neither counts as a page, and neither is windowed.
+ * `header-beside="expanded"` moves the header beside the pages once the
+ * window is that wide (see headerBeside()).
  *
  * The page index rides the tab-change transport, so a single feed is
  * capped at 32,767 pages per screen.
@@ -137,6 +140,10 @@ class Pager extends Element
         $settle = $attrs['report_on_settle'] ?? $attrs['reportOnSettle'] ?? $attrs['report-on-settle'] ?? null;
         if ($settle !== null) {
             $this->reportOnSettle(filter_var($settle, FILTER_VALIDATE_BOOLEAN));
+        }
+        $beside = $attrs['header_beside'] ?? $attrs['headerBeside'] ?? $attrs['header-beside'] ?? null;
+        if ($beside !== null) {
+            $this->headerBeside($beside);
         }
         $cb = $attrs['on_page_change'] ?? $attrs['onPageChange'] ?? $attrs['on-page-change'] ?? null;
         if ($cb !== null) {
@@ -208,6 +215,28 @@ class Pager extends Element
     public function reportOnSettle(bool $value = true): static
     {
         $this->pagerProps['report_on_settle'] = $value;
+
+        return $this;
+    }
+
+    /**
+     * From a breakpoint (`expanded`, `lg`, … as the responsive classes name
+     * them) or a width in points up, the header scrolls by itself in a
+     * leading column and the tabs and pages fill the trailing one, split at
+     * a foldable's fold or evenly elsewhere. Narrower, it is above the tabs
+     * as usual. Native decides against the live window width, as it does
+     * for the classes, so the header is sent once for either layout. iOS
+     * only so far: Android keeps the header above the tabs at any width.
+     */
+    public function headerBeside(string|int|float $from): static
+    {
+        $width = is_numeric($from) ? (float) $from : TailwindParser::breakpointMinWidth($from);
+
+        if ($width === null) {
+            throw new InvalidArgumentException("Unknown breakpoint [{$from}] for header-beside.");
+        }
+
+        $this->pagerProps['header_beside_from'] = $width;
 
         return $this;
     }

@@ -56,6 +56,7 @@ struct NativeUIVirtualListRenderer: View {
         // Environment-propagating, so it reaches the List inside the body
         // without threading another property through it.
         .scrollIndicators(node.props.getBool("shows_indicators", default: true) ? .automatic : .hidden)
+        .modifier(NativeUIScrollEdgeExtension())
     }
 }
 

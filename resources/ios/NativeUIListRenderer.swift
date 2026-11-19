@@ -200,6 +200,7 @@ struct NativeUIListRenderer: View {
             // Only this list draws the header, not one in its rows.
             .environment(\.nativeUIPagerHeader, nil)
             .modifier(ListAutoScrollModifier(request: autoScrollTo, targetID: autoScrollTarget, anchor: .top))
+            .modifier(NativeUIScrollEdgeExtension())
         }
     }
 

@@ -400,6 +400,28 @@ element.)
 | `inline` | `.graphical` — embedded calendar | embedded picker |
 | `wheel` | `.wheel` — drum | **no drum in Material**; falls back to embedded |
 
+### Clearing a picked date
+
+`clearable` draws an X inside a compact picker while it holds a value — beside
+the calendar icon on Android, beside the date button on iOS. Tapping it sends
+`''` through `@change` / `native:model`, the same empty value that clears the
+picker from PHP, and leaves the dialog closed.
+
+```blade
+<native:date-picker
+    label="Due"
+    placeholder="Optional"
+    native:model="dueOn"
+    clearable
+    clear-label="{{ __('Clear') }}"
+/>
+```
+
+`clear-label` is what a screen reader says for the X (`Clear` when unset), so
+pass a translated string. Inline and wheel pickers always show a date, so they
+draw no X. On iOS a cleared picker falls back to its placeholder chip, so give
+a clearable picker a `placeholder`.
+
 ### Platform notes
 
 - `title`, `confirm-label`, and `cancel-label` are **Android only** — iOS
