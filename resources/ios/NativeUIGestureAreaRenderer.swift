@@ -69,18 +69,17 @@ import UIKit
 ///                                fits on stays centred, a drag past an
 ///                                edge meets resistance, and the content
 ///                                springs back into place on release. A
-///                                pinch zooms around the fingers.
+///                                pinch zooms around the fingers. The
+///                                area only takes a drag while the
+///                                content has room to move on a bound
+///                                axis at the zoom it's at (see
+///                                BoundedPanRecognizer), so at whole
+///                                size a drag goes to whatever is around
+///                                the area: a pager, a drag to close, a
+///                                scroll view, the swipe back.
 ///   - `content-ratio`  (float) — the content's width over height,
 ///                                fitted inside the area, for `bounded`
 ///                                (0 = the content fills the area).
-///   - `zoom-pan-x-id` /
-///     `zoom-pan-y-id`  (int)   — the pan a zoom moves while no pan is
-///                                bound (`-initial` seeds each): a pinch
-///                                keeps the point between the fingers in
-///                                place and a double tap aims at the
-///                                tapped point, but one-finger drags are
-///                                left to whatever is around the area.
-///                                A bound pan takes their place.
 ///   - `double-tap-zoom` (float)— the scale a double tap zooms the pinch
 ///                                to from 1, bringing the tapped point
 ///                                to the middle as far as `bounded`
@@ -97,16 +96,18 @@ struct NativeUIGestureAreaRenderer: View {
     @State private var dragStart: CGFloat = 0
     @ObservedObject private var store = SharedValueStore.shared
 
-    // `bounded` only: the area's size, the drag's last translation (bounded
-    // drags move by each step's change, so a pinch can move the pan in the
-    // same gesture), the undamped pan the finger asked for and what was last
-    // written, whether two fingers are pinching (the pinch then moves the
-    // pan, not the drag), and the spring back.
+    // `bounded` only: the area's size, the undamped pan the finger asked
+    // for and what was last written, whether two fingers are pinching (the
+    // pinch then moves the pan, not the drag; a finger left over drags
+    // it), whether a pinch and a drag are under way (each until the last
+    // finger lifts; whichever ends last springs the content back), and the
+    // spring back.
     @State private var areaSize: CGSize = .zero
-    @State private var lastTranslation: CGSize = .zero
     @State private var rawPan: CGSize = .zero
     @State private var writtenPan: CGSize = .zero
     @State private var pinching = false
+    @State private var pinchUnderWay = false
+    @State private var dragUnderWay = false
     @State private var settle = NativeUIPanSettle()
     // A trigger axis only: the haptic at the point, and whether the pull
     // is past it.
@@ -138,12 +139,7 @@ struct NativeUIGestureAreaRenderer: View {
         let triggerX = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-x-trigger", default: 0)))
         let triggerY = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-y-trigger", default: 0)))
         let onTrigger = node.props.getInt("on_trigger", default: 0)
-        let zoomPanXInitial = CGFloat(node.props.getFloat("zoom-pan-x-initial", default: 0))
-        let zoomPanYInitial = CGFloat(node.props.getFloat("zoom-pan-y-initial", default: 0))
         let doubleTapZoom = CGFloat(node.props.getFloat("double-tap-zoom", default: 0))
-        // The pan a zoom moves: the drag's own, or failing that the zoom's.
-        let zoomX = panXId != 0 ? panXId : node.props.getInt("zoom-pan-x-id", default: 0)
-        let zoomY = panYId != 0 ? panYId : node.props.getInt("zoom-pan-y-id", default: 0)
         // One bound axis and nothing else moving the pan: a UIKit pan that
         // only takes drags along that axis, so an enclosing scroll view
         // keeps the other (see AxisPanRecognizer). SwiftUI's drag below
@@ -164,14 +160,12 @@ struct NativeUIGestureAreaRenderer: View {
         // `including: .subviews` disables the drag entirely when no pan
         // binding exists — DragGesture(minimumDistance: 0) recognizes on
         // touch-down and would otherwise starve the swipe recognizers
-        // and any other non-simultaneous gesture on the area.
+        // and any other non-simultaneous gesture on the area. A `bounded`
+        // area drags through BoundedPanRecognizer instead, which only
+        // takes a drag while the zoomed content has room to move.
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    if bounds.enabled {
-                        dragBounded(value.translation, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
-                        return
-                    }
                     if panXId != 0 {
                         store.set(dragStartX + value.translation.width, for: panXId)
                     }
@@ -180,24 +174,36 @@ struct NativeUIGestureAreaRenderer: View {
                     }
                 }
                 .onEnded { value in
-                    if bounds.enabled {
-                        lastTranslation = .zero
-                        settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
-                    }
                     if panXId != 0 { dragStartX = store.value(for: panXId) }
                     if panYId != 0 { dragStart = store.value(for: panYId) }
-                    guard onDragEnd != 0 else { return }
-                    // Report the resting translation of each bound axis;
-                    // an unbound axis reports the raw gesture translation
-                    // so a callback-only area (no SharedValue) still learns
-                    // where the finger let go.
-                    let scale = pinchId != 0 ? store.value(for: pinchId) : 1
-                    let x = panXId != 0 ? bounds.settled(store.value(for: panXId), axis: .horizontal, scale: scale) : value.translation.width
-                    let y = panYId != 0 ? bounds.settled(store.value(for: panYId), axis: .vertical, scale: scale) : value.translation.height
-                    NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: "\(x),\(y)")
+                    reportDragEnd(onDragEnd, translation: value.translation, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
                 },
-            including: hasPan && axisPan == nil ? .all : .subviews
+            including: hasPan && axisPan == nil && !bounds.enabled ? .all : .subviews
         )
+        .modifier(BoundedPanModifier(
+            enabled: bounds.enabled && (panXId != 0 || panYId != 0),
+            bounds: bounds,
+            pinchId: pinchId,
+            panXId: panXId,
+            panYId: panYId,
+            settle: settle,
+            began: {
+                dragUnderWay = true
+                // A drag that begins under a pinch picks the content up
+                // where the pinch left it, under the fingers already.
+                return !pinchUnderWay
+            },
+            moved: { step in
+                dragBounded(step, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+            },
+            ended: { translation in
+                dragUnderWay = false
+                if !pinchUnderWay {
+                    settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+                }
+                reportDragEnd(onDragEnd, translation: translation, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+            }
+        ))
         .modifier(AxisPanModifier(
             axis: axisPan,
             pulls: axisPan == .horizontal ? triggerX.distance : triggerY.distance,
@@ -251,20 +257,30 @@ struct NativeUIGestureAreaRenderer: View {
             minScale: pinchMin,
             maxScale: pinchMax,
             bounds: bounds,
-            panXId: zoomX,
-            panYId: zoomY,
+            panXId: panXId,
+            panYId: panYId,
             onBoundedBegin: {
                 settle.stop()
+                pinchUnderWay = true
                 pinching = true
             },
+            onBoundedFingers: { two in
+                // UIKit's pinch carries on with one finger left: that
+                // finger drags the content on, and a second landing hands
+                // it back to the pinch.
+                pinching = two
+            },
             onBoundedEnd: {
+                pinchUnderWay = false
                 pinching = false
-                settleIntoBounds(panXId: zoomX, panYId: zoomY, pinchId: pinchId, bounds: bounds)
+                if !dragUnderWay {
+                    settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+                }
             }
         ))
         .modifier(DoubleTapModifier(enabled: doubleTapZoom > 1 && pinchId != 0) { location in
             zoomOnDoubleTap(
-                at: location, to: doubleTapZoom, pinchId: pinchId, panXId: zoomX, panYId: zoomY,
+                at: location, to: doubleTapZoom, pinchId: pinchId, panXId: panXId, panYId: panYId,
                 minScale: pinchMin, maxScale: pinchMax, bounds: bounds, onPinchEnd: onPinchEnd
             )
         })
@@ -277,8 +293,6 @@ struct NativeUIGestureAreaRenderer: View {
             seedPanX(panXId, initial: panXInitial)
             seedPan(panYId, initial: panYInitial)
             seedPinch(pinchId, initial: pinchInitial)
-            seedPinch(zoomX, initial: zoomX == panXId ? panXInitial : zoomPanXInitial)
-            seedPinch(zoomY, initial: zoomY == panYId ? panYInitial : zoomPanYInitial)
         }
         // Two distinct re-publish situations to handle while this view
         // stays alive (onAppear won't re-fire):
@@ -305,12 +319,6 @@ struct NativeUIGestureAreaRenderer: View {
         .onChange(of: pinchId) { _, newId in
             seedPinch(newId, initial: pinchInitial)
         }
-        .onChange(of: zoomX) { _, newId in
-            seedPinch(newId, initial: newId == panXId ? panXInitial : zoomPanXInitial)
-        }
-        .onChange(of: zoomY) { _, newId in
-            seedPinch(newId, initial: newId == panYId ? panYInitial : zoomPanYInitial)
-        }
         .onChange(of: panYInitial) { _, newInitial in
             guard panYId != 0 else { return }
             writeBack(newInitial, for: panYId, snapping: !snapY.isEmpty || !triggerY.isEmpty)
@@ -335,32 +343,42 @@ struct NativeUIGestureAreaRenderer: View {
         settle.run([.init(id: id, from: store.value(for: id), to: value)])
     }
 
-    /// A bounded drag step: moves each bound axis by this step's change,
-    /// freely inside the bounds and with growing resistance past them.
-    private func dragBounded(_ translation: CGSize, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
-        let step = CGSize(width: translation.width - lastTranslation.width, height: translation.height - lastTranslation.height)
-        lastTranslation = translation
-        // SwiftUI's drag follows one finger; while two are down the pinch
-        // moves the pan with both of them.
+    /// Tells PHP where a drag ended: the resting translation of each bound
+    /// axis, and for an unbound axis the raw gesture translation, so a
+    /// callback-only area (no SharedValue) still learns where the finger
+    /// let go.
+    private func reportDragEnd(_ onDragEnd: Int, translation: CGSize, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
+        guard onDragEnd != 0 else { return }
+        let scale = pinchId != 0 ? store.value(for: pinchId) : 1
+        let x = panXId != 0 ? bounds.settled(store.value(for: panXId), axis: .horizontal, scale: scale) : translation.width
+        let y = panYId != 0 ? bounds.settled(store.value(for: panYId), axis: .vertical, scale: scale) : translation.height
+        NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: "\(x),\(y)")
+    }
+
+    /// A bounded drag step: moves each bound axis by the finger's movement
+    /// since the last step, freely inside the bounds and with growing
+    /// resistance past them.
+    private func dragBounded(_ step: CGSize, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
+        // While two fingers are pinching, the pinch moves the pan with both
+        // of them.
         guard !pinching else { return }
-        // A finger that hasn't moved leaves whatever is moving the content
-        // alone: a tap is a drag that goes nowhere, and a double tap's zoom
-        // would otherwise stop as its second tap lifts.
+        // A step that goes nowhere (a finger landing or lifting) leaves
+        // whatever is moving the content alone.
         guard step != .zero else { return }
         settle.stop()
         let scale = pinchId != 0 ? store.value(for: pinchId) : 1
         if panXId != 0 {
             // Something else (a pinch, the spring back) moved the pan since
-            // the last step: carry on from where it is.
+            // the last step: carry on from where it is, past an edge too.
             let current = store.value(for: panXId)
-            if current != writtenPan.width { rawPan.width = current }
+            if current != writtenPan.width { rawPan.width = bounds.unresisted(current, axis: .horizontal, scale: scale) }
             rawPan.width += step.width
             writtenPan.width = bounds.resisted(rawPan.width, axis: .horizontal, scale: scale)
             store.set(writtenPan.width, for: panXId)
         }
         if panYId != 0 {
             let current = store.value(for: panYId)
-            if current != writtenPan.height { rawPan.height = current }
+            if current != writtenPan.height { rawPan.height = bounds.unresisted(current, axis: .vertical, scale: scale) }
             rawPan.height += step.height
             writtenPan.height = bounds.resisted(rawPan.height, axis: .vertical, scale: scale)
             store.set(writtenPan.height, for: panYId)
@@ -402,7 +420,7 @@ struct NativeUIGestureAreaRenderer: View {
             .init(id: pinchId, from: scale, to: target),
             .init(id: panXId, from: panX, to: toX),
             .init(id: panYId, from: panY, to: toY),
-        ]) {
+        ], zoomingTo: target) {
             if onPinchEnd != 0 {
                 NativeElementBridge.sendSliderChangeEvent(onPinchEnd, nodeId: nodeId, value: Float(target))
             }
@@ -421,9 +439,8 @@ struct NativeUIGestureAreaRenderer: View {
             let from = store.value(for: panYId)
             moves.append(.init(id: panYId, from: from, to: bounds.settled(from, axis: .vertical, scale: scale)))
         }
-        // Already in place: leave whatever is moving it alone. A tap ends a
-        // drag that went nowhere, and the second tap of a double tap would
-        // otherwise stop the zoom it just started.
+        // Already in place: leave whatever is moving it alone, rather than
+        // stopping a spring back or a double tap's zoom that's landing.
         guard moves.contains(where: { abs($0.to - $0.from) > 0.01 }) else { return }
         settle.run(moves)
     }
@@ -478,6 +495,8 @@ private struct PinchModifier: ViewModifier {
     let panXId: Int
     let panYId: Int
     let onBoundedBegin: () -> Void
+    /// Whether two fingers are on the bounded pinch, when that changes.
+    let onBoundedFingers: (Bool) -> Void
     let onBoundedEnd: () -> Void
 
     @State private var lastMagnification: CGFloat = 1
@@ -495,6 +514,7 @@ private struct PinchModifier: ViewModifier {
                 panYId: panYId,
                 clamp: { clamped($0) },
                 onBegin: onBoundedBegin,
+                onFingers: onBoundedFingers,
                 onEnd: { final in
                     onBoundedEnd()
                     if onPinchEnd != 0 {
@@ -544,6 +564,10 @@ private struct PinchModifier: ViewModifier {
 /// centre maps to scale * p + pan, so keeping the point that was under the
 /// fingers' last centre under the new one gives
 /// pan' = c - r * (last - pan).
+///
+/// UIKit's pinch doesn't end when a finger lifts: it carries on with one
+/// until the last lifts. It moves nothing with one, and says so through
+/// `onFingers`, so the area's drag can move the content with that finger.
 private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
     let bounds: NativeUIPanBounds
     let pinchId: Int
@@ -551,6 +575,8 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
     let panYId: Int
     let clamp: (CGFloat) -> CGFloat
     let onBegin: () -> Void
+    /// Whether two fingers are on the pinch, each time that changes.
+    let onFingers: (Bool) -> Void
     let onEnd: (CGFloat) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
@@ -573,8 +599,14 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
         case .began:
             recognizer.scale = 1
             context.coordinator.lastCentre = centre
+            context.coordinator.twoFingers = true
             onBegin()
         case .changed:
+            let twoFingers = recognizer.numberOfTouches >= 2
+            if twoFingers != context.coordinator.twoFingers {
+                context.coordinator.twoFingers = twoFingers
+                onFingers(twoFingers)
+            }
             // A finger lifting or landing moves the centre without the
             // content moving: start again from the new centre.
             guard recognizer.numberOfTouches >= 2, let last = context.coordinator.lastCentre,
@@ -599,6 +631,7 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
         case .ended, .cancelled, .failed:
             context.coordinator.lastCentre = nil
             context.coordinator.touches = 2
+            context.coordinator.twoFingers = true
             onEnd(store.value(for: pinchId))
         default:
             break
@@ -608,12 +641,206 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var lastCentre: CGPoint?
         var touches = 2
+        var twoFingers = true
 
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
             true
+        }
+    }
+}
+
+/// Attaches BoundedPanRecognizer to a `bounded` area with a pan bound.
+private struct BoundedPanModifier: ViewModifier {
+    let enabled: Bool
+    let bounds: NativeUIPanBounds
+    let pinchId: Int
+    let panXId: Int
+    let panYId: Int
+    let settle: NativeUIPanSettle
+    let began: () -> Bool
+    let moved: (CGSize) -> Void
+    let ended: (CGSize) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.gesture(BoundedPanRecognizer(
+                bounds: bounds, pinchId: pinchId, panXId: panXId, panYId: panYId,
+                settle: settle, began: began, moved: moved, ended: ended
+            ))
+        } else {
+            content
+        }
+    }
+}
+
+/// The drag of a `bounded` area. It only begins while the content has
+/// room to move on a bound axis at the zoom it's at when the finger starts
+/// moving, read from the store there and then (and, while a double tap's
+/// zoom runs, at the zoom it's heading for too), so at whole size a drag
+/// on the area goes to whatever is around it: a pager pages, a drag to
+/// close closes, a scroll view scrolls, the swipe back pops. Zoomed in,
+/// the drag is the area's alone: an enclosing scroll view, an enclosing
+/// area's one-axis pan (AxisPanRecognizer) and iOS 26's swipe back from
+/// mid-screen all wait for this pan to fail, and the edge swipe back still
+/// wins, since this pan waits for it. SwiftUI's drag can't hand a drag on
+/// like this: with `minimumDistance: 0` it claims every touch as it lands.
+///
+/// It runs alongside the area's pinch and double tap. It takes any number
+/// of fingers, so a pager stays put while zoomed content is pinched; the
+/// pinch moves the pan while two fingers are on it and this pan's steps
+/// are dropped, and a finger left over drags the content on.
+///
+/// SwiftUI puts UIKit recognizers on whichever UIView hosts the SwiftUI
+/// views, which an enclosing area's may share, so the pans that wait are
+/// picked out by what they are, never by where their views sit.
+private struct BoundedPanRecognizer: UIGestureRecognizerRepresentable {
+    let bounds: NativeUIPanBounds
+    let pinchId: Int
+    let panXId: Int
+    let panYId: Int
+    /// The area's spring back, which also runs a double tap's zoom.
+    let settle: NativeUIPanSettle
+    /// As the drag begins: whether the content still has to catch up with
+    /// the finger's movement since it landed, rather than having followed
+    /// it already.
+    let began: () -> Bool
+    /// The finger's movement since the last step, in the area's space.
+    let moved: (CGSize) -> Void
+    /// The whole drag's translation, once the fingers lift.
+    let ended: (CGSize) -> Void
+
+    /// Less counts as none, so a pinch ending at 1.004x doesn't stall a pager.
+    static let minimumRoom: CGFloat = 2
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(hasRoom: hasRoom)
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.hasRoom = hasRoom
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    /// Whether the content can move on a bound axis at the zoom it's at
+    /// when asked, rather than when the area was last drawn.
+    private var hasRoom: () -> Bool {
+        let bounds = bounds
+        let pinchId = pinchId
+        let panXId = panXId
+        let panYId = panYId
+        let settle = settle
+        return {
+            var scale = pinchId != 0 ? SharedValueStore.shared.value(for: pinchId) : 1
+            // While a double tap's zoom runs, there's room only if there is
+            // now and where it's heading. A swipe during a zoom out would
+            // otherwise see room in the scale it's passing through, begin,
+            // and stop the zoom part way with its first step, leaving the
+            // content zoomed for real so no later swipe pages either. A zoom
+            // in still gives the drag up once it has real room.
+            if let target = settle.zoomingTo { scale = min(scale, target) }
+            return (panXId != 0 && bounds.limit(.horizontal, scale: scale) > Self.minimumRoom)
+                || (panYId != 0 && bounds.limit(.vertical, scale: scale) > Self.minimumRoom)
+        }
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        let coordinator = context.coordinator
+        let point = context.converter.localTranslation ?? recognizer.translation(in: recognizer.view)
+        let translation = CGSize(width: point.x, height: point.y)
+        switch recognizer.state {
+        case .began, .changed:
+            if recognizer.state == .began {
+                coordinator.active = true
+                // Catching up, the first step is all the finger has moved
+                // since it landed; otherwise it's nothing.
+                coordinator.last = began() ? .zero : translation
+                coordinator.touches = recognizer.numberOfTouches
+            }
+            // A finger landing or lifting moves the touches' centre without
+            // the content moving: carry on from the new centre.
+            let step = recognizer.numberOfTouches == coordinator.touches
+                ? CGSize(width: translation.width - coordinator.last.width, height: translation.height - coordinator.last.height)
+                : .zero
+            coordinator.touches = recognizer.numberOfTouches
+            coordinator.last = translation
+            moved(step)
+        case .ended, .cancelled, .failed:
+            guard coordinator.active else { return }
+            coordinator.active = false
+            ended(translation)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var hasRoom: () -> Bool
+        /// The drag's translation at the last step, how many fingers it
+        /// had then, and whether it began.
+        var last: CGSize = .zero
+        var touches = 0
+        var active = false
+
+        init(hasRoom: @escaping () -> Bool) {
+            self.hasRoom = hasRoom
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            hasRoom()
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            isTakenFrom(otherGestureRecognizer, by: gestureRecognizer)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let navigation = navigationController(of: gestureRecognizer.view) else { return false }
+            return otherGestureRecognizer === navigation.interactivePopGestureRecognizer
+        }
+
+        /// The pinch, the double tap and the rest run alongside; the pans
+        /// this drag is taken from don't, and nor does another bounded
+        /// area's drag.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            !isTakenFrom(otherGestureRecognizer, by: gestureRecognizer)
+                && !(otherGestureRecognizer.delegate is BoundedPanRecognizer.Coordinator)
+        }
+
+        /// Whether `other` is one of the pans that wait for this drag to
+        /// fail: a scroll view's, an enclosing area's one-axis pan, or iOS
+        /// 26's swipe back from mid-screen. Another bounded area's drag is
+        /// left out, since each would wait for the other: nested bounded
+        /// areas race, and the first to begin takes the drag.
+        private func isTakenFrom(_ other: UIGestureRecognizer, by pan: UIGestureRecognizer) -> Bool {
+            if let scrollView = other.view as? UIScrollView, other === scrollView.panGestureRecognizer {
+                return true
+            }
+            if other.delegate is AxisPanRecognizer.Coordinator {
+                return true
+            }
+            if #available(iOS 26.0, *),
+               let navigation = navigationController(of: pan.view),
+               other === navigation.interactiveContentPopGestureRecognizer {
+                return true
+            }
+            return false
         }
     }
 }
@@ -662,6 +889,21 @@ struct NativeUIPanBounds {
         let damped = (1 - 1 / (overshoot * 0.55 / extent + 1)) * extent
         return (pan < 0 ? -1 : 1) * (limit + damped)
     }
+
+    /// The undamped pan that `resisted` shows as `shown`, so a drag that
+    /// picks the content up past an edge (where a pinch left it, or part
+    /// way through the spring back) carries on from there instead of
+    /// jumping in. The damped overshoot never reaches the area's size, so
+    /// one at or past it starts from just inside.
+    func unresisted(_ shown: CGFloat, axis: Axis, scale: CGFloat) -> CGFloat {
+        let limit = limit(axis, scale: scale)
+        let overshoot = abs(shown) - limit
+        guard overshoot > 0 else { return shown }
+        let extent = max(1, axis == .horizontal ? area.width : area.height)
+        let damped = min(overshoot, extent * 0.99)
+        let raw = damped * extent / ((extent - damped) * 0.55)
+        return (shown < 0 ? -1 : 1) * (limit + raw)
+    }
 }
 
 /// Moves pan values back inside their bounds, frame by frame through the
@@ -682,14 +924,20 @@ final class NativeUIPanSettle: NSObject {
     private var moves: [Move] = []
     /// Run once the moves land; dropped if something stops them first.
     private var landed: (() -> Void)?
+    /// The scale a double tap's zoom is heading for while it runs, so the
+    /// area's drag can judge room by where the zoom ends up rather than by
+    /// a scale it's only passing through (see BoundedPanRecognizer). A
+    /// spring back doesn't change the scale, so it has none.
+    private(set) var zoomingTo: CGFloat?
 
-    func run(_ moves: [Move], landed: (() -> Void)? = nil) {
+    func run(_ moves: [Move], zoomingTo: CGFloat? = nil, landed: (() -> Void)? = nil) {
         stop()
         self.moves = moves.filter { $0.id != 0 && abs($0.to - $0.from) > 0.01 }
         guard !self.moves.isEmpty else {
             landed?()
             return
         }
+        self.zoomingTo = zoomingTo
         self.landed = landed
         startedAt = CACurrentMediaTime()
         let link = CADisplayLink(target: self, selector: #selector(step(_:)))
@@ -701,6 +949,7 @@ final class NativeUIPanSettle: NSObject {
         link?.invalidate()
         link = nil
         landed = nil
+        zoomingTo = nil
     }
 
     @objc private func step(_ link: CADisplayLink) {
@@ -928,17 +1177,19 @@ private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
             guard let navigation = navigationController(of: gestureRecognizer.view) else { return false }
             return otherGestureRecognizer === navigation.interactivePopGestureRecognizer
         }
-
-        private func navigationController(of view: UIView?) -> UINavigationController? {
-            var responder: UIResponder? = view
-            while let current = responder {
-                if let navigation = current as? UINavigationController { return navigation }
-                if let controller = current as? UIViewController, let navigation = controller.navigationController { return navigation }
-                responder = current.next
-            }
-            return nil
-        }
     }
+}
+
+/// The navigation controller a recognizer's view is shown in, for the
+/// swipe back's recognizers.
+private func navigationController(of view: UIView?) -> UINavigationController? {
+    var responder: UIResponder? = view
+    while let current = responder {
+        if let navigation = current as? UINavigationController { return navigation }
+        if let controller = current as? UIViewController, let navigation = controller.navigationController { return navigation }
+        responder = current.next
+    }
+    return nil
 }
 
 // MARK: - Double tap (conditional)

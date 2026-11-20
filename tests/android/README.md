@@ -37,6 +37,24 @@ the pull goes out past the point, the pan follows the finger to the point
 and resists past it, and a drag the other way is left to an enclosing
 scroll container.
 
+`GestureAreaBoundedPanTest` puts a `bounded` photo with both pans and a pinch
+bound on the first page of a horizontal pager, inside a vertical drag to
+close. At whole size, and at 1.01x where there is under 2dp of room, a drag
+pages the pager or moves the drag to close and leaves the pans at rest.
+Zoomed, the same drags pan the photo and leave the pager and the drag to close
+still. A drag the pager or the drag to close has taken stays with it when the
+photo zooms partway through, even in steps bigger than touch slop, until a
+second finger makes it a pinch and the pager goes back. A pinch at whole size
+zooms without paging, and a pinch in doesn't start the drag to close. A double
+tap zooms and aims the bound pans, and a pinch straight after it carries on
+from its zoom. A swipe straight after a double tap back out pages while the
+zoom lands and reports; after a double tap in it pages if it passes slop
+before the zoom's first frame, and once the zoom has room it pans and stops
+the zoom there. The pager
+is Compose's `HorizontalPager`, which the production pager renders, and the
+drag to close is `detectVerticalDragGestures`, which a gesture area with a
+lone `pan-y-id` runs: `NodeView` here can't hold a gesture area.
+
 `TextInputCaretTest` pushes a new value into the outlined, filled and bare
 editors and checks where the caret lands: where the `selection` props say
 (code points, clamped), at the end when they don't, never on an echo of what

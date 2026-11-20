@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.layout.Box
@@ -31,8 +32,10 @@ import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -117,18 +120,23 @@ import kotlin.math.abs
  *                                fits on stays centred, a drag past an
  *                                edge meets resistance, and the content
  *                                springs back into place on release. A
- *                                pinch zooms around the fingers.
+ *                                pinch zooms around the fingers and a
+ *                                double tap aims at the tapped point,
+ *                                both moving the bound pans. A
+ *                                one-finger drag is the area's only
+ *                                while the content has room to move on
+ *                                a bound axis (see MinRoomDp) at the
+ *                                zoom it has when the drag starts.
+ *                                Content that fits leaves the drag to
+ *                                whatever is around the area (a pager,
+ *                                a drag to close, a scroll container),
+ *                                so a photo at whole size pages and
+ *                                closes with its pans bound. Two
+ *                                fingers down are a pinch, and the
+ *                                area's either way.
  *   - `content-ratio`  (float) — the content's width over height,
  *                                fitted inside the area, for `bounded`
  *                                (0 = the content fills the area).
- *   - `zoom-pan-x-id` /
- *     `zoom-pan-y-id`  (int)   — the pan a zoom moves while no pan is
- *                                bound (`-initial` seeds each): a pinch
- *                                keeps the point between the fingers in
- *                                place and a double tap aims at the
- *                                tapped point, but one-finger drags are
- *                                left to whatever is around the area. A
- *                                bound pan takes their place.
  *   - `double-tap-zoom` (float)— the scale a double tap zooms the pinch
  *                                to from 1, bringing the tapped point to
  *                                the middle as far as `bounded` allows; a
@@ -154,12 +162,7 @@ object GestureAreaRenderer {
         val onPinchEnd = node.props.getInt("on_pinch_end", 0)
         val onSwipe = node.props.getInt("on_swipe", 0)
         val swipeFingers = node.props.getInt("swipe-fingers", 1)
-        val zoomPanXId = node.props.getInt("zoom-pan-x-id", 0)
-        val zoomPanYId = node.props.getInt("zoom-pan-y-id", 0)
         val doubleTapZoom = node.props.getFloat("double-tap-zoom", 0f)
-        // The pan a zoom moves: the drag's own, or failing that the zoom's.
-        val zoomX = if (panXId != 0) panXId else zoomPanXId
-        val zoomY = if (panYId != 0) panYId else zoomPanYId
 
         // `bounded` only: the area's size in dp (pan values are dp), and the
         // two-finger state and spring back the drag and pinch share.
@@ -200,8 +203,6 @@ object GestureAreaRenderer {
         SyncBinding(panXId, panXInitial, if (snapX.isEmpty && triggerX.isEmpty) null else { value -> snapping.to(panXId, value, scope) })
         SyncBinding(panYId, panYInitial, if (snapY.isEmpty && triggerY.isEmpty) null else { value -> snapping.to(panYId, value, scope) })
         SyncBinding(pinchId, pinchInitial)
-        if (zoomPanXId != panXId) SyncBinding(zoomPanXId, node.props.getFloat("zoom-pan-x-initial", 0f))
-        if (zoomPanYId != panYId) SyncBinding(zoomPanYId, node.props.getFloat("zoom-pan-y-initial", 0f))
 
         Box(
             modifier = modifier
@@ -209,7 +210,7 @@ object GestureAreaRenderer {
                 .onSizeChanged { size ->
                     areaSize = with(density) { Size(size.width.toDp().value, size.height.toDp().value) }
                 }
-                .pointerInput(panXId, panYId, onDragEnd, bounds, snapX, snapY, triggerX, triggerY, onTrigger) {
+                .pointerInput(panXId, panYId, pinchId, onDragEnd, bounds, snapX, snapY, triggerX, triggerY, onTrigger) {
                     if (panXId == 0 && panYId == 0 && onDragEnd == 0) return@pointerInput
                     if (bounds.enabled) {
                         // The undamped pan the finger asked for, and what was
@@ -219,18 +220,10 @@ object GestureAreaRenderer {
                         var rawY = 0f
                         var writtenX = 0f
                         var writtenY = 0f
-                        detectDragGestures(
-                            onDragEnd = {
-                                val (x, y) = settle.into(bounds, scope, panXId, panYId, pinchId)
-                                if (onDragEnd != 0) {
-                                    NativeUIBridge.sendTextChangeEvent(onDragEnd, node.id, "$x,$y")
-                                }
-                            },
-                            onDragCancel = { settle.into(bounds, scope, panXId, panYId, pinchId) },
-                        ) { _, dragAmount ->
+                        val step: (Offset) -> Unit = step@{ dragAmount ->
                             // Two fingers down: the pinch moves the pan with
                             // both of them, so the first finger alone mustn't.
-                            if (settle.pinching) return@detectDragGestures
+                            if (settle.pinching) return@step
                             settle.stop()
                             val scale = if (pinchId != 0) SharedValueStore.valueOf(pinchId) else 1f
                             if (panXId != 0) {
@@ -246,6 +239,92 @@ object GestureAreaRenderer {
                                 rawY += dragAmount.y.toDp().value
                                 writtenY = bounds.resisted(rawY, horizontal = false, scale = scale)
                                 SharedValueStore.set(panYId, writtenY)
+                            }
+                        }
+                        // Whether the content has room to move on a bound axis
+                        // at the zoom it has right now. The scale is read here,
+                        // not keyed on, so a pinch or a double tap that has just
+                        // zoomed in counts on the very next drag. While a double
+                        // tap's zoom animates there must be room both now and
+                        // where the zoom is heading, so the smaller scale counts.
+                        // A drag as it zooms back out is left to the pager, and
+                        // the zoom finishes and reports, rather than the drag
+                        // stopping it part way and keeping the content zoomed. A
+                        // drag in the first frames of a zoom in pages too, rather
+                        // than freezing the content barely zoomed; once the zoom
+                        // in has real room the drag takes it and stops it there.
+                        val roomToMove = {
+                            val live = if (pinchId != 0) SharedValueStore.valueOf(pinchId) else 1f
+                            val scale = minOf(live, settle.zoomingTo ?: live)
+                            (panXId != 0 && bounds.limit(horizontal = true, scale = scale) > MinRoomDp) ||
+                                (panYId != 0 && bounds.limit(horizontal = false, scale = scale) > MinRoomDp)
+                        }
+                        val slop = viewConfiguration.touchSlop
+                        awaitEachGesture {
+                            // Content that fits the area has nowhere to pan, so a
+                            // drag over it is left unconsumed for whatever is
+                            // around the area: a pager pages, a drag to close
+                            // closes, a scroll container scrolls, as if no pan
+                            // were bound. With room to move the drag is the
+                            // area's, and consuming it keeps the pager and the
+                            // drag to close still. Two fingers down are a pinch,
+                            // which is the area's too: a drag to close follows
+                            // the first finger alone, and would move while a
+                            // pinch in at whole size zooms nothing.
+                            //
+                            // Room is judged once, when the finger first passes
+                            // touch slop. Once a parent has consumed the drag it
+                            // keeps it, however the zoom changes after, until a
+                            // second finger comes down and makes it a pinch.
+                            // Compose's awaitTouchSlopOrCancellation can't do
+                            // this: left unconsumed it starts the slop over, and
+                            // a fast drag that passes slop again on its next
+                            // event is judged again before the parent sees it.
+                            var pointer = awaitFirstDown(requireUnconsumed = false).id
+                            var travel = Offset.Zero
+                            var parentHasIt = false
+                            var overSlop = Offset.Zero
+                            var start: PointerInputChange? = null
+                            while (start == null) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == pointer } ?: return@awaitEachGesture
+                                if (change.changedToUpIgnoreConsumed()) {
+                                    pointer = event.changes.firstOrNull { it.pressed }?.id ?: return@awaitEachGesture
+                                    continue
+                                }
+                                val pinching = pinchId != 0 && event.changes.count { it.pressed } >= 2
+                                if (parentHasIt) {
+                                    if (pinching) start = change
+                                } else {
+                                    // Something inside the area took it first.
+                                    if (change.isConsumed) return@awaitEachGesture
+                                    travel += change.positionChangeIgnoreConsumed()
+                                    val distance = travel.getDistance()
+                                    if (distance >= slop) {
+                                        if (pinching || roomToMove()) {
+                                            start = change
+                                            overSlop = travel * ((distance - slop) / distance)
+                                        } else {
+                                            travel = Offset.Zero
+                                        }
+                                    }
+                                }
+                                if (start == null) {
+                                    // Every handler has had this event by the
+                                    // Final pass: a parent that took it has it.
+                                    awaitPointerEvent(PointerEventPass.Final)
+                                    if (change.isConsumed) parentHasIt = true
+                                }
+                            }
+                            start.consume()
+                            step(overSlop)
+                            val lifted = drag(start.id) { change ->
+                                step(change.positionChange())
+                                change.consume()
+                            }
+                            val (x, y) = settle.into(bounds, scope, panXId, panYId, pinchId)
+                            if (lifted && onDragEnd != 0) {
+                                NativeUIBridge.sendTextChangeEvent(onDragEnd, node.id, "$x,$y")
                             }
                         }
                         return@pointerInput
@@ -374,7 +453,7 @@ object GestureAreaRenderer {
                         }
                     }
                 }
-                .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax, bounds, zoomX, zoomY) {
+                .pointerInput(pinchId, onPinchEnd, pinchMin, pinchMax, bounds, panXId, panYId) {
                     if (pinchId == 0 && onPinchEnd == 0) return@pointerInput
                     awaitEachGesture {
                         // The zoom factor is dimensionless — no px/dp
@@ -393,6 +472,12 @@ object GestureAreaRenderer {
                             val event = awaitPointerEvent()
                             val fingers = event.changes.count { it.pressed }
                             if (fingers >= 2) {
+                                // Carry on from the store each step, as iOS
+                                // does, not from where it was when the gesture
+                                // began: a double tap's zoom animates after its
+                                // second tap lifts, so a pinch straight after it
+                                // would otherwise start from the old scale.
+                                if (pinchId != 0) scale = SharedValueStore.valueOf(pinchId)
                                 val zoom = event.calculateZoom()
                                 val previous = scale
                                 if (zoom != 1f) {
@@ -422,13 +507,13 @@ object GestureAreaRenderer {
                                         val cy = centroid.y.toDp().value - bounds.area.height / 2
                                         val lastX = cx - move.x.toDp().value
                                         val lastY = cy - move.y.toDp().value
-                                        if (zoomX != 0) {
-                                            val pan = SharedValueStore.valueOf(zoomX)
-                                            SharedValueStore.set(zoomX, cx - applied * (lastX - pan))
+                                        if (panXId != 0) {
+                                            val pan = SharedValueStore.valueOf(panXId)
+                                            SharedValueStore.set(panXId, cx - applied * (lastX - pan))
                                         }
-                                        if (zoomY != 0) {
-                                            val pan = SharedValueStore.valueOf(zoomY)
-                                            SharedValueStore.set(zoomY, cy - applied * (lastY - pan))
+                                        if (panYId != 0) {
+                                            val pan = SharedValueStore.valueOf(panYId)
+                                            SharedValueStore.set(panYId, cy - applied * (lastY - pan))
                                         }
                                     }
                                 }
@@ -439,14 +524,14 @@ object GestureAreaRenderer {
                         }
                         settle.pinching = false
                         if ((zoomed || moved) && bounds.enabled) {
-                            settle.into(bounds, scope, zoomX, zoomY, pinchId)
+                            settle.into(bounds, scope, panXId, panYId, pinchId)
                         }
                         if (zoomed && onPinchEnd != 0) {
                             NativeUIBridge.sendSliderChangeEvent(onPinchEnd, node.id, scale)
                         }
                     }
                 }
-                .pointerInput(doubleTapZoom, pinchId, pinchMin, pinchMax, bounds, zoomX, zoomY, onPinchEnd) {
+                .pointerInput(doubleTapZoom, pinchId, pinchMin, pinchMax, bounds, panXId, panYId, onPinchEnd) {
                     if (doubleTapZoom <= 1f || pinchId == 0) return@pointerInput
                     // Two taps close together in time and place. Nothing is
                     // consumed, so a pinch, a pan, a pager or a drag to close
@@ -466,8 +551,8 @@ object GestureAreaRenderer {
                         // content point (c - pan) / scale, which sits in the
                         // middle once the pan is -zoom times it.
                         val scale = SharedValueStore.valueOf(pinchId)
-                        val panX = if (zoomX != 0) SharedValueStore.valueOf(zoomX) else 0f
-                        val panY = if (zoomY != 0) SharedValueStore.valueOf(zoomY) else 0f
+                        val panX = if (panXId != 0) SharedValueStore.valueOf(panXId) else 0f
+                        val panY = if (panYId != 0) SharedValueStore.valueOf(panYId) else 0f
                         val zoomedIn = scale > 1.01f
                         var target = if (zoomedIn) 1f else doubleTapZoom
                         if (pinchMin > 0f) target = maxOf(pinchMin, target)
@@ -481,7 +566,7 @@ object GestureAreaRenderer {
                             toY = bounds.settled(-target * pointY, horizontal = false, scale = target)
                         }
                         val zoomTo = target
-                        settle.zoom(scope, listOf(Triple(pinchId, scale, zoomTo), Triple(zoomX, panX, toX), Triple(zoomY, panY, toY))) {
+                        settle.zoom(scope, zoomTo, listOf(Triple(pinchId, scale, zoomTo), Triple(panXId, panX, toX), Triple(panYId, panY, toY))) {
                             if (onPinchEnd != 0) {
                                 NativeUIBridge.sendSliderChangeEvent(onPinchEnd, node.id, zoomTo)
                             }
@@ -721,28 +806,40 @@ object GestureAreaRenderer {
     private class BoundedPan {
         var pinching = false
 
+        /**
+         * The scale a double tap's zoom is heading to while it animates, else
+         * null. A drag judges room by it, so one that starts as the zoom goes
+         * back to 1 is the pager's, not the half-zoomed content's.
+         */
+        var zoomingTo: Float? = null
+            private set
+
         private var job: Job? = null
 
         fun stop() {
             job?.cancel()
             job = null
+            zoomingTo = null
         }
 
         /**
-         * Animates a double tap's zoom: each (id, from, to) in step, then
-         * [landed]. A pinch or a drag stopping it first means it never lands.
+         * Animates a double tap's zoom to [scale]: each (id, from, to) in
+         * step, then [landed]. A pinch or a drag stopping it first means it
+         * never lands.
          */
-        fun zoom(scope: CoroutineScope, moves: List<Triple<Int, Float, Float>>, landed: () -> Unit) {
+        fun zoom(scope: CoroutineScope, scale: Float, moves: List<Triple<Int, Float, Float>>, landed: () -> Unit) {
             stop()
             val moving = moves.filter { (id, from, to) -> id != 0 && abs(to - from) > 0.01f }
             if (moving.isEmpty()) {
                 landed()
                 return
             }
+            zoomingTo = scale
             job = scope.launch {
                 animate(0f, 1f, animationSpec = tween(SettleMillis, easing = EaseOutCubic)) { progress, _ ->
                     moving.forEach { (id, from, to) -> SharedValueStore.set(id, from + (to - from) * progress) }
                 }
+                zoomingTo = null
                 landed()
             }
         }
@@ -872,6 +969,9 @@ object GestureAreaRenderer {
             }
         }
     }
+
+    /** Room to pan under this many dp counts as none, so a pinch let go just past 1x (about 1.01x on a phone) doesn't keep drags from the pager. */
+    private const val MinRoomDp = 2f
 
     /** How long a pan takes to spring back inside its bounds or onto a snap point. */
     private const val SettleMillis = 350
