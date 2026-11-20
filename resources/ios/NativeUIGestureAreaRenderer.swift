@@ -64,15 +64,36 @@ import UIKit
 ///   - `swipe-fingers`  (int)   — touches required for the swipe
 ///                                (default 1; Jump-style is 3).
 ///   - `bounded`        (bool)  — keep the zoomed content inside the
-///                                area (see NativeUIPanBounds): pan stops at the
+///                                area (see NativeUIPanBounds), and
+///                                clip it to the area: pan stops at the
 ///                                content's edges, an axis the content
-///                                fits on stays centred, a drag past an
-///                                edge meets resistance, and the content
-///                                springs back into place on release. A
-///                                pinch zooms around the fingers.
+///                                fits on stays centred, and let go the
+///                                content glides on at the finger's
+///                                speed and bounces off an edge (see
+///                                NativeUIPanGlide). A pinch zooms
+///                                around the fingers. The area only
+///                                takes a drag while the content is
+///                                zoomed and has room to move the way
+///                                the finger is going, at the zoom it's
+///                                at (see BoundedPanRecognizer), so at
+///                                whole size a drag goes to whatever is
+///                                around the area: a pager, a drag to
+///                                close, a scroll view, the swipe back.
+///                                Zoomed, at an edge, it goes to a pager
+///                                or a scroll view but not a drag to
+///                                close. A drag that reaches an
+///                                edge moves the scroll view around the
+///                                area on (see NativeUIPanHandOff), or
+///                                meets resistance with none.
 ///   - `content-ratio`  (float) — the content's width over height,
 ///                                fitted inside the area, for `bounded`
 ///                                (0 = the content fills the area).
+///   - `double-tap-zoom` (float)— the scale a double tap zooms the pinch
+///                                to from 1, bringing the tapped point
+///                                to the middle as far as `bounded`
+///                                allows; a double tap past 1 goes back
+///                                to 1. Animated, then `on_pinch_end`
+///                                reports the new scale.
 ///
 /// On gesture end, each anchor is reset so subsequent gestures continue
 /// from the current value rather than snapping back.
@@ -82,18 +103,26 @@ struct NativeUIGestureAreaRenderer: View {
     @State private var dragStartX: CGFloat = 0
     @State private var dragStart: CGFloat = 0
     @ObservedObject private var store = SharedValueStore.shared
+    /// The axes a gesture area around this one pans on, such as a drag to
+    /// close, which zoomed content keeps its drags from.
+    @Environment(\.nativeUIGesturePans) private var around
 
-    // `bounded` only: the area's size, the drag's last translation (bounded
-    // drags move by each step's change, so a pinch can move the pan in the
-    // same gesture), the undamped pan the finger asked for and what was last
-    // written, whether two fingers are pinching (the pinch then moves the
-    // pan, not the drag), and the spring back.
+    // `bounded` only: the area's size, the undamped pan the finger asked
+    // for and what was last written, whether two fingers are pinching (the
+    // pinch then moves the pan, not the drag; a finger left over drags
+    // it), whether a pinch and a drag are under way (each until the last
+    // finger lifts; whichever ends last springs the content back), and the
+    // spring back.
     @State private var areaSize: CGSize = .zero
-    @State private var lastTranslation: CGSize = .zero
     @State private var rawPan: CGSize = .zero
     @State private var writtenPan: CGSize = .zero
     @State private var pinching = false
+    @State private var pinchUnderWay = false
+    @State private var dragUnderWay = false
     @State private var settle = NativeUIPanSettle()
+    // The scroll views a bounded drag has pulled along past the content's
+    // edges (a pager), and how far.
+    @State private var handOff = NativeUIPanHandOff()
     // A trigger axis only: the haptic at the point, and whether the pull
     // is past it.
     @State private var pull = NativeUIPanPull()
@@ -124,6 +153,7 @@ struct NativeUIGestureAreaRenderer: View {
         let triggerX = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-x-trigger", default: 0)))
         let triggerY = NativeUIPanTrigger(distance: CGFloat(node.props.getFloat("pan-y-trigger", default: 0)))
         let onTrigger = node.props.getInt("on_trigger", default: 0)
+        let doubleTapZoom = CGFloat(node.props.getFloat("double-tap-zoom", default: 0))
         // One bound axis and nothing else moving the pan: a UIKit pan that
         // only takes drags along that axis, so an enclosing scroll view
         // keeps the other (see AxisPanRecognizer). SwiftUI's drag below
@@ -139,19 +169,26 @@ struct NativeUIGestureAreaRenderer: View {
                 NodeView(node: child).equatable()
             }
         }
+        // A bounded area inside this one keeps its zoomed drags from this
+        // one's pans.
+        .environment(\.nativeUIGesturePans, bounds.enabled ? around : NativeUIGesturePans(
+            horizontal: around.horizontal || panXId != 0,
+            vertical: around.vertical || panYId != 0
+        ))
+        // Zoomed content stays inside a bounded area, so it doesn't draw
+        // over what's around it or onto the next page as it slides in.
+        .modifier(BoundedClip(enabled: bounds.enabled))
         .contentShape(Rectangle())
         .onGeometryChange(for: CGSize.self) { $0.size } action: { areaSize = $0 }
         // `including: .subviews` disables the drag entirely when no pan
         // binding exists — DragGesture(minimumDistance: 0) recognizes on
         // touch-down and would otherwise starve the swipe recognizers
-        // and any other non-simultaneous gesture on the area.
+        // and any other non-simultaneous gesture on the area. A `bounded`
+        // area drags through BoundedPanRecognizer instead, which only
+        // takes a drag while the zoomed content has room to move.
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    if bounds.enabled {
-                        dragBounded(value.translation, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
-                        return
-                    }
                     if panXId != 0 {
                         store.set(dragStartX + value.translation.width, for: panXId)
                     }
@@ -160,24 +197,46 @@ struct NativeUIGestureAreaRenderer: View {
                     }
                 }
                 .onEnded { value in
-                    if bounds.enabled {
-                        lastTranslation = .zero
-                        settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
-                    }
                     if panXId != 0 { dragStartX = store.value(for: panXId) }
                     if panYId != 0 { dragStart = store.value(for: panYId) }
-                    guard onDragEnd != 0 else { return }
-                    // Report the resting translation of each bound axis;
-                    // an unbound axis reports the raw gesture translation
-                    // so a callback-only area (no SharedValue) still learns
-                    // where the finger let go.
-                    let scale = pinchId != 0 ? store.value(for: pinchId) : 1
-                    let x = panXId != 0 ? bounds.settled(store.value(for: panXId), axis: .horizontal, scale: scale) : value.translation.width
-                    let y = panYId != 0 ? bounds.settled(store.value(for: panYId), axis: .vertical, scale: scale) : value.translation.height
-                    NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: "\(x),\(y)")
+                    reportDragEnd(onDragEnd, translation: value.translation, rest: nil, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
                 },
-            including: hasPan && axisPan == nil ? .all : .subviews
+            including: hasPan && axisPan == nil && !bounds.enabled ? .all : .subviews
         )
+        .modifier(BoundedPanModifier(
+            enabled: bounds.enabled && (panXId != 0 || panYId != 0),
+            bounds: bounds,
+            pinchId: pinchId,
+            panXId: panXId,
+            panYId: panYId,
+            around: around,
+            settle: settle,
+            began: { scrollViews in
+                dragUnderWay = true
+                handOff.begin(with: scrollViews)
+                // A drag that begins under a pinch picks the content up
+                // where the pinch left it, under the fingers already.
+                return !pinchUnderWay
+            },
+            moved: { step in
+                dragBounded(step, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+            },
+            ended: { translation, velocity in
+                dragUnderWay = false
+                // What the drag pulled along settles with the flick on its
+                // axis, so a flick past a zoomed photo's edge pages, and the
+                // content stays at that edge. On the other axes it glides.
+                let handed = handOff.end(velocity: velocity)
+                var rest: CGSize?
+                if !pinchUnderWay {
+                    rest = glideIntoBounds(
+                        velocity: CGSize(width: handed.horizontal ? 0 : velocity.width, height: handed.vertical ? 0 : velocity.height),
+                        panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds
+                    )
+                }
+                reportDragEnd(onDragEnd, translation: translation, rest: rest, panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+            }
+        ))
         .modifier(AxisPanModifier(
             axis: axisPan,
             pulls: axisPan == .horizontal ? triggerX.distance : triggerY.distance,
@@ -235,13 +294,29 @@ struct NativeUIGestureAreaRenderer: View {
             panYId: panYId,
             onBoundedBegin: {
                 settle.stop()
+                pinchUnderWay = true
                 pinching = true
             },
+            onBoundedFingers: { two in
+                // UIKit's pinch carries on with one finger left: that
+                // finger drags the content on, and a second landing hands
+                // it back to the pinch.
+                pinching = two
+            },
             onBoundedEnd: {
+                pinchUnderWay = false
                 pinching = false
-                settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+                if !dragUnderWay {
+                    settleIntoBounds(panXId: panXId, panYId: panYId, pinchId: pinchId, bounds: bounds)
+                }
             }
         ))
+        .modifier(DoubleTapModifier(enabled: doubleTapZoom > 1 && pinchId != 0) { location in
+            zoomOnDoubleTap(
+                at: location, to: doubleTapZoom, pinchId: pinchId, panXId: panXId, panYId: panYId,
+                minScale: pinchMin, maxScale: pinchMax, bounds: bounds, onPinchEnd: onPinchEnd
+            )
+        })
         .modifier(SwipeModifier(
             nodeId: node.id,
             onSwipe: onSwipe,
@@ -301,31 +376,123 @@ struct NativeUIGestureAreaRenderer: View {
         settle.run([.init(id: id, from: store.value(for: id), to: value)])
     }
 
-    /// A bounded drag step: moves each bound axis by this step's change,
-    /// freely inside the bounds and with growing resistance past them.
-    private func dragBounded(_ translation: CGSize, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
-        let step = CGSize(width: translation.width - lastTranslation.width, height: translation.height - lastTranslation.height)
-        lastTranslation = translation
-        // SwiftUI's drag follows one finger; while two are down the pinch
-        // moves the pan with both of them.
+    /// Tells PHP where a drag ended: the resting translation of each bound
+    /// axis (where a glide will stop, given one), and for an unbound axis
+    /// the raw gesture translation, so a callback-only area (no
+    /// SharedValue) still learns where the finger let go.
+    private func reportDragEnd(_ onDragEnd: Int, translation: CGSize, rest: CGSize?, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
+        guard onDragEnd != 0 else { return }
+        let scale = pinchId != 0 ? store.value(for: pinchId) : 1
+        let x = panXId != 0 ? rest?.width ?? bounds.settled(store.value(for: panXId), axis: .horizontal, scale: scale) : translation.width
+        let y = panYId != 0 ? rest?.height ?? bounds.settled(store.value(for: panYId), axis: .vertical, scale: scale) : translation.height
+        NativeElementBridge.sendTextChangeEvent(onDragEnd, nodeId: node.id, text: "\(x),\(y)")
+    }
+
+    /// A bounded drag step: moves each bound axis by the finger's movement
+    /// since the last step, freely inside the bounds and with growing
+    /// resistance past them.
+    private func dragBounded(_ step: CGSize, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) {
+        // While two fingers are pinching, the pinch moves the pan with both
+        // of them.
         guard !pinching else { return }
+        // A step that goes nowhere (a finger landing or lifting) leaves
+        // whatever is moving the content alone.
+        guard step != .zero else { return }
         settle.stop()
         let scale = pinchId != 0 ? store.value(for: pinchId) : 1
+        // What the drag pulled along takes its share back first, so a pager
+        // pulled part way to the next page goes back before the content
+        // pans again.
+        let back = handOff.giveBack(CGSize(width: panXId != 0 ? step.width : 0, height: panYId != 0 ? step.height : 0))
         if panXId != 0 {
             // Something else (a pinch, the spring back) moved the pan since
-            // the last step: carry on from where it is.
+            // the last step: carry on from where it is, past an edge too.
             let current = store.value(for: panXId)
-            if current != writtenPan.width { rawPan.width = current }
-            rawPan.width += step.width
+            if current != writtenPan.width { rawPan.width = bounds.unresisted(current, axis: .horizontal, scale: scale) }
+            // The content moves as far as its edge, and the rest goes to the
+            // scroll view around the area, so a zoomed photo dragged on past
+            // its edge pulls the pager on to the next one. What that leaves
+            // stretches the content past the edge.
+            let left = step.width - back.width
+            let free = bounds.free(rawPan.width, by: left, axis: .horizontal, scale: scale)
+            let past = left - free
+            rawPan.width += free + past - handOff.take(past, horizontal: true)
             writtenPan.width = bounds.resisted(rawPan.width, axis: .horizontal, scale: scale)
             store.set(writtenPan.width, for: panXId)
         }
         if panYId != 0 {
             let current = store.value(for: panYId)
-            if current != writtenPan.height { rawPan.height = current }
-            rawPan.height += step.height
+            if current != writtenPan.height { rawPan.height = bounds.unresisted(current, axis: .vertical, scale: scale) }
+            let left = step.height - back.height
+            let free = bounds.free(rawPan.height, by: left, axis: .vertical, scale: scale)
+            let past = left - free
+            rawPan.height += free + past - handOff.take(past, horizontal: false)
             writtenPan.height = bounds.resisted(rawPan.height, axis: .vertical, scale: scale)
             store.set(writtenPan.height, for: panYId)
+        }
+    }
+
+    /// Lets the content go at `velocity` after a drag: it glides on and
+    /// slows to a stop, bounces off an edge it reaches, and comes back to
+    /// the edge from past it (see NativeUIPanGlide). An axis the content
+    /// fits on doesn't glide, and content let go past an edge only goes
+    /// back. Returns where it comes to rest.
+    private func glideIntoBounds(velocity: CGSize, panXId: Int, panYId: Int, pinchId: Int, bounds: NativeUIPanBounds) -> CGSize {
+        let scale = pinchId != 0 ? store.value(for: pinchId) : 1
+        var glides: [NativeUIPanGlide] = []
+        for (id, axis, speed) in [(panXId, NativeUIPanBounds.Axis.horizontal, velocity.width), (panYId, .vertical, velocity.height)] where id != 0 {
+            let limit = bounds.limit(axis, scale: scale)
+            let position = store.value(for: id)
+            let outward = abs(position) > limit && speed * position > 0
+            // Too slow to carry it half a point is no glide at all.
+            let still = abs(speed) / NativeUIPanGlide.decay < 0.5
+            let fits = limit <= BoundedPanRecognizer.minimumRoom
+            let v = outward || still || fits ? 0 : min(NativeUIPanGlide.fastest, max(-NativeUIPanGlide.fastest, speed))
+            glides.append(NativeUIPanGlide(id: id, position: position, velocity: v, limit: limit))
+        }
+        let rests = settle.glide(glides)
+        return CGSize(width: rests[panXId] ?? 0, height: rests[panYId] ?? 0)
+    }
+
+    /// A double tap: from 1, zoom to `zoom` with the tapped point brought
+    /// to the middle, as far as the bounds let the pan go; past 1, back to
+    /// 1 and the middle. A point at c from the area's middle shows the
+    /// content point (c - pan) / scale, which sits in the middle once the
+    /// pan is -zoom times it. Animated through the store like the spring
+    /// back, which a pinch or a drag stops, and reported as a pinch end
+    /// once it lands.
+    private func zoomOnDoubleTap(
+        at location: CGPoint, to zoom: CGFloat, pinchId: Int, panXId: Int, panYId: Int,
+        minScale: CGFloat, maxScale: CGFloat, bounds: NativeUIPanBounds, onPinchEnd: Int
+    ) {
+        let scale = store.value(for: pinchId)
+        let panX = panXId != 0 ? store.value(for: panXId) : 0
+        let panY = panYId != 0 ? store.value(for: panYId) : 0
+        let zoomedIn = scale > 1.01
+        var target = zoomedIn ? 1 : zoom
+        if minScale > 0 { target = max(minScale, target) }
+        if maxScale > 0 { target = min(maxScale, target) }
+        var toX: CGFloat = 0
+        var toY: CGFloat = 0
+        if !zoomedIn, scale > 0 {
+            let pointX = (location.x - areaSize.width / 2 - panX) / scale
+            let pointY = (location.y - areaSize.height / 2 - panY) / scale
+            toX = bounds.settled(-target * pointX, axis: .horizontal, scale: target)
+            toY = bounds.settled(-target * pointY, axis: .vertical, scale: target)
+        }
+        // A drag that isn't bounded carries on from where its last one
+        // ended, which is now where the zoom puts it.
+        if panXId != 0 { dragStartX = toX }
+        if panYId != 0 { dragStart = toY }
+        let nodeId = node.id
+        settle.run([
+            .init(id: pinchId, from: scale, to: target),
+            .init(id: panXId, from: panX, to: toX),
+            .init(id: panYId, from: panY, to: toY),
+        ], zoomingTo: target) {
+            if onPinchEnd != 0 {
+                NativeElementBridge.sendSliderChangeEvent(onPinchEnd, nodeId: nodeId, value: Float(target))
+            }
         }
     }
 
@@ -341,6 +508,9 @@ struct NativeUIGestureAreaRenderer: View {
             let from = store.value(for: panYId)
             moves.append(.init(id: panYId, from: from, to: bounds.settled(from, axis: .vertical, scale: scale)))
         }
+        // Already in place: leave whatever is moving it alone, rather than
+        // stopping a spring back or a double tap's zoom that's landing.
+        guard moves.contains(where: { abs($0.to - $0.from) > 0.01 }) else { return }
         settle.run(moves)
     }
 
@@ -394,6 +564,8 @@ private struct PinchModifier: ViewModifier {
     let panXId: Int
     let panYId: Int
     let onBoundedBegin: () -> Void
+    /// Whether two fingers are on the bounded pinch, when that changes.
+    let onBoundedFingers: (Bool) -> Void
     let onBoundedEnd: () -> Void
 
     @State private var lastMagnification: CGFloat = 1
@@ -411,6 +583,7 @@ private struct PinchModifier: ViewModifier {
                 panYId: panYId,
                 clamp: { clamped($0) },
                 onBegin: onBoundedBegin,
+                onFingers: onBoundedFingers,
                 onEnd: { final in
                     onBoundedEnd()
                     if onPinchEnd != 0 {
@@ -460,6 +633,10 @@ private struct PinchModifier: ViewModifier {
 /// centre maps to scale * p + pan, so keeping the point that was under the
 /// fingers' last centre under the new one gives
 /// pan' = c - r * (last - pan).
+///
+/// UIKit's pinch doesn't end when a finger lifts: it carries on with one
+/// until the last lifts. It moves nothing with one, and says so through
+/// `onFingers`, so the area's drag can move the content with that finger.
 private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
     let bounds: NativeUIPanBounds
     let pinchId: Int
@@ -467,6 +644,8 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
     let panYId: Int
     let clamp: (CGFloat) -> CGFloat
     let onBegin: () -> Void
+    /// Whether two fingers are on the pinch, each time that changes.
+    let onFingers: (Bool) -> Void
     let onEnd: (CGFloat) -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
@@ -489,8 +668,14 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
         case .began:
             recognizer.scale = 1
             context.coordinator.lastCentre = centre
+            context.coordinator.twoFingers = true
             onBegin()
         case .changed:
+            let twoFingers = recognizer.numberOfTouches >= 2
+            if twoFingers != context.coordinator.twoFingers {
+                context.coordinator.twoFingers = twoFingers
+                onFingers(twoFingers)
+            }
             // A finger lifting or landing moves the centre without the
             // content moving: start again from the new centre.
             guard recognizer.numberOfTouches >= 2, let last = context.coordinator.lastCentre,
@@ -515,6 +700,7 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
         case .ended, .cancelled, .failed:
             context.coordinator.lastCentre = nil
             context.coordinator.touches = 2
+            context.coordinator.twoFingers = true
             onEnd(store.value(for: pinchId))
         default:
             break
@@ -524,12 +710,290 @@ private struct BoundedPinchRecognizer: UIGestureRecognizerRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var lastCentre: CGPoint?
         var touches = 2
+        var twoFingers = true
 
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
             true
+        }
+    }
+}
+
+/// Attaches BoundedPanRecognizer to a `bounded` area with a pan bound.
+private struct BoundedPanModifier: ViewModifier {
+    let enabled: Bool
+    let bounds: NativeUIPanBounds
+    let pinchId: Int
+    let panXId: Int
+    let panYId: Int
+    let around: NativeUIGesturePans
+    let settle: NativeUIPanSettle
+    let began: ([UIScrollView]) -> Bool
+    let moved: (CGSize) -> Void
+    let ended: (CGSize, CGSize) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.gesture(BoundedPanRecognizer(
+                bounds: bounds, pinchId: pinchId, panXId: panXId, panYId: panYId, around: around,
+                settle: settle, began: began, moved: moved, ended: ended
+            ))
+        } else {
+            content
+        }
+    }
+}
+
+/// The drag of a `bounded` area. It only begins while the content is
+/// zoomed and has room to move the way the finger is going (see
+/// `hasRoom`), at the zoom it's at when the finger starts moving, read
+/// from the store there and then (and, while a double tap's zoom runs, at
+/// the zoom it's heading for too). So at whole size a drag on the area
+/// goes to whatever is around it: a pager pages, a drag to close closes, a
+/// scroll view scrolls, the swipe back pops. Zoomed, at an edge the finger
+/// is heading for, it goes to a pager or a scroll view, but not to a drag
+/// to close. Otherwise the drag is the area's: an enclosing scroll view, an enclosing area's
+/// one-axis pan (AxisPanRecognizer) and iOS 26's swipe back from
+/// mid-screen all wait for this pan to fail, and the edge swipe back still
+/// wins, since this pan waits for it. SwiftUI's drag can't hand a drag on
+/// like this: with `minimumDistance: 0` it claims every touch as it lands.
+///
+/// It runs alongside the area's pinch and double tap. It takes any number
+/// of fingers, and two fingers down always begin it, so a pager stays put
+/// while the content is pinched; the pinch moves the pan while two fingers
+/// are on it and this pan's steps are dropped, and a finger left over
+/// drags the content on.
+///
+/// SwiftUI puts UIKit recognizers on whichever UIView hosts the SwiftUI
+/// views, which an enclosing area's may share, so the pans that wait are
+/// picked out by what they are, never by where their views sit. The
+/// scroll views among them are the ones a drag past the content's edge
+/// moves (see NativeUIPanHandOff).
+private struct BoundedPanRecognizer: UIGestureRecognizerRepresentable {
+    let bounds: NativeUIPanBounds
+    let pinchId: Int
+    let panXId: Int
+    let panYId: Int
+    /// The axes a gesture area around this one pans on.
+    let around: NativeUIGesturePans
+    /// The area's spring back, which also runs a double tap's zoom and the
+    /// glide after a drag.
+    let settle: NativeUIPanSettle
+    /// As the drag begins, with the scroll views around the area: whether
+    /// the content still has to catch up with the finger's movement since
+    /// it landed, rather than having followed it already.
+    let began: ([UIScrollView]) -> Bool
+    /// The finger's movement since the last step, in the area's space.
+    let moved: (CGSize) -> Void
+    /// The whole drag's translation and the finger's velocity as it lifted
+    /// (none when the drag was cancelled), once the fingers lift.
+    let ended: (CGSize, CGSize) -> Void
+
+    /// Less counts as none, so a pinch ending at 1.004x doesn't stall a pager.
+    static let minimumRoom: CGFloat = 2
+
+    /// A finger still this long (seconds) before it lifts lets go without a flick.
+    static let stillFor: CFTimeInterval = 0.04
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(hasRoom: hasRoom, settle: settle)
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.hasRoom = hasRoom
+        context.coordinator.settle = settle
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    /// Whether the drag is the area's, given how far the finger has gone
+    /// and how many fingers are down: two are a pinch, which is. At whole
+    /// size, with no room to move on a bound axis at the zoom it's at when
+    /// asked (rather than when the area was last drawn), one isn't.
+    /// Zoomed, it is while the content can move the way the finger is
+    /// going: on an axis the drag runs within 60 degrees of, more than
+    /// `minimumRoom` from its edge that way. So a zoomed photo at its right
+    /// edge leaves a swipe left to the pager. It keeps a drag it can't use
+    /// from a gesture area's pan around it, though: a drag to close only
+    /// gets drags while the content is at whole size, so panning a zoomed
+    /// photo up to its edge doesn't start closing the viewer.
+    private var hasRoom: (CGPoint, Int) -> Bool {
+        let bounds = bounds
+        let pinchId = pinchId
+        let panXId = panXId
+        let panYId = panYId
+        let around = around
+        let settle = settle
+        return { travel, touches in
+            if touches >= 2, pinchId != 0 { return true }
+            var scale = pinchId != 0 ? SharedValueStore.shared.value(for: pinchId) : 1
+            // While a double tap's zoom runs, there's room only if there is
+            // now and where it's heading. A swipe during a zoom out would
+            // otherwise see room in the scale it's passing through, begin,
+            // and stop the zoom part way with its first step, leaving the
+            // content zoomed for real so no later swipe pages either. A zoom
+            // in still gives the drag up once it has real room.
+            if let target = settle.zoomingTo { scale = min(scale, target) }
+            let zoomed = (panXId != 0 && bounds.limit(.horizontal, scale: scale) > Self.minimumRoom)
+                || (panYId != 0 && bounds.limit(.vertical, scale: scale) > Self.minimumRoom)
+            guard zoomed else { return false }
+            let distance = max(hypot(travel.x, travel.y), 0.0001)
+            let alongX = panXId != 0 && abs(travel.x) / distance >= 0.5
+            let alongY = panYId != 0 && abs(travel.y) / distance >= 0.5
+            let store = SharedValueStore.shared
+            return (alongX && bounds.room(store.value(for: panXId), way: travel.x, axis: .horizontal, scale: scale) > Self.minimumRoom)
+                || (alongY && bounds.room(store.value(for: panYId), way: travel.y, axis: .vertical, scale: scale) > Self.minimumRoom)
+                || (alongX && around.horizontal)
+                || (alongY && around.vertical)
+        }
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        let coordinator = context.coordinator
+        let point = context.converter.localTranslation ?? recognizer.translation(in: recognizer.view)
+        let translation = CGSize(width: point.x, height: point.y)
+        switch recognizer.state {
+        case .began, .changed:
+            if recognizer.state == .began {
+                coordinator.active = true
+                // Catching up, the first step is all the finger has moved
+                // since it landed; otherwise it's nothing.
+                coordinator.last = began(coordinator.scrollViews(around: recognizer.view)) ? .zero : translation
+                coordinator.touches = recognizer.numberOfTouches
+                coordinator.movedAt = CACurrentMediaTime()
+            }
+            // A finger landing or lifting moves the touches' centre without
+            // the content moving: carry on from the new centre.
+            let step = recognizer.numberOfTouches == coordinator.touches
+                ? CGSize(width: translation.width - coordinator.last.width, height: translation.height - coordinator.last.height)
+                : .zero
+            coordinator.touches = recognizer.numberOfTouches
+            coordinator.last = translation
+            if step != .zero { coordinator.movedAt = CACurrentMediaTime() }
+            moved(step)
+        case .ended, .cancelled, .failed:
+            guard coordinator.active else { return }
+            coordinator.active = false
+            var velocity = CGSize.zero
+            // A finger held still before it lifts sends nothing while it's
+            // still, and UIKit reports the speed it last moved at. Still
+            // for longer than a move takes to come in, it lets go without
+            // a flick, as a scroll view does.
+            if recognizer.state == .ended, CACurrentMediaTime() - coordinator.movedAt <= Self.stillFor {
+                let local = context.converter.localVelocity ?? recognizer.velocity(in: recognizer.view)
+                velocity = CGSize(width: local.x, height: local.y)
+            }
+            ended(translation, velocity)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var hasRoom: (CGPoint, Int) -> Bool
+        var settle: NativeUIPanSettle
+        /// The drag's translation at the last step, how many fingers it
+        /// had then, and whether it began.
+        var last: CGSize = .zero
+        var touches = 0
+        var active = false
+        /// When the drag last moved.
+        var movedAt: CFTimeInterval = 0
+        /// The scroll views whose pans waited on this touch's drag.
+        private var waiting: [WeakScrollView] = []
+
+        private struct WeakScrollView {
+            weak var view: UIScrollView?
+        }
+
+        init(hasRoom: @escaping (CGPoint, Int) -> Bool, settle: NativeUIPanSettle) {
+            self.hasRoom = hasRoom
+            self.settle = settle
+        }
+
+        /// The scroll views around the area: those whose pans waited on
+        /// this drag, and any the view the drag is on sits in.
+        func scrollViews(around view: UIView?) -> [UIScrollView] {
+            var found = waiting.compactMap(\.view)
+            var current = view
+            while let candidate = current {
+                if let scrollView = candidate as? UIScrollView, !found.contains(where: { $0 === scrollView }) {
+                    found.append(scrollView)
+                }
+                current = candidate.superview
+            }
+            return found
+        }
+
+        /// A finger landing stops the content gliding, as a scroll view's does.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if gestureRecognizer.numberOfTouches == 0 {
+                waiting = []
+                settle.catch()
+            }
+            return true
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            var travel = pan.translation(in: pan.view)
+            if travel == .zero { travel = pan.velocity(in: pan.view) }
+            return hasRoom(travel, pan.numberOfTouches)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            isTakenFrom(otherGestureRecognizer, by: gestureRecognizer)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let navigation = navigationController(of: gestureRecognizer.view) else { return false }
+            return otherGestureRecognizer === navigation.interactivePopGestureRecognizer
+        }
+
+        /// The pinch, the double tap and the rest run alongside; the pans
+        /// this drag is taken from don't, and nor does another bounded
+        /// area's drag.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            !isTakenFrom(otherGestureRecognizer, by: gestureRecognizer)
+                && !(otherGestureRecognizer.delegate is BoundedPanRecognizer.Coordinator)
+        }
+
+        /// Whether `other` is one of the pans that wait for this drag to
+        /// fail: a scroll view's, an enclosing area's one-axis pan, or iOS
+        /// 26's swipe back from mid-screen. Another bounded area's drag is
+        /// left out, since each would wait for the other: nested bounded
+        /// areas race, and the first to begin takes the drag.
+        private func isTakenFrom(_ other: UIGestureRecognizer, by pan: UIGestureRecognizer) -> Bool {
+            if let scrollView = other.view as? UIScrollView, other === scrollView.panGestureRecognizer {
+                if !waiting.contains(where: { $0.view === scrollView }) {
+                    waiting.append(WeakScrollView(view: scrollView))
+                }
+                return true
+            }
+            if other.delegate is AxisPanRecognizer.Coordinator {
+                return true
+            }
+            if #available(iOS 26.0, *),
+               let navigation = navigationController(of: pan.view),
+               other === navigation.interactiveContentPopGestureRecognizer {
+                return true
+            }
+            return false
         }
     }
 }
@@ -578,6 +1042,68 @@ struct NativeUIPanBounds {
         let damped = (1 - 1 / (overshoot * 0.55 / extent + 1)) * extent
         return (pan < 0 ? -1 : 1) * (limit + damped)
     }
+
+    /// The undamped pan that `resisted` shows as `shown`, so a drag that
+    /// picks the content up past an edge (where a pinch left it, or part
+    /// way through the spring back) carries on from there instead of
+    /// jumping in. The damped overshoot never reaches the area's size, so
+    /// one at or past it starts from just inside.
+    func unresisted(_ shown: CGFloat, axis: Axis, scale: CGFloat) -> CGFloat {
+        let limit = limit(axis, scale: scale)
+        let overshoot = abs(shown) - limit
+        guard overshoot > 0 else { return shown }
+        let extent = max(1, axis == .horizontal ? area.width : area.height)
+        let damped = min(overshoot, extent * 0.99)
+        let raw = damped * extent / ((extent - damped) * 0.55)
+        return (shown < 0 ? -1 : 1) * (limit + raw)
+    }
+
+    /// How far a pan at `pan` can go the way of `way`'s sign before it
+    /// meets the edge.
+    func room(_ pan: CGFloat, way: CGFloat, axis: Axis, scale: CGFloat) -> CGFloat {
+        let limit = limit(axis, scale: scale)
+        return way > 0 ? limit - pan : way < 0 ? pan + limit : 0
+    }
+
+    /// How much of a step `by` moves the undamped pan `raw` without taking
+    /// it further past an edge. The rest is past the edge.
+    func free(_ raw: CGFloat, by: CGFloat, axis: Axis, scale: CGFloat) -> CGFloat {
+        let limit = limit(axis, scale: scale)
+        if by > 0 { return min(by, max(0, limit - raw)) }
+        if by < 0 { return max(by, min(0, -limit - raw)) }
+        return 0
+    }
+}
+
+/// The axes the gesture areas around a view pan on (`pan-x` / `pan-y`
+/// on an area that isn't `bounded`).
+struct NativeUIGesturePans: Equatable {
+    var horizontal = false
+    var vertical = false
+}
+
+private struct NativeUIGesturePansKey: EnvironmentKey {
+    static let defaultValue = NativeUIGesturePans()
+}
+
+extension EnvironmentValues {
+    var nativeUIGesturePans: NativeUIGesturePans {
+        get { self[NativeUIGesturePansKey.self] }
+        set { self[NativeUIGesturePansKey.self] = newValue }
+    }
+}
+
+/// Clips a `bounded` area's content to the area.
+private struct BoundedClip: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.clipped()
+        } else {
+            content
+        }
+    }
 }
 
 /// Moves pan values back inside their bounds, frame by frame through the
@@ -596,11 +1122,52 @@ final class NativeUIPanSettle: NSObject {
     private var link: CADisplayLink?
     private var startedAt: CFTimeInterval = 0
     private var moves: [Move] = []
+    /// Run once the moves land; dropped if something stops them first.
+    private var landed: (() -> Void)?
+    /// The scale a double tap's zoom is heading for while it runs, so the
+    /// area's drag can judge room by where the zoom ends up rather than by
+    /// a scale it's only passing through (see BoundedPanRecognizer). A
+    /// spring back doesn't change the scale, so it has none.
+    private(set) var zoomingTo: CGFloat?
+    /// The axes of the content gliding after a drag while it does, where
+    /// each comes to rest, and the frame the glide last stepped to.
+    private var glides: [NativeUIPanGlide] = []
+    private var rests: [Int: CGFloat] = [:]
+    private var steppedTo: CFTimeInterval = 0
 
-    func run(_ moves: [Move]) {
+    /// Lets the content go after a drag (see NativeUIPanGlide), and returns
+    /// where each axis comes to rest.
+    func glide(_ axes: [NativeUIPanGlide]) -> [Int: CGFloat] {
+        stop()
+        var rests: [Int: CGFloat] = [:]
+        for axis in axes { rests[axis.id] = axis.rest() }
+        let moving = axes.filter { $0.velocity != 0 || abs($0.position) > $0.limit }
+        guard !moving.isEmpty else { return rests }
+        glides = moving
+        self.rests = rests
+        steppedTo = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(step(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        return rests
+    }
+
+    /// A finger landing on content that's gliding stops it where it is.
+    /// Content bouncing back from past an edge carries on into place.
+    func `catch`() {
+        guard !glides.isEmpty, glides.allSatisfy({ abs($0.position) <= $0.limit }) else { return }
+        stop()
+    }
+
+    func run(_ moves: [Move], zoomingTo: CGFloat? = nil, landed: (() -> Void)? = nil) {
         stop()
         self.moves = moves.filter { $0.id != 0 && abs($0.to - $0.from) > 0.01 }
-        guard !self.moves.isEmpty else { return }
+        guard !self.moves.isEmpty else {
+            landed?()
+            return
+        }
+        self.zoomingTo = zoomingTo
+        self.landed = landed
         startedAt = CACurrentMediaTime()
         let link = CADisplayLink(target: self, selector: #selector(step(_:)))
         link.add(to: .main, forMode: .common)
@@ -610,9 +1177,25 @@ final class NativeUIPanSettle: NSObject {
     func stop() {
         link?.invalidate()
         link = nil
+        landed = nil
+        zoomingTo = nil
+        glides = []
+        rests = [:]
     }
 
     @objc private func step(_ link: CADisplayLink) {
+        if !glides.isEmpty {
+            let dt = CGFloat(min(0.05, max(0, link.targetTimestamp - steppedTo)))
+            steppedTo = link.targetTimestamp
+            for index in glides.indices where !glides[index].done {
+                glides[index].step(dt)
+                let axis = glides[index]
+                // Landing where it said it would, for the report.
+                SharedValueStore.shared.set(axis.done ? rests[axis.id] ?? axis.position : axis.position, for: axis.id)
+            }
+            if glides.allSatisfy(\.done) { stop() }
+            return
+        }
         let progress = min(1, (link.targetTimestamp - startedAt) / Self.duration)
         // Ease out: fast away from the edge, slowing into place.
         let eased = 1 - pow(1 - progress, 3)
@@ -620,8 +1203,221 @@ final class NativeUIPanSettle: NSObject {
             SharedValueStore.shared.set(move.from + (move.to - move.from) * eased, for: move.id)
         }
         if progress >= 1 {
+            let landed = landed
             stop()
+            landed?()
         }
+    }
+}
+
+/// One axis of content let go after a drag, as a UIScrollView moves:
+/// inside its limit it slows at UIScrollView's normal rate (0.998 a
+/// millisecond), and past it a critically damped spring takes it back to
+/// the edge. Each step is the exact solution over its time, so the frame
+/// rate doesn't change where it ends up. Android's PanGlide is the same.
+struct NativeUIPanGlide {
+    /// How fast it slows: 0.998 a millisecond, per second.
+    static let decay: CGFloat = 2.002
+    /// The stiffness of the spring back from past an edge (its natural
+    /// frequency, per second).
+    static let bounce: CGFloat = 14
+    /// The fastest content glides off, in points a second.
+    static let fastest: CGFloat = 8000
+
+    let id: Int
+    private(set) var position: CGFloat
+    private(set) var velocity: CGFloat
+    let limit: CGFloat
+    private(set) var done = false
+
+    init(id: Int, position: CGFloat, velocity: CGFloat, limit: CGFloat) {
+        self.id = id
+        self.position = position
+        self.velocity = velocity
+        self.limit = limit
+    }
+
+    mutating func step(_ dt: CGFloat) {
+        guard !done else { return }
+        if abs(position) <= limit {
+            let decay = exp(-Self.decay * dt)
+            position += velocity * (1 - decay) / Self.decay
+            velocity *= decay
+            // Under a quarter of a point left to go: there.
+            if abs(position) <= limit, abs(velocity) / Self.decay < 0.25 {
+                position = min(limit, max(-limit, position + velocity / Self.decay))
+                velocity = 0
+                done = true
+            }
+        } else {
+            // x(t) = (x + (v + w x) t) e^(-w t), from the edge.
+            let edge = position < 0 ? -limit : limit
+            let x = position - edge
+            let b = velocity + Self.bounce * x
+            let decay = exp(-Self.bounce * dt)
+            let next = (x + b * dt) * decay
+            velocity = (velocity - Self.bounce * b * dt) * decay
+            position = edge + next
+            if abs(next) < 0.25, abs(velocity) < 4 {
+                position = edge
+                velocity = 0
+                done = true
+            }
+        }
+    }
+
+    /// Where it comes to rest, worked out ahead without moving it.
+    func rest() -> CGFloat {
+        var ahead = self
+        var steps = 0
+        while !ahead.done, steps < 2400 {
+            ahead.step(1 / 240)
+            steps += 1
+        }
+        return min(limit, max(-limit, ahead.position))
+    }
+}
+
+/// The scroll views a `bounded` drag moves once the content reaches its
+/// edge: on each axis, the innermost one around the area that scrolls
+/// that way. A zoomed photo dragged on past its edge pulls the pager on
+/// towards the next one, as Photos does, and a drag back gives the pager
+/// back its page before the photo pans again. A paging scroll view moves
+/// at most a page from where it was, and on release goes to the page the
+/// drag and the flick were heading for; any other glides on.
+///
+/// The scroll view's own pan waited on the drag and failed, so the drag
+/// moves the scroll view's offset itself.
+final class NativeUIPanHandOff {
+    private struct Held {
+        weak var view: UIScrollView?
+        let start: CGPoint
+    }
+
+    private var x: Held?
+    private var y: Held?
+    /// How far the drag has moved each axis's scroll view, in the
+    /// finger's terms.
+    private var handed: CGSize = .zero
+
+    /// A flick at least this fast (points a second) pages, however short.
+    private static let flick: CGFloat = 300
+
+    func begin(with scrollViews: [UIScrollView]) {
+        handed = .zero
+        x = Self.innermost(scrollViews, horizontal: true).map { Held(view: $0, start: $0.contentOffset) }
+        y = Self.innermost(scrollViews, horizontal: false).map { Held(view: $0, start: $0.contentOffset) }
+    }
+
+    /// Gives the scroll views back what they're owed of a drag step: the
+    /// part of it the other way to how far the drag has moved them, no
+    /// more than that. Returns what they took.
+    func giveBack(_ step: CGSize) -> CGSize {
+        CGSize(
+            width: move(x, by: Self.owed(step.width, handed.width), horizontal: true),
+            height: move(y, by: Self.owed(step.height, handed.height), horizontal: false)
+        )
+    }
+
+    /// Moves the axis's scroll view by as much of `past` (the drag past the
+    /// content's edge) as it can go, and returns how much.
+    func take(_ past: CGFloat, horizontal: Bool) -> CGFloat {
+        move(horizontal ? x : y, by: past, horizontal: horizontal)
+    }
+
+    /// Lets go of the scroll views the drag moved, at the finger's
+    /// `velocity`, and says which axes it had moved.
+    func end(velocity: CGSize) -> (horizontal: Bool, vertical: Bool) {
+        let horizontal = abs(handed.width) > 0.5
+        let vertical = abs(handed.height) > 0.5
+        if horizontal { settle(x, horizontal: true, velocity: velocity.width) }
+        if vertical { settle(y, horizontal: false, velocity: velocity.height) }
+        x = nil
+        y = nil
+        handed = .zero
+        return (horizontal, vertical)
+    }
+
+    private static func owed(_ by: CGFloat, _ handed: CGFloat) -> CGFloat {
+        if by > 0, handed < 0 { return min(by, -handed) }
+        if by < 0, handed > 0 { return max(by, -handed) }
+        return 0
+    }
+
+    private static func innermost(_ scrollViews: [UIScrollView], horizontal: Bool) -> UIScrollView? {
+        scrollViews
+            .filter { range(of: $0, horizontal: horizontal).upperBound > range(of: $0, horizontal: horizontal).lowerBound + 0.5 }
+            .min { depth(of: $0) > depth(of: $1) }
+    }
+
+    private static func depth(of view: UIView) -> Int {
+        var depth = 0
+        var current = view.superview
+        while let parent = current {
+            depth += 1
+            current = parent.superview
+        }
+        return depth
+    }
+
+    /// The offsets the scroll view can rest at along the axis.
+    private static func range(of view: UIScrollView, horizontal: Bool) -> ClosedRange<CGFloat> {
+        let inset = view.adjustedContentInset
+        let low = horizontal ? -inset.left : -inset.top
+        let high = horizontal
+            ? view.contentSize.width + inset.right - view.bounds.width
+            : view.contentSize.height + inset.bottom - view.bounds.height
+        return low...max(low, high)
+    }
+
+    private static func page(of view: UIScrollView, horizontal: Bool) -> CGFloat {
+        horizontal ? view.bounds.width : view.bounds.height
+    }
+
+    /// Moves the scroll view so its content follows the finger `by`, as far
+    /// as it can go, and returns how far that was in the finger's terms.
+    private func move(_ held: Held?, by finger: CGFloat, horizontal: Bool) -> CGFloat {
+        guard finger != 0, let held, let view = held.view else { return 0 }
+        var range = Self.range(of: view, horizontal: horizontal)
+        if view.isPagingEnabled {
+            let start = horizontal ? held.start.x : held.start.y
+            let page = Self.page(of: view, horizontal: horizontal)
+            range = max(range.lowerBound, start - page)...min(range.upperBound, start + page)
+        }
+        var offset = view.contentOffset
+        let current = horizontal ? offset.x : offset.y
+        // The finger going left moves the content left: further on.
+        let target = min(range.upperBound, max(range.lowerBound, current - finger))
+        guard target != current else { return 0 }
+        if horizontal { offset.x = target } else { offset.y = target }
+        view.contentOffset = offset
+        let took = current - target
+        if horizontal { handed.width += took } else { handed.height += took }
+        return took
+    }
+
+    private func settle(_ held: Held?, horizontal: Bool, velocity finger: CGFloat) {
+        guard let held, let view = held.view else { return }
+        let range = Self.range(of: view, horizontal: horizontal)
+        let current = horizontal ? view.contentOffset.x : view.contentOffset.y
+        let start = horizontal ? held.start.x : held.start.y
+        let speed = -finger
+        var target: CGFloat
+        if view.isPagingEnabled {
+            // On to the next page past halfway, or with a flick its way;
+            // otherwise back.
+            let page = Self.page(of: view, horizontal: horizontal)
+            let moved = current - start
+            let onward = abs(moved) > page / 2 ? speed * moved >= 0 || abs(speed) < Self.flick
+                : abs(speed) >= Self.flick && speed * moved > 0
+            target = onward ? start + (moved > 0 ? page : -page) : start
+        } else {
+            target = current + speed / NativeUIPanGlide.decay
+        }
+        target = min(range.upperBound, max(range.lowerBound, target))
+        var offset = view.contentOffset
+        if horizontal { offset.x = target } else { offset.y = target }
+        view.setContentOffset(offset, animated: true)
     }
 }
 
@@ -835,15 +1631,38 @@ private struct AxisPanRecognizer: UIGestureRecognizerRepresentable {
             guard let navigation = navigationController(of: gestureRecognizer.view) else { return false }
             return otherGestureRecognizer === navigation.interactivePopGestureRecognizer
         }
+    }
+}
 
-        private func navigationController(of view: UIView?) -> UINavigationController? {
-            var responder: UIResponder? = view
-            while let current = responder {
-                if let navigation = current as? UINavigationController { return navigation }
-                if let controller = current as? UIViewController, let navigation = controller.navigationController { return navigation }
-                responder = current.next
-            }
-            return nil
+/// The navigation controller a recognizer's view is shown in, for the
+/// swipe back's recognizers.
+private func navigationController(of view: UIView?) -> UINavigationController? {
+    var responder: UIResponder? = view
+    while let current = responder {
+        if let navigation = current as? UINavigationController { return navigation }
+        if let controller = current as? UIViewController, let navigation = controller.navigationController { return navigation }
+        responder = current.next
+    }
+    return nil
+}
+
+// MARK: - Double tap (conditional)
+
+/// A double tap that says where it landed, in the area's own space, when
+/// the area zooms on a double tap. Simultaneous, so a pinch, a pan, a
+/// pager or a drag to close around the area work as before; a tap moves
+/// nothing, so none of them start on it.
+private struct DoubleTapModifier: ViewModifier {
+    let enabled: Bool
+    let tapped: (CGPoint) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.simultaneousGesture(
+                SpatialTapGesture(count: 2).onEnded { tapped($0.location) }
+            )
+        } else {
+            content
         }
     }
 }
