@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -46,6 +48,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -54,12 +57,15 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Velocity
 import coil3.compose.AsyncImage
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +79,7 @@ import com.nativephp.plugins.native_ui.NativeUITheme
 import kotlin.math.abs
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -236,6 +243,7 @@ object PagerRenderer {
                 }
             }
 
+            val pageScroll = PagerHandOff.remember(pagerState, if (horizontal) Orientation.Horizontal else Orientation.Vertical)
             val pages: @Composable (Modifier) -> Unit = { pagesModifier ->
                 if (horizontal) {
                     HorizontalPager(
@@ -243,6 +251,7 @@ object PagerRenderer {
                         modifier = pagesModifier,
                         beyondViewportPageCount = 1,
                         key = { it },
+                        pageNestedScrollConnection = pageScroll,
                     ) { index -> page(index) }
                 } else {
                     VerticalPager(
@@ -250,6 +259,7 @@ object PagerRenderer {
                         modifier = pagesModifier,
                         beyondViewportPageCount = 1,
                         key = { it },
+                        pageNestedScrollConnection = pageScroll,
                     ) { index -> page(index) }
                 }
             }
@@ -786,4 +796,53 @@ private fun PagerChildren(node: NativeUINode) {
  */
 private fun Modifier.pagerStationary(header: PagerHeader): Modifier = graphicsLayer {
     translationX = (header.pagerState.currentPage + header.pagerState.currentPageOffsetFraction - header.page) * size.width
+}
+
+/**
+ * What the pager does with scrolling its pages hand it. Compose's own keeps
+ * a page's leftover fling from paging, so a list flung to its end doesn't
+ * page on. A page that has dragged the pager part way itself (a zoomed
+ * photo dragged past its edge, see GestureAreaRenderer) has the pager
+ * settle here instead: on to the next page with a flick that way, back
+ * with a flick back, and otherwise to whichever page it's nearer. Compose's
+ * pager would decide by how far the finger has gone since it landed, most
+ * of which panned the photo, so a slow drag a quarter of the way on would
+ * page.
+ */
+internal object PagerHandOff {
+    /** Slower than this (dp/s), a page's drag settles where the pager is nearest. */
+    private const val FlickDp = 400
+
+    @Composable
+    fun remember(state: PagerState, orientation: Orientation): NestedScrollConnection {
+        val pages = PagerDefaults.pageNestedScrollConnection(state, orientation)
+        // Finger velocity towards the later pages: leftwards in a
+        // horizontal pager, rightwards when it runs right to left.
+        val sign = if (orientation == Orientation.Horizontal && LocalLayoutDirection.current == LayoutDirection.Rtl) 1f else -1f
+        val flick = with(LocalDensity.current) { FlickDp.dp.toPx() }
+        return androidx.compose.runtime.remember(pages, state, orientation, sign, flick) {
+            Connection(pages, state, orientation, sign, flick)
+        }
+    }
+
+    private class Connection(
+        private val pages: NestedScrollConnection,
+        private val state: PagerState,
+        private val orientation: Orientation,
+        private val sign: Float,
+        private val flick: Float,
+    ) : NestedScrollConnection by pages {
+        override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+            if (abs(state.currentPageOffsetFraction) <= 0.001f) return pages.onPostFling(consumed, available)
+            val speed = sign * if (orientation == Orientation.Horizontal) available.x else available.y
+            val position = state.currentPage + state.currentPageOffsetFraction
+            val target = when {
+                speed > flick -> floor(position).toInt() + 1
+                speed < -flick -> ceil(position).toInt() - 1
+                else -> position.roundToInt()
+            }.coerceIn(0, maxOf(0, state.pageCount - 1))
+            state.animateScrollToPage(target)
+            return available
+        }
+    }
 }

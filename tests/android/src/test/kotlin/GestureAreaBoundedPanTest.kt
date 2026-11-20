@@ -1,5 +1,6 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
@@ -319,7 +321,8 @@ class GestureAreaBoundedPanTest {
         compose.onNodeWithTag("node-2").performTouchInput {
             doubleClick(center)
             advanceEventTime(50)
-            dragBy(-200f, 0f)
+            // Short of the room the zoom has by then, so the pager stays put.
+            dragBy(-40f, 0f)
             up()
         }
         compose.runOnIdle {
@@ -327,6 +330,181 @@ class GestureAreaBoundedPanTest {
             val scale = SharedValueStore.valueOf(Pinch)
             assertTrue("stopped at $scale", scale > 1.1f && scale < 1.95f)
             assertTrue(events().toString(), events().none { it.startsWith("slider:") })
+        }
+    }
+
+    @Test fun swipeTowardsTheEdgeAZoomedPhotoIsAtPagesThePager() {
+        viewer()
+        // At 2x the 300dp-wide photo has 150dp to move each way. At -150 its
+        // right edge is showing, so it can't go any further left.
+        compose.runOnIdle {
+            SharedValueStore.set(Pinch, 2f)
+            SharedValueStore.set(PanX, -150f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { dragBy(-120f, 0f) }
+        compose.runOnIdle {
+            assertEquals(-150f, SharedValueStore.valueOf(PanX), 0.01f)
+            assertTrue("pager at ${position()}", position() > 0.2f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { up() }
+        compose.runOnIdle {
+            assertEquals(1, pager.currentPage)
+            assertEquals(-150f, SharedValueStore.valueOf(PanX), 0.01f)
+            assertEquals(emptyList<String>(), events())
+        }
+    }
+
+    @Test fun swipeAwayFromTheEdgeAZoomedPhotoIsAtPansIt() {
+        viewer()
+        compose.runOnIdle {
+            SharedValueStore.set(Pinch, 2f)
+            SharedValueStore.set(PanX, -150f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { dragBy(100f, 0f) }
+        compose.runOnIdle {
+            assertTrue("panned to ${SharedValueStore.valueOf(PanX)}", SharedValueStore.valueOf(PanX) > -80f)
+            assertEquals(0f, position(), 0.001f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { up() }
+        compose.runOnIdle { assertEquals(0, pager.currentPage) }
+    }
+
+    @Test fun dragDownAtTheTopEdgeOfAZoomedPhotoStaysWithThePhoto() {
+        viewer()
+        // At 2x the 120dp-high photo has 60dp each way, and at 60 its top
+        // edge is showing: it can't go any further down. The drag to close
+        // only gets drags at whole size, so the photo stretches instead.
+        compose.runOnIdle {
+            SharedValueStore.set(Pinch, 2f)
+            SharedValueStore.set(PanY, 60f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { dragBy(0f, 80f) }
+        compose.runOnIdle {
+            assertEquals(0f, closing, 0.01f)
+            assertTrue("stretched to ${SharedValueStore.valueOf(PanY)}", SharedValueStore.valueOf(PanY) > 61f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { up() }
+        compose.runOnIdle {
+            assertEquals(0f, closing, 0.01f)
+            assertEquals(60f, SharedValueStore.valueOf(PanY), 0.01f)
+        }
+    }
+
+    @Test fun zoomedPhotoDraggedPastItsEdgePullsThePagerOn() {
+        viewer()
+        // 50dp short of its right edge.
+        compose.runOnIdle {
+            SharedValueStore.set(Pinch, 2f)
+            SharedValueStore.set(PanX, -100f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { dragBy(-200f, 0f) }
+        compose.runOnIdle {
+            // At the edge, not stretched past it: the pager has the rest.
+            assertEquals(-150f, SharedValueStore.valueOf(PanX), 0.01f)
+            assertTrue("pager at ${position()}", position() > 0.35f && position() < 0.55f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { up() }
+        compose.runOnIdle {
+            assertEquals(1, pager.currentPage)
+            assertEquals(0f, pager.currentPageOffsetFraction, 0.001f)
+            assertEquals(-150f, SharedValueStore.valueOf(PanX), 0.01f)
+            assertEquals(listOf("change:$DragEnd:-150.0,0.0"), events())
+        }
+    }
+
+    @Test fun slowDragPastAZoomedPhotosEdgeLetGoShortOfHalfwayStaysOnItsPage() {
+        viewer()
+        // From the middle, 150dp short of its right edge: most of the drag
+        // pans the photo, and the pager only goes about a quarter of the
+        // way. The finger has gone most of a page, which Compose's pager
+        // would take as a drag past halfway.
+        compose.runOnIdle {
+            SharedValueStore.set(Pinch, 2f)
+            SharedValueStore.set(PanX, 0f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput {
+            dragBy(-250f, 0f)
+            advanceEventTime(300)
+            up()
+        }
+        compose.runOnIdle {
+            assertEquals(0, pager.currentPage)
+            assertEquals(0f, pager.currentPageOffsetFraction, 0.001f)
+            assertEquals(-150f, SharedValueStore.valueOf(PanX), 0.01f)
+        }
+    }
+
+    @Test fun pagerAZoomedPhotoPulledOnGoesBackBeforeThePhotoPansAgain() {
+        viewer()
+        compose.runOnIdle {
+            SharedValueStore.set(Pinch, 2f)
+            SharedValueStore.set(PanX, -100f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput {
+            dragBy(-160f, 0f)
+            repeat(8) { moveBy(Offset((160f / 8f).dp.toPx(), 0f)) }
+        }
+        compose.runOnIdle {
+            assertEquals(0f, position(), 0.001f)
+            // Back where it started, and on by the touch slop the drag took
+            // to start, which moved neither.
+            val x = SharedValueStore.valueOf(PanX)
+            assertTrue("panned to $x", x > -100f && x < -75f)
+        }
+        compose.onNodeWithTag("node-2").performTouchInput { up() }
+    }
+
+    @Test fun zoomedPhotoFlickedGlidesOnToItsEdge() {
+        viewer()
+        // At 3x the photo has 300dp to move each way across.
+        compose.runOnIdle { SharedValueStore.set(Pinch, 3f) }
+        compose.onNodeWithTag("node-2").performTouchInput {
+            down(center)
+            // 60dp in 40ms: 1500dp/s, which would carry it some 750dp on.
+            repeat(4) { moveBy(Offset((-15f).dp.toPx(), 0f), delayMillis = 10) }
+            up()
+        }
+        compose.runOnIdle {
+            assertEquals(-300f, SharedValueStore.valueOf(PanX), 0.01f)
+            assertEquals(0f, position(), 0.001f)
+            assertEquals(listOf("change:$DragEnd:-300.0,0.0"), events())
+        }
+    }
+
+    @Test fun zoomedPhotoLetGoMovingGlidesOnAndSlowsToAStop() {
+        viewer()
+        compose.runOnIdle { SharedValueStore.set(Pinch, 3f) }
+        var letGo = 0f
+        compose.onNodeWithTag("node-2").performTouchInput {
+            down(center)
+            // 48dp in 128ms: 375dp/s, about another 190dp.
+            repeat(8) { moveBy(Offset((-6f).dp.toPx(), 0f)) }
+        }
+        compose.runOnIdle { letGo = SharedValueStore.valueOf(PanX) }
+        compose.onNodeWithTag("node-2").performTouchInput { up() }
+        compose.runOnIdle {
+            val x = SharedValueStore.valueOf(PanX)
+            assertTrue("let go at $letGo, rests at $x", x < letGo - 100f && x > -300f)
+            assertEquals(listOf("change:$DragEnd:$x,0.0"), events())
+        }
+    }
+
+    @Test fun zoomedPhotoHeldStillBeforeLettingGoStaysWhereItIs() {
+        viewer()
+        compose.runOnIdle { SharedValueStore.set(Pinch, 3f) }
+        var letGo = 0f
+        compose.onNodeWithTag("node-2").performTouchInput {
+            down(center)
+            repeat(4) { moveBy(Offset((-15f).dp.toPx(), 0f), delayMillis = 10) }
+        }
+        compose.runOnIdle { letGo = SharedValueStore.valueOf(PanX) }
+        compose.onNodeWithTag("node-2").performTouchInput {
+            advanceEventTime(200)
+            up()
+        }
+        compose.runOnIdle {
+            assertEquals(letGo, SharedValueStore.valueOf(PanX), 0.01f)
+            assertEquals(listOf("change:$DragEnd:$letGo,0.0"), events())
         }
     }
 
@@ -354,13 +532,17 @@ class GestureAreaBoundedPanTest {
         compose.setContent {
             pager = rememberPagerState { 3 }
             Box(Modifier.pointerInput(Unit) { detectVerticalDragGestures { _, dy -> closing += dy.toDp().value } }) {
+                // What a gesture area with a lone `pan-y-id` tells the areas inside it.
+                CompositionLocalProvider(LocalGesturePans provides GesturePans(y = true)) {
                 HorizontalPager(
                     state = pager,
                     modifier = Modifier.size(300.dp, 120.dp),
                     beyondViewportPageCount = 1,
                     key = { it },
+                    pageNestedScrollConnection = PagerHandOff.remember(pager, Orientation.Horizontal),
                 ) { page ->
                     if (page == 0) GestureAreaRenderer.Render(photo(), Modifier) else Box(Modifier.fillMaxSize())
+                }
                 }
             }
         }
