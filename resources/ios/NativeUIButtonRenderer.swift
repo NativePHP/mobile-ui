@@ -56,10 +56,11 @@ struct NativeUIButtonRenderer: View {
         if hasMenu {
             let items = node.children.filter { $0.type == "top_bar_action" }
             Menu {
-                ForEach(items) { item in buttonMenuItem(item) }
+                ForEach(items) { item in NativeUIMenuItem(item: item) }
             } label: {
                 buttonBody()
             }
+            .nativeUIMenuImages(items)
         } else {
             buttonBody()
         }
@@ -483,30 +484,5 @@ private struct A11yHintModifier: ViewModifier {
     func body(content: Content) -> some View {
         if hint.isEmpty { content }
         else { content.accessibilityHint(hint) }
-    }
-}
-
-/// Render one menu item attached to a Button via `:menu`. Mirrors the
-/// pattern used by `pressableMenuItem` and `TopBarActionView`.
-@ViewBuilder
-private func buttonMenuItem(_ item: NativeUINode) -> some View {
-    if item.props.getBool("divider") {
-        Divider()
-    } else {
-        let label = item.props.getString("label", default: "")
-        let icon = item.props.getString("icon", default: "")
-        let isDestructive = item.props.getBool("destructive")
-        Button(role: isDestructive ? .destructive : nil) {
-            if item.onPress != 0 {
-                NativeElementBridge.sendPressEvent(item.onPress, nodeId: item.id)
-            }
-        } label: {
-            if !icon.isEmpty {
-                Label { Text(label) } icon: { NativeIcon.image(icon) }
-            } else {
-                Text(label)
-            }
-        }
-        .tint(isDestructive ? .red : nil)
     }
 }

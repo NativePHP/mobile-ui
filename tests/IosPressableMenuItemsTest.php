@@ -3,7 +3,7 @@
 it('lays out a pressable without its menu items on iOS', function () {
     $source = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUISimpleRenderers.swift');
     $start = strpos($source, 'struct NativeUIPressableRenderer');
-    $pressable = substr($source, $start, strpos($source, 'private func pressableMenuItem') - $start);
+    $pressable = substr($source, $start, strpos($source, 'struct NativeUICanvasRenderer') - $start);
 
     expect($pressable)
         ->toContain('let content = node.children.filter { $0.type != "top_bar_action" }')
@@ -24,7 +24,7 @@ it('gives a menu pressable its accessibility label and hint on iOS', function ()
     $source = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUISimpleRenderers.swift');
     $start = strpos($source, 'struct NativeUIPressableRenderer');
     $pressable = substr($source, $start, strpos($source, 'private struct PressableMenuAccessibility') - $start);
-    $modifier = substr($source, strpos($source, 'private struct PressableMenuAccessibility'), strpos($source, 'private func pressableMenuItem') - strpos($source, 'private struct PressableMenuAccessibility'));
+    $modifier = substr($source, strpos($source, 'private struct PressableMenuAccessibility'), strpos($source, 'struct NativeUICanvasRenderer') - strpos($source, 'private struct PressableMenuAccessibility'));
 
     expect($pressable)
         ->toContain('.modifier(PressableMenuAccessibility(')
