@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -55,10 +59,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
 import com.nativephp.mobile.ui.MaterialIcon
+import coil3.compose.SubcomposeAsyncImage
 import com.nativephp.mobile.ui.nativerender.*
 
 object ColumnRenderer {
@@ -293,6 +299,11 @@ internal fun ExpressiveMenu(
 /// the classic full-bleed rectangle. Leading icon in `onSurfaceVariant`,
 /// label in `onSurface` (`error` for destructive). A `divider()` renders
 /// as a thin inset rule grouping sections.
+///
+/// An `image` (an account's avatar, say) takes the icon's place, cut to
+/// a circle or, with `image_shape: rounded`, a rounded square. The icon
+/// shows while it loads and stays if it fails. A `checked` row has a
+/// tick at its end, as on the option a menu has picked.
 @Composable
 internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) {
     if (item.props.getBool("divider")) {
@@ -304,7 +315,11 @@ internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) 
     }
     val itemLabel = item.props.getString("label", "")
     val itemIcon = item.props.getString("icon", "")
+    val itemImage = item.props.getString("image", "")
+    val roundedImage = item.props.getString("image_shape", "circle") == "rounded"
+    val isChecked = item.props.getBool("checked")
     val isDestructive = item.props.getBool("destructive")
+    val context = LocalContext.current
 
     val labelColor = if (isDestructive) MaterialTheme.colorScheme.error
         else MaterialTheme.colorScheme.onSurface
@@ -319,6 +334,7 @@ internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) 
             // clickable so the ripple is bounded to the rounded shape.
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(16.dp))
+            .semantics { if (isChecked) selected = true }
             .clickable {
                 onSelected()
                 if (item.onPress != 0) {
@@ -329,13 +345,29 @@ internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (itemIcon.isNotEmpty()) {
-            MaterialIcon(
-                name = itemIcon,
-                contentDescription = itemLabel,
-                size = 24.dp,
-                tint = iconColor,
+        val icon = @Composable {
+            if (itemIcon.isNotEmpty()) {
+                MaterialIcon(
+                    name = itemIcon,
+                    contentDescription = itemLabel,
+                    size = 24.dp,
+                    tint = iconColor,
+                )
+            }
+        }
+        if (itemImage.isNotEmpty()) {
+            SubcomposeAsyncImage(
+                model = remember(itemImage, context) { nuiResolveImageSrc(itemImage, context) },
+                contentDescription = null,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(if (roundedImage) RoundedCornerShape(5.dp) else CircleShape),
+                contentScale = ContentScale.Crop,
+                loading = { icon() },
+                error = { icon() },
             )
+        } else {
+            icon()
         }
         Text(
             itemLabel,
@@ -344,6 +376,14 @@ internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) 
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(1f),
         )
+        if (isChecked) {
+            MaterialIcon(
+                name = "check",
+                contentDescription = null,
+                size = 24.dp,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
