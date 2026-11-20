@@ -27,6 +27,11 @@ scroll container, and a bound pan still follows the finger. `NodeView` here
 stands in for core's: each child is a fixed-size box, clickable like a core
 `pressable` when it has a press handler.
 
+`GestureAreaSnapTest` drags a snapping pan (`pan-y-snap`) quickly to short of
+halfway. Held still before it lifts, it springs back to 0 rather than flinging
+on with the speed of its last move. Let go while moving, or moving again after
+a pause, it carries on to the far point.
+
 `GestureAreaTriggerTest` pulls a pan with a trigger point (`pan-x-trigger`):
 let go past the point it fires `@trigger` and springs back, short of it or
 after coming back under it it only springs back, the haptic plays each time
