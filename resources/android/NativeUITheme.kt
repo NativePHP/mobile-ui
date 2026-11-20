@@ -62,6 +62,13 @@ data class NativeUITokens(
     val inputFill:        Color,
     val onInput:          Color?,
 
+    // The track of a switch that is on. NULL when undeclared, and the switch
+    // then keeps `primary`, as before the token existed. iOS always draws its
+    // switch's knob white, so an app whose `primary` is white (a dark theme,
+    // say) needs this token there; Android reads it too, so one theme gives
+    // the same switch on both platforms.
+    val toggle:           Color?,
+
     // Radii
     val radiusSm:   Dp,
     val radiusMd:   Dp,
@@ -102,6 +109,7 @@ data class NativeUITokens(
             onAccent         = parseHex("#FFFFFF"),
             inputFill        = Color.Transparent,
             onInput          = null,
+            toggle           = null,
             radiusSm = 4.dp, radiusMd = 8.dp, radiusLg = 16.dp, radiusFull = 9999.dp,
             fontSm = 14.sp, fontMd = 16.sp, fontLg = 20.sp, fontXl = 24.sp,
             fontFamily = "System",
@@ -201,6 +209,8 @@ object NativeUITheme {
         // is the resolved LIGHT token set, so declaring `on-input` under
         // `light` alone still covers both.
         onInput          = optionalColor(map["on-input"],   fb.onInput),
+        // Optional for the same reason: absent means `primary`.
+        toggle           = optionalColor(map["toggle"],     fb.toggle),
         radiusSm = radiusSm, radiusMd = radiusMd, radiusLg = radiusLg, radiusFull = radiusFull,
         fontSm = fontSm, fontMd = fontMd, fontLg = fontLg, fontXl = fontXl,
         fontFamily = fontFamily,
