@@ -57,6 +57,7 @@ import com.nativephp.mobile.ui.nativerender.NodeView
 import com.nativephp.mobile.ui.nativerender.SharedValueStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.exp
@@ -482,11 +483,11 @@ object GestureAreaRenderer {
                     // axes so `on_drag_end` can report an unbound one too.
                     // A snapping axis follows the finger from where it was
                     // when the drag began (rawX / rawY), with resistance
-                    // past its outer points, and the tracker's fling picks
-                    // the point it springs to on release.
+                    // past its outer points, and the fling it lets go with
+                    // picks the point it springs to on release.
                     var rawX = 0f
                     var rawY = 0f
-                    val velocity = VelocityTracker()
+                    val velocity = ReleaseVelocity()
                     // A one-axis pan's trigger, if it has one, and whether the
                     // pull is past its point.
                     val pullsX = panXId != 0 && panYId == 0 && !triggerX.isEmpty
@@ -496,7 +497,7 @@ object GestureAreaRenderer {
                         snapping.stop()
                         rawX = if (panXId != 0) SharedValueStore.valueOf(panXId) else 0f
                         rawY = if (panYId != 0) SharedValueStore.valueOf(panYId) else 0f
-                        velocity.resetTracking()
+                        velocity.reset()
                     }
                     val onDrag: (Offset, Offset) -> Unit = { bound, raw ->
                         gestureX += raw.x.toDp().value
@@ -529,7 +530,7 @@ object GestureAreaRenderer {
                     val onEnd: (Boolean) -> Unit = { lifted ->
                         // px per second, into dp like the pan itself. A pull
                         // always goes back to rest.
-                        val fling = velocity.calculateVelocity()
+                        val fling = velocity.atRelease()
                         val x = when {
                             panXId == 0 -> gestureX
                             pullsX -> restX.also { snapping.to(panXId, it, scope) }
@@ -550,44 +551,50 @@ object GestureAreaRenderer {
                         gestureX = 0f
                         gestureY = 0f
                     }
-                    when {
-                        // A pull: the same as below, but only a drag its own way.
-                        pullsX || pullsY -> detectPull(
-                            horizontal = pullsX,
-                            way = if (pullsX) triggerX.distance else triggerY.distance,
-                            onStart = onStart,
-                            onEnd = onEnd,
-                        ) { change, dragAmount ->
-                            velocity.addPosition(change.uptimeMillis, change.position)
-                            val raw = change.position - change.previousPosition
-                            onDrag(if (pullsX) Offset(dragAmount, 0f) else Offset(0f, dragAmount), raw)
-                        }
-                        // One axis bound: detect on that axis only, so the
-                        // other direction stays free for an enclosing
-                        // scroll container.
-                        panXId != 0 && panYId == 0 -> detectHorizontalDragGestures(
-                            onDragStart = onStart,
-                            onDragEnd = { onEnd(true) },
-                            onDragCancel = { onEnd(false) },
-                        ) { change, dragAmount ->
-                            velocity.addPosition(change.uptimeMillis, change.position)
-                            onDrag(Offset(dragAmount, 0f), change.position - change.previousPosition)
-                        }
-                        panXId == 0 && panYId != 0 -> detectVerticalDragGestures(
-                            onDragStart = onStart,
-                            onDragEnd = { onEnd(true) },
-                            onDragCancel = { onEnd(false) },
-                        ) { change, dragAmount ->
-                            velocity.addPosition(change.uptimeMillis, change.position)
-                            onDrag(Offset(0f, dragAmount), change.position - change.previousPosition)
-                        }
-                        else -> detectDragGestures(
-                            onDragStart = onStart,
-                            onDragEnd = { onEnd(true) },
-                            onDragCancel = { onEnd(false) },
-                        ) { change, dragAmount ->
-                            velocity.addPosition(change.uptimeMillis, change.position)
-                            onDrag(dragAmount, dragAmount)
+                    coroutineScope {
+                        // The detectors below end a drag without saying
+                        // when the finger lifted, so hear that here first,
+                        // for the fling a snap settles by.
+                        if (!snapX.isEmpty || !snapY.isEmpty) launch { velocity.watchLifts(this@pointerInput) }
+                        when {
+                            // A pull: the same as below, but only a drag its own way.
+                            pullsX || pullsY -> detectPull(
+                                horizontal = pullsX,
+                                way = if (pullsX) triggerX.distance else triggerY.distance,
+                                onStart = onStart,
+                                onEnd = onEnd,
+                            ) { change, dragAmount ->
+                                velocity.add(change)
+                                val raw = change.position - change.previousPosition
+                                onDrag(if (pullsX) Offset(dragAmount, 0f) else Offset(0f, dragAmount), raw)
+                            }
+                            // One axis bound: detect on that axis only, so the
+                            // other direction stays free for an enclosing
+                            // scroll container.
+                            panXId != 0 && panYId == 0 -> detectHorizontalDragGestures(
+                                onDragStart = onStart,
+                                onDragEnd = { onEnd(true) },
+                                onDragCancel = { onEnd(false) },
+                            ) { change, dragAmount ->
+                                velocity.add(change)
+                                onDrag(Offset(dragAmount, 0f), change.position - change.previousPosition)
+                            }
+                            panXId == 0 && panYId != 0 -> detectVerticalDragGestures(
+                                onDragStart = onStart,
+                                onDragEnd = { onEnd(true) },
+                                onDragCancel = { onEnd(false) },
+                            ) { change, dragAmount ->
+                                velocity.add(change)
+                                onDrag(Offset(0f, dragAmount), change.position - change.previousPosition)
+                            }
+                            else -> detectDragGestures(
+                                onDragStart = onStart,
+                                onDragEnd = { onEnd(true) },
+                                onDragCancel = { onEnd(false) },
+                            ) { change, dragAmount ->
+                                velocity.add(change)
+                                onDrag(dragAmount, dragAmount)
+                            }
                         }
                     }
                 }
@@ -1186,6 +1193,52 @@ object GestureAreaRenderer {
         /** Whether a pull this far from rest is at the point or past it. */
         fun passed(offset: Float): Boolean =
             !isEmpty && if (distance < 0f) offset <= distance else offset >= distance
+    }
+
+    /**
+     * The speed a drag lets go with, in px per second. A tracker fed only
+     * the moves the drag detectors pass on keeps the last move's speed
+     * however long the finger then rests, so a drag held still and let go
+     * short of halfway would fling on to the next snap point. Told when the
+     * finger lifted, a finger that hadn't moved for more than 40ms before
+     * lets go with none, as Android's own VelocityTracker judges it from
+     * the up event.
+     */
+    private class ReleaseVelocity {
+        private val tracker = VelocityTracker()
+        private var lastMove = 0L
+        private var liftedAt = 0L
+
+        fun reset() {
+            tracker.resetTracking()
+            lastMove = 0L
+            liftedAt = 0L
+        }
+
+        fun add(change: PointerInputChange) {
+            tracker.addPosition(change.uptimeMillis, change.position)
+            lastMove = change.uptimeMillis
+        }
+
+        /**
+         * Notes each finger that lifts. The Initial pass reaches here before
+         * a drag detector's Main pass ends the drag on the same event.
+         */
+        suspend fun watchLifts(scope: PointerInputScope) = scope.awaitPointerEventScope {
+            while (true) {
+                awaitPointerEvent(PointerEventPass.Initial).changes.forEach {
+                    if (it.changedToUpIgnoreConsumed()) liftedAt = it.uptimeMillis
+                }
+            }
+        }
+
+        fun atRelease(): Velocity =
+            if (liftedAt - lastMove > StoppedMillis) Velocity.Zero else tracker.calculateVelocity()
+
+        private companion object {
+            /** Android's own: no move for this long before the finger lifts means it had stopped. */
+            const val StoppedMillis = 40L
+        }
     }
 
     /** Springs a snapping or trigger axis to where it rests, on release or a PHP write-back. */
