@@ -96,8 +96,7 @@ it('binds the iOS selection whenever PHP can place it, and places it on a push',
 
     expect($source)
         ->toContain('let selectionBound = selectionEnabled || placesSelection')
-        ->toContain('if selectionBound {
-                                TextEditor(text: $text, selection: $selection)')
+        ->toMatch('/if selectionBound \{\s*TextEditor\(text: \$text, selection: \$selection\)/')
         ->toContain('if selectionBound {
                     TextField(placeholder, text: $text, selection: $selection, prompt: prompt)')
         ->toContain('placed = placeSelection(start: placedStart, end: placedEnd, in: newServerValue)');
