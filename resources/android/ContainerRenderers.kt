@@ -303,7 +303,9 @@ internal fun ExpressiveMenu(
 /// An `image` (an account's avatar, say) takes the icon's place, cut to
 /// a circle or, with `image_shape: rounded`, a rounded square. The icon
 /// shows while it loads and stays if it fails. A `checked` row has a
-/// tick at its end, as on the option a menu has picked.
+/// tick at its end, as on the option a menu has picked. A `subtitle`
+/// (an account's handle under its name, say) is a second, smaller line
+/// under the label in `onSurfaceVariant`.
 @Composable
 internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) {
     if (item.props.getBool("divider")) {
@@ -315,6 +317,7 @@ internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) 
     }
     val itemLabel = item.props.getString("label", "")
     val itemIcon = item.props.getString("icon", "")
+    val itemSubtitle = item.props.getString("subtitle", "")
     val itemImage = item.props.getString("image", "")
     val roundedImage = item.props.getString("image_shape", "circle") == "rounded"
     val isChecked = item.props.getBool("checked")
@@ -369,13 +372,30 @@ internal fun renderAttachedMenuItem(item: NativeUINode, onSelected: () -> Unit) 
         } else {
             icon()
         }
-        Text(
-            itemLabel,
-            fontFamily = nuiDefaultFontFamily(),
-            color = labelColor,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f),
-        )
+        if (itemSubtitle.isNotEmpty()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    itemLabel,
+                    fontFamily = nuiDefaultFontFamily(),
+                    color = labelColor,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    itemSubtitle,
+                    fontFamily = nuiDefaultFontFamily(),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        } else {
+            Text(
+                itemLabel,
+                fontFamily = nuiDefaultFontFamily(),
+                color = labelColor,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+        }
         if (isChecked) {
             MaterialIcon(
                 name = "check",
