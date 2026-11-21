@@ -197,14 +197,6 @@ struct NativeUIImageRenderer: View {
         }
     }
 
-    /// `revalidate` on `<native:image>`: follow the server's HTTP caching for
-    /// a remote image instead of reusing whatever is on disk. A bare Blade
-    /// attribute arrives as `true`, a quoted one as a string.
-    private var revalidates: Bool {
-        let p = node.props
-        return p.getBool("revalidate") || ["true", "1"].contains(p.getString("revalidate"))
-    }
-
     @ViewBuilder
     private func imageContent(src: String, fit: ImageFit, tintArgb: Int, cornerRadius: CGFloat, ref: String) -> some View {
         switch NativeUIImageSource.resolve(src) {
@@ -229,7 +221,7 @@ struct NativeUIImageRenderer: View {
             // strict HTTP caching), decoded off the main thread at the size
             // it's drawn, and tried again if the download fails. None draws
             // the image at its own size, so it needs the whole image.
-            NativeUIRemoteImage(url: url, fullSize: fit == .none, revalidate: revalidates) { phase in
+            NativeUIRemoteImage(url: url, fullSize: fit == .none, revalidate: node.props.revalidatesRemoteImages) { phase in
                 switch phase {
                 case .success(let image):
                     tinted(image, fit: fit, tintArgb: tintArgb, cornerRadius: cornerRadius, ref: ref)

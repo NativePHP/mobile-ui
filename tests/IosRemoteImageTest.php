@@ -4,6 +4,8 @@ use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\ElementRegistry;
 use Native\Mobile\Edge\Elements\Image;
 use Native\Mobile\Edge\NativeElementCollector;
+use Native\Mobile\UI\Elements\ListItem;
+use Native\Mobile\UI\Elements\Pager;
 
 $ios = dirname(__DIR__).'/resources/ios';
 
@@ -15,9 +17,9 @@ it('loads every remote image through NativeUIRemoteImage', function () use ($ios
 
     // No plain AsyncImage: it uses the small shared URLCache and decodes at full size.
     expect($uses)->toBe(0)
-        ->and(file_get_contents($ios.'/NativeUIImageSource.swift'))->toContain('NativeUIRemoteImage(url: url) { phase in')
-        ->and(file_get_contents($ios.'/NativeUISimpleRenderers.swift'))->toContain('NativeUIRemoteImage(url: url, fullSize: fit == .none, revalidate: revalidates) { phase in')
-        ->and(file_get_contents($ios.'/NativeUIPagerRenderer.swift'))->toContain('NativeUIRemoteImage(url: url) { phase in');
+        ->and(file_get_contents($ios.'/NativeUIImageSource.swift'))->toContain('NativeUIRemoteImage(url: url, revalidate: revalidate) { phase in')
+        ->and(file_get_contents($ios.'/NativeUISimpleRenderers.swift'))->toContain('NativeUIRemoteImage(url: url, fullSize: fit == .none, revalidate: node.props.revalidatesRemoteImages) { phase in')
+        ->and(file_get_contents($ios.'/NativeUIPagerRenderer.swift'))->toContain('NativeUIRemoteImage(url: url, revalidate: revalidatesPlaceholders) { phase in');
 });
 
 it('downloads through its own session with a small memory tier and a disk cache', function () use ($ios) {
@@ -59,36 +61,69 @@ it('empties the URLCache memory tier on a memory warning and in the background',
         ->toContain('urlCache.memoryCapacity = 0');
 });
 
-it('passes revalidate from the image element to the remote image', function () use ($ios) {
-    expect(file_get_contents($ios.'/NativeUISimpleRenderers.swift'))
-        ->toContain('return p.getBool("revalidate") || ["true", "1"].contains(p.getString("revalidate"))')
+it('reads revalidate the same way for every element that shows remote images', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('var revalidatesRemoteImages: Bool {')
+        ->toContain('getBool("revalidate") || ["true", "1"].contains(getString("revalidate"))')
         ->and(file_get_contents(dirname(__DIR__).'/src/NativeUIServiceProvider.php'))
         ->toContain("NativeElementCollector::captureAttribute('revalidate', 'revalidate');");
 });
 
-it('carries revalidate onto the image node as a prop', function () {
+it('passes revalidate from a list item to its avatar and thumbnail', function () use ($ios) {
+    $source = file_get_contents($ios.'/NativeUIListItemRenderer.swift');
+
+    expect($source)
+        ->toContain('NativeUIRowImage(src: value, revalidate: node.props.revalidatesRemoteImages) {')
+        ->toContain('NativeUIRowImage(src: value, contentMode: imageFit == "contain" ? .fit : .fill, revalidate: node.props.revalidatesRemoteImages) {')
+        ->and(file_get_contents($ios.'/NativeUIImageSource.swift'))
+        ->toContain('init(src: String, contentMode: ContentMode = .fill, revalidate: Bool = false, @ViewBuilder placeholder: @escaping () -> Placeholder) {');
+});
+
+it('passes revalidate from a pager to its placeholder images', function () use ($ios) {
+    expect(file_get_contents($ios.'/NativeUIPagerRenderer.swift'))
+        ->toContain('revalidatesPlaceholders: p.revalidatesRemoteImages,')
+        ->toContain('NativeUIRemoteImage(url: url, revalidate: revalidatesPlaceholders) { phase in');
+});
+
+/**
+ * The tree Blade would build for one element, with mobile-ui's capture of
+ * `revalidate` registered.
+ */
+function revalidateProps(string $type, string $class, array $attrs): array
+{
     NativeElementCollector::reset();
     ElementRegistry::reset();
-    ElementRegistry::register('image', Image::class);
+    ElementRegistry::register($type, $class);
     NativeElementCollector::captureAttribute('revalidate', 'revalidate');
 
     try {
-        NativeElementCollector::leaf('image', ['src' => 'https://example.com/a.jpg', 'revalidate' => true]);
-        $props = NativeElementCollector::collect()->toArray(new CallbackRegistry)['props'];
+        NativeElementCollector::leaf($type, $attrs);
 
-        expect($props['revalidate'])->toBeTrue()
-            ->and($props['src'])->toBe('https://example.com/a.jpg');
-
-        NativeElementCollector::reset();
-        NativeElementCollector::leaf('image', ['src' => 'https://example.com/a.jpg']);
-        $props = NativeElementCollector::collect()->toArray(new CallbackRegistry)['props'];
-
-        expect($props)->not->toHaveKey('revalidate');
+        return NativeElementCollector::collect()->toArray(new CallbackRegistry)['props'];
     } finally {
         NativeElementCollector::stopCapturingAttributes();
         NativeElementCollector::reset();
         ElementRegistry::reset();
     }
+}
+
+it('carries revalidate onto the image node as a prop', function () {
+    $props = revalidateProps('image', Image::class, ['src' => 'https://example.com/a.jpg', 'revalidate' => true]);
+
+    expect($props['revalidate'])->toBeTrue()
+        ->and($props['src'])->toBe('https://example.com/a.jpg')
+        ->and(revalidateProps('image', Image::class, ['src' => 'https://example.com/a.jpg']))->not->toHaveKey('revalidate');
+});
+
+it('carries revalidate onto a list item and a pager as a prop', function () {
+    $item = revalidateProps('list_item', ListItem::class, ['headline' => 'Ada', 'leadingAvatar' => 'https://example.com/ada.jpg', 'revalidate' => true]);
+    $pager = revalidateProps('pager', Pager::class, ['placeholders' => ['https://example.com/1.jpg'], 'revalidate' => 'true']);
+
+    expect($item['revalidate'])->toBeTrue()
+        ->and($item['leading_value'])->toBe('https://example.com/ada.jpg')
+        ->and($pager['revalidate'])->toBe('true')
+        ->and($pager['placeholders'])->toBe(['https://example.com/1.jpg'])
+        ->and(ListItem::make('Ada')->leadingAvatar('https://example.com/ada.jpg')->setProp('revalidate', true)->toArray(new CallbackRegistry)['props']['revalidate'])->toBeTrue();
 });
 
 it('thumbnails with ImageIO only when the source is well over the drawn size', function () use ($ios) {

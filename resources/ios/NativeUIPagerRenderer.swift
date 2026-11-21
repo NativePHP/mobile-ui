@@ -72,6 +72,7 @@ struct NativeUIPagerRenderer: View {
             cbId: p.getCallbackId("on_page_change"),
             pageByIndex: pageByIndex,
             placeholders: p.getStringList("placeholders"),
+            revalidatesPlaceholders: p.revalidatesRemoteImages,
             tabs: PagerTabs(props: p),
             header: beside ? nil : header,
             besideHeader: beside ? header : nil,
@@ -98,6 +99,9 @@ private struct PagerBody: View {
     let pageByIndex: [Int: NativeUINode]
     /// Image per page index for pages PHP hasn't shipped; "" for none.
     let placeholders: [String]
+    /// `revalidate` on the pager: its placeholder images follow the server's
+    /// HTTP caching, as a `<native:image revalidate>` does.
+    let revalidatesPlaceholders: Bool
     /// The tab row above the pages, if the pager has one.
     let tabs: PagerTabs?
     /// The `pager_header`, which each page's list draws above the tabs.
@@ -145,7 +149,7 @@ private struct PagerBody: View {
     /// long feed never fetches stills it may never reach.
     static let placeholderRadius = 4
 
-    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String], tabs: PagerTabs?, header: NativeUINode?, besideHeader: NativeUINode?, overlay: NativeUINode?, background: PagerColor, a11yLabel: String) {
+    init(nodeId: Int, count: Int, loaded: Int, requestedPage: Int, horizontal: Bool, reportOnSettle: Bool, cbId: Int, pageByIndex: [Int: NativeUINode], placeholders: [String], revalidatesPlaceholders: Bool, tabs: PagerTabs?, header: NativeUINode?, besideHeader: NativeUINode?, overlay: NativeUINode?, background: PagerColor, a11yLabel: String) {
         self.nodeId = nodeId
         self.count = count
         self.loaded = loaded
@@ -155,6 +159,7 @@ private struct PagerBody: View {
         self.cbId = cbId
         self.pageByIndex = pageByIndex
         self.placeholders = placeholders
+        self.revalidatesPlaceholders = revalidatesPlaceholders
         self.tabs = tabs
         self.header = header
         self.besideHeader = besideHeader
@@ -703,7 +708,7 @@ private struct PagerBody: View {
     @ViewBuilder
     private func placeholder(_ index: Int) -> some View {
         if index < placeholders.count, !placeholders[index].isEmpty, let url = URL(string: placeholders[index]) {
-            NativeUIRemoteImage(url: url) { phase in
+            NativeUIRemoteImage(url: url, revalidate: revalidatesPlaceholders) { phase in
                 if let image = phase.image {
                     image.resizable().aspectRatio(contentMode: .fill)
                 } else {

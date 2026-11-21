@@ -777,17 +777,31 @@ struct NativeUIRemoteImage<Content: View>: View {
     }
 }
 
+extension GenericProps {
+    /// `revalidate` on an element that shows remote images: `<native:image>`,
+    /// a list item's avatar or thumbnail, a pager's placeholders. Those
+    /// images follow the server's HTTP caching instead of reusing whatever
+    /// is on disk (see `NativeUIRemoteImageCache`). A bare Blade attribute
+    /// arrives as `true`, a quoted one as a string.
+    var revalidatesRemoteImages: Bool {
+        getBool("revalidate") || ["true", "1"].contains(getString("revalidate"))
+    }
+}
+
 /// Avatar / thumbnail image for list rows: fills its frame, showing
 /// `placeholder` while the image loads and when the source doesn't resolve.
-/// Callers supply their own frame and clip shape.
+/// Callers supply their own frame and clip shape. `revalidate` is the row's
+/// `revalidate` prop, as on `<native:image>`.
 struct NativeUIRowImage<Placeholder: View>: View {
     private let src: String
     private let contentMode: ContentMode
+    private let revalidate: Bool
     private let placeholder: () -> Placeholder
 
-    init(src: String, contentMode: ContentMode = .fill, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+    init(src: String, contentMode: ContentMode = .fill, revalidate: Bool = false, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.src = src
         self.contentMode = contentMode
+        self.revalidate = revalidate
         self.placeholder = placeholder
     }
 
@@ -802,7 +816,7 @@ struct NativeUIRowImage<Placeholder: View>: View {
                 placeholder()
             }
         case .remote(let url):
-            NativeUIRemoteImage(url: url) { phase in
+            NativeUIRemoteImage(url: url, revalidate: revalidate) { phase in
                 if let image = phase.image {
                     image
                         .resizable()
