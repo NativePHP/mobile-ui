@@ -2,6 +2,7 @@
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Layouts\Builders\NavAction;
+use Native\Mobile\UI\MenuItem;
 
 it('carries a menu row subtitle to the renderers', function () {
     $item = NavAction::make('post-as-simon')
@@ -17,6 +18,21 @@ it('carries a menu row subtitle to the renderers', function () {
         'subtitle' => '@simon-hamp',
     ]);
 });
+
+it('sets a menu row subtitle with MenuItem::subtitle', function () {
+    $item = MenuItem::subtitle(NavAction::make('post-as-simon')->label('Simon')->toElement(), '@simon-hamp');
+
+    expect($item->toArray(new CallbackRegistry)['props'])->toMatchArray([
+        'label' => 'Simon',
+        'subtitle' => '@simon-hamp',
+    ]);
+});
+
+it('leaves a menu row without a subtitle when it is empty', function (?string $subtitle) {
+    $item = MenuItem::subtitle(NavAction::make('post-as-simon')->label('Simon')->toElement(), $subtitle);
+
+    expect($item->toArray(new CallbackRegistry)['props'])->not->toHaveKey('subtitle');
+})->with([null, '']);
 
 it('draws an iOS menu row subtitle as a second Text in every kind of row', function () {
     $source = file_get_contents(dirname(__DIR__).'/resources/ios/NativeUIMenuItem.swift');
