@@ -2,25 +2,13 @@
 
 use Native\Mobile\Edge\CallbackRegistry;
 use Native\Mobile\Edge\Layouts\Builders\NavAction;
-use Native\Mobile\UI\MenuItem;
 
 it('carries a menu row subtitle to the renderers', function () {
     $item = NavAction::make('post-as-simon')
         ->label('Simon')
+        ->subtitle('@simon-hamp')
         ->icon('person')
-        ->toElement()
-        ->setProp('subtitle', '@simon-hamp');
-
-    $props = $item->toArray(new CallbackRegistry)['props'];
-
-    expect($props)->toMatchArray([
-        'label' => 'Simon',
-        'subtitle' => '@simon-hamp',
-    ]);
-});
-
-it('sets a menu row subtitle with MenuItem::subtitle', function () {
-    $item = MenuItem::subtitle(NavAction::make('post-as-simon')->label('Simon')->toElement(), '@simon-hamp');
+        ->toElement();
 
     expect($item->toArray(new CallbackRegistry)['props'])->toMatchArray([
         'label' => 'Simon',
@@ -29,7 +17,7 @@ it('sets a menu row subtitle with MenuItem::subtitle', function () {
 });
 
 it('leaves a menu row without a subtitle when it is empty', function (?string $subtitle) {
-    $item = MenuItem::subtitle(NavAction::make('post-as-simon')->label('Simon')->toElement(), $subtitle);
+    $item = NavAction::make('post-as-simon')->label('Simon')->subtitle($subtitle)->toElement();
 
     expect($item->toArray(new CallbackRegistry)['props'])->not->toHaveKey('subtitle');
 })->with([null, '']);
