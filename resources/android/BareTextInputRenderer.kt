@@ -1,7 +1,11 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -13,23 +17,28 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.plugins.native_ui.NativeUITheme
+import kotlin.math.roundToInt
 
 /**
  * Chromeless text input — Compose `BasicTextField` with no decoration.
@@ -107,6 +116,13 @@ object BareTextInputRenderer {
             SelectionReporter(scope = scope, props = props, nodeId = node.id)
         }
 
+        // Where the caret is drawn (`@caretChange`), for a multiline field.
+        // Dormant unless `on_caret_change` is wired; see CaretReporter.
+        val caretReporter = remember(props.onCaretChangeCb, props.selectionDebounceMs, props.secure, props.multiline) {
+            CaretReporter(scope = scope, props = props, nodeId = node.id)
+        }
+        val density = LocalDensity.current.density
+
         // Bare sends every edit as it happens, so only the caret can be
         // pending when a press elsewhere is dispatched. The policy runs this
         // first, so a press that reads the caret (picking a mention) sees
@@ -126,6 +142,7 @@ object BareTextInputRenderer {
                 value = pushed
                 lastSentValue = props.serverValue
                 selectionReporter.flush(pushed)
+                caretReporter.onValueChanged(pushed)
             }
         }
 
@@ -150,7 +167,9 @@ object BareTextInputRenderer {
                     }
                 }
                 selectionReporter.onValueChanged(newValue)
+                caretReporter.onValueChanged(newValue)
             },
+            onTextLayout = { result -> caretReporter.onLayout(result, value) },
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
@@ -160,12 +179,19 @@ object BareTextInputRenderer {
             // elsewhere honor this field's keep-focus-on-submit (mobile-air
             // #335). The unfocused call this fires on first composition is a
             // no-op there, since this field doesn't own the policy yet.
+            // A field that fills its height (`fills_height`, from `h-full`)
+            // takes all of it; the text scrolls inside. onSizeChanged and the
+            // nested scroll connection only feed the caret reporter.
             modifier = Modifier
                 .fillMaxWidth()
+                .then(if (props.fillsHeight) Modifier.fillMaxHeight() else Modifier)
+                .onSizeChanged { caretReporter.onSize(it.width, it.height, density) }
+                .nestedScroll(caretReporter.scrollConnection)
                 .focusRequester(focusRequester)
                 .onFocusChanged { state ->
                     if (wasFocused && !state.isFocused) selectionReporter.flush(value)
                     wasFocused = state.isFocused
+                    caretReporter.onFocusChanged(state.isFocused)
                     if (state.isFocused) {
                         KeyboardFocusPolicy.fieldFocused(focusToken, props.keepFocusOnSubmit) { flushSelection() }
                     } else {
@@ -197,17 +223,34 @@ object BareTextInputRenderer {
             // composer grew without bound instead of scrolling internally
             // at the cap like iOS's lineLimit(min...max). Same forwarding as
             // the filled/outlined variants.
-            maxLines = props.maxLines,
+            maxLines = props.effectiveMaxLines,
             minLines = props.minLines,
             decorationBox = { innerTextField ->
-                if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
-                    Text(
-                        text = props.placeholder,
-                        color = placeholderColor,
-                        fontSize = props.textSize.sp
-                    )
+                // propagateMinConstraints as BasicTextField's own root box
+                // does, so a field that fills its height still hands all of
+                // it to the text.
+                Box(propagateMinConstraints = true) {
+                    if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
+                        Text(
+                            text = props.placeholder,
+                            color = placeholderColor,
+                            fontSize = props.textSize.sp
+                        )
+                    }
+                    innerTextField()
+                    // Sits where the scrolled text is, so the caret reporter
+                    // can ask the field's own scroller to show the caret when
+                    // the field gets shorter. Compose only does that when the
+                    // caret moves. See CaretReporter.
+                    if (props.multiline) {
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .offset { IntOffset(0, -caretReporter.scrollPx.roundToInt()) }
+                                .bringIntoViewRequester(caretReporter.bringIntoViewRequester)
+                        )
+                    }
                 }
-                innerTextField()
             },
             // Filled and Outlined pass this since day one; Bare never did, so
             // `keyboard="number"` (and the derived capitalization) were

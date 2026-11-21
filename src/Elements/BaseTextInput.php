@@ -26,7 +26,7 @@ use Native\Mobile\UI\Concerns\ShowsFieldErrors;
  *   - `prefix`, `suffix`, `leading-icon`, `trailing-icon` (decorations)
  *   - `size`                                          (sm | md | lg)
  *   - `a11y-label`, `a11y-hint`                       (accessibility)
- *   - `@change`, `@submit`, `@selectionChange`        (callbacks)
+ *   - `@change`, `@submit`, `@selectionChange`, `@caretChange` (callbacks)
  *
  * `@selectionChange` reports caret / selection movement: the handler is
  * called with `(string $text, int $selectionStart, int $selectionEnd)`,
@@ -38,6 +38,13 @@ use Native\Mobile\UI\Concerns\ShowsFieldErrors;
  *
  * `selection` is the other direction: where the caret goes when PHP changes
  * the field's text, in the same code-point offsets. See `selection()`.
+ *
+ * `@caretChange` reports where a multiline field draws its caret, in points,
+ * for placing something next to it. See `onCaretChange()` and `Caret`.
+ *
+ * A multiline field with `h-full` (or `fill`) fills the height its parent
+ * gives it and scrolls its own text, instead of being as tall as its lines.
+ * See `resolveProps()`.
  *
  * Subclasses (`OutlinedTextInput`, `FilledTextInput`) only override `$type`
  * so native renderers can dispatch to the right Material3 / SwiftUI primitive.
@@ -54,6 +61,19 @@ abstract class BaseTextInput extends Element
     protected ?string $submitCallback = null;
 
     protected ?string $selectionChangeCallback = null;
+
+    protected ?string $caretChangeCallback = null;
+
+    /**
+     * `@caretChange` isn't one of core's own events, so it's declared here
+     * for the precompiler to rewrite to `_caretChange` like `@change`.
+     *
+     * @return string[]
+     */
+    public static function elementEvents(): array
+    {
+        return ['caretChange'];
+    }
 
     public static function make(): static
     {
@@ -227,6 +247,12 @@ abstract class BaseTextInput extends Element
         // same expression.
         if (isset($attrs['_selectionChange'])) {
             $this->onSelectionChange($attrs['_selectionChange']);
+        }
+
+        // `@caretChange` → `_caretChange`. The collector only routes core
+        // events, so this one is always wired here.
+        if (isset($attrs['_caretChange'])) {
+            $this->onCaretChange((string) $attrs['_caretChange']);
         }
     }
 
@@ -724,6 +750,31 @@ abstract class BaseTextInput extends Element
         return $this;
     }
 
+    /**
+     * Where a multiline field draws its caret. The handler is called with
+     * the caret's rectangle after it moves, after the text is laid out again,
+     * and after the field scrolls, coalesced like `@selectionChange` (the
+     * same `selection-debounce-ms` window) and only when something changed.
+     *
+     * Type the parameter as `Native\Mobile\UI\Caret` to get it decoded:
+     * `x`, `y`, `width` and `height` in the field's own points (dp on
+     * Android), from the top-left of its visible area with its scrolling
+     * taken off, the visual `line` the caret is on, and the field's visible
+     * `fieldWidth` / `fieldHeight`. Literal arguments come first, as usual:
+     * `@caretChange="caretMoved('body')"` calls `caretMoved('body', $caret)`.
+     *
+     * Only sent while the field has focus, only by multiline fields, and
+     * never by a `secure` one (the callback isn't serialized for it).
+     *
+     * Blade: `@caretChange="method"`.
+     */
+    public function onCaretChange(string $method): static
+    {
+        $this->caretChangeCallback = $method;
+
+        return $this;
+    }
+
     protected function resolveProps(CallbackRegistry $registry): array
     {
         $props = $this->inputProps;
@@ -757,6 +808,22 @@ abstract class BaseTextInput extends Element
             // the event's TEXT_CHANGE payload ("{start},{end}\x1F{text}") and
             // call the handler with (text, selectionStart, selectionEnd).
             $props['on_selection_change'] = $registry->register($this->selectionChangeCallback, 'text_selection');
+        }
+        // A plain callback: the payload arrives as the TEXT_CHANGE text, and a
+        // handler typed `Caret` decodes it (see Caret). Never for a secure
+        // field, for the same reason as the selection.
+        if ($this->caretChangeCallback !== null && empty($this->inputProps['secure'])) {
+            $props['on_caret_change'] = $registry->register($this->caretChangeCallback);
+        }
+
+        // A multiline field given the height of its parent (`h-full`, `fill`)
+        // fills it and scrolls its own text, rather than being as tall as its
+        // lines: `min-lines` still sets the least it shows, and `max-lines`
+        // no longer caps it. `flex-1` alone doesn't do this, because in a row
+        // it means width, and a chat bar's flex-1 field must keep growing in
+        // lines. Put `h-full` on the field inside a `flex-1` column.
+        if (! empty($this->inputProps['multiline']) && (parent::getLayout()['height'] ?? null) === 'fill') {
+            $props['fills_height'] = true;
         }
 
         return $props;

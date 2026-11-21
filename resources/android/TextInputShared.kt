@@ -1,16 +1,24 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.text.TextLayoutResult
+import java.util.Locale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
@@ -82,6 +90,10 @@ internal data class TextInputProps(
     val onChangeCb: Int,
     val onSubmitCb: Int,
     val onSelectionChangeCb: Int,
+    /** `@caretChange`; 0 when unset. Reported by the bare variant's multiline field. */
+    val onCaretChangeCb: Int,
+    /** `h-full` / `fill` on a multiline field: fill the height given, without the max-lines cap. */
+    val fillsHeight: Boolean,
     val syncMode: SyncMode,
     val debounceMs: Int,
     val autofocus: Boolean,
@@ -114,6 +126,13 @@ internal data class TextInputProps(
     val revealToggle: Boolean get() = secure && revealable && enabled && !readOnly
 
     val singleLine: Boolean get() = !multiline
+
+    /**
+     * The line cap the field passes to Compose. A field that fills its
+     * height (`fills_height`) has none, so it can be as tall as it's made,
+     * and Compose scrolls the text inside whatever height that is.
+     */
+    val effectiveMaxLines: Int get() = if (fillsHeight) Int.MAX_VALUE else maxLines
 
     /** Numeric sp size for the chromeless variant. Tracks token fallbacks. */
     val textSize: Int get() = when (size) {
@@ -176,6 +195,8 @@ internal fun parseTextInputProps(node: NativeUINode): TextInputProps {
         onChangeCb   = p.getCallbackId("on_change"),
         onSubmitCb   = p.getCallbackId("on_submit"),
         onSelectionChangeCb = p.getCallbackId("on_selection_change"),
+        onCaretChangeCb = p.getCallbackId("on_caret_change"),
+        fillsHeight  = p.getBool("multiline") && p.getBool("fills_height"),
         syncMode     = parseSyncMode(p.getString("sync_mode", "live")),
         debounceMs   = p.getInt("debounce_ms").let { if (it > 0) it else 300 },
         autofocus    = p.getBool("autofocus"),
@@ -752,4 +773,212 @@ internal fun Modifier.nuiAutofocus(enabled: Boolean): Modifier {
     }
 
     return this.focusRequester(requester)
+}
+
+/**
+ * Where a multiline field draws its caret, for `@caretChange`: packed as
+ * `x,y,width,height,line,fieldWidth,fieldHeight` in dp and sent over the
+ * text-change channel with its own callback id, like [SelectionReporter].
+ *
+ * The rectangle is [TextLayoutResult.getCursorRect] at the selection's end,
+ * less how far the field has scrolled its text, so it's measured from the
+ * top-left of what the field shows. `line` is
+ * [TextLayoutResult.getLineForOffset].
+ *
+ * BasicTextField (the TextFieldValue one) keeps its scroll position to
+ * itself, so this follows it: the field scrolls by just enough to keep the
+ * caret in view whenever the caret's rectangle changes, which is mirrored
+ * here as Compose's TextFieldScrollerPosition does it, and a drag or fling
+ * of the field's text reaches [scrollConnection] as nested scroll, from
+ * which the consumed distance is taken.
+ *
+ * Compose only scrolls to the caret when the caret moves, not when the
+ * field gets shorter, so a field that shrinks under a caret near its
+ * bottom would leave the caret below its new bottom edge until the next
+ * keystroke. iOS scrolls it back into view. To match, a focused multiline
+ * field that gets shorter asks [bringIntoViewRequester] to show the caret.
+ * The requester sits on a box the renderer places at the mirrored scroll
+ * offset ([scrollPx]), so it moves with the text and the request lands on
+ * the field's own scroller. That scroll reaches [scrollConnection] like a
+ * drag does. This part runs for every multiline field, with or without a
+ * callback.
+ *
+ * Reports are coalesced over [TextInputProps.selectionDebounceMs] and an
+ * unchanged payload is dropped. Nothing is sent while the field isn't
+ * focused, for a single-line or secure field, or with no callback set.
+ */
+internal class CaretReporter(
+    private val scope: CoroutineScope,
+    private val props: TextInputProps,
+    private val nodeId: Int,
+) {
+    /** Whether `@caretChange` reports are sent. */
+    val active: Boolean get() = props.onCaretChangeCb != 0 && props.multiline && !props.secure
+
+    /** Whether the scroll is followed at all: any multiline field, see [revealCaret]. */
+    private val tracking: Boolean get() = props.multiline
+
+    private var layout: TextLayoutResult? = null
+    private var selectionEnd = 0
+    private var fieldWidthPx = 0
+    private var viewportPx = 0
+    private var density = 1f
+    private var focused = false
+
+    // The mirrored scroll position, in px, and the caret rectangle it was
+    // last coerced for. [offset] is read from layout callbacks, so it's a
+    // plain field; [offsetState] only carries it to the renderer's anchor
+    // box, which reads it while placing.
+    private var offset = 0f
+        set(value) {
+            field = value
+            offsetState.floatValue = value
+        }
+    private val offsetState = mutableFloatStateOf(0f)
+    private var previousCursor = Rect.Zero
+
+    /** How far the field has scrolled its text, in px, as a state for placement. */
+    val scrollPx: Float get() = offsetState.floatValue
+
+    /** Put on a box placed at -[scrollPx] over the text, so requests move with it. */
+    val bringIntoViewRequester = BringIntoViewRequester()
+    private var revealJob: Job? = null
+
+    private var job: Job? = null
+    private var lastSent: String? = null
+
+    /** The field's text, laid out again. */
+    fun onLayout(result: TextLayoutResult, value: TextFieldValue) {
+        if (!tracking) return
+        layout = result
+        selectionEnd = value.selection.end
+        update()
+    }
+
+    /** The caret moved or the text changed. */
+    fun onValueChanged(value: TextFieldValue) {
+        if (!tracking) return
+        selectionEnd = value.selection.end
+        // New text gets a new layout, which runs the update; the old one
+        // would put the caret by text that's no longer there.
+        if (layout?.layoutInput?.text?.text != value.text) return
+        update()
+    }
+
+    fun onSize(widthPx: Int, heightPx: Int, density: Float) {
+        if (!tracking) return
+        val shrank = heightPx < viewportPx
+        fieldWidthPx = widthPx
+        viewportPx = heightPx
+        this.density = density
+        update()
+        if (shrank) revealCaret()
+    }
+
+    fun onFocusChanged(isFocused: Boolean) {
+        if (!tracking) return
+        focused = isFocused
+        lastSent = null
+        if (isFocused) {
+            schedule()
+        } else {
+            job?.cancel()
+            job = null
+            revealJob?.cancel()
+            revealJob = null
+        }
+    }
+
+    /**
+     * The field got shorter: if that left the caret outside what it shows,
+     * scroll the field's text until the caret is back in view. Only while
+     * focused, since there's no caret to keep in view otherwise.
+     */
+    private fun revealCaret() {
+        if (!focused) return
+        val cursor = cursorRect() ?: return
+        if (cursor.top >= offset && cursor.bottom <= offset + viewportPx) return
+        revealJob?.cancel()
+        revealJob = scope.launch {
+            // Cancelled by a newer request or by the field leaving
+            // composition; either way there's nothing left to do.
+            runCatching { bringIntoViewRequester.bringIntoView(cursor) }
+        }
+    }
+
+    /** What the field's own scrolling consumed, as nested scroll reports it. */
+    val scrollConnection = object : NestedScrollConnection {
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            if (tracking && consumed.y != 0f) {
+                // A finger moving up (negative y) scrolls the text up, which
+                // is the scroll position growing.
+                offset = (offset - consumed.y).coerceIn(0f, maxOffset())
+                schedule()
+            }
+            return Offset.Zero
+        }
+    }
+
+    private fun maxOffset(): Float =
+        ((layout?.size?.height ?: 0) - viewportPx).coerceAtLeast(0).toFloat()
+
+    private fun cursorRect(): Rect? {
+        val result = layout ?: return null
+        val end = selectionEnd.coerceIn(0, result.layoutInput.text.length)
+        return result.getCursorRect(end)
+    }
+
+    private fun update() {
+        val cursor = cursorRect() ?: return
+        // Compose re-coerces when the caret's left or top edge moves, so
+        // typing along a line brings a scrolled-away caret back too.
+        if (cursor.left != previousCursor.left || cursor.top != previousCursor.top) {
+            val start = offset
+            val endVisible = start + viewportPx
+            val delta = when {
+                cursor.bottom > endVisible -> cursor.bottom - endVisible
+                cursor.top < start && cursor.bottom - cursor.top > viewportPx -> cursor.bottom - endVisible
+                cursor.top < start -> cursor.top - start
+                else -> 0f
+            }
+            offset += delta
+            previousCursor = cursor
+        }
+        offset = offset.coerceIn(0f, maxOffset())
+        schedule()
+    }
+
+    private fun schedule() {
+        if (!active || !focused) return
+        job?.cancel()
+        val delayMs = props.selectionDebounceMs.coerceAtLeast(0).toLong()
+        job = scope.launch {
+            delay(delayMs)
+            emit()
+        }
+    }
+
+    private fun emit() {
+        if (!active || !focused) return
+        val result = layout ?: return
+        val cursor = cursorRect() ?: return
+        val end = selectionEnd.coerceIn(0, result.layoutInput.text.length)
+        val d = if (density > 0f) density else 1f
+        // getCursorRect is a hairline; the caret is drawn 2dp wide.
+        val width = maxOf(cursor.width / d, 2f)
+        val payload = listOf(
+            format(cursor.left / d),
+            format((cursor.top - offset) / d),
+            format(width),
+            format(cursor.height / d),
+            result.getLineForOffset(end).toString(),
+            format(fieldWidthPx / d),
+            format(viewportPx / d),
+        ).joinToString(",")
+        if (payload == lastSent) return
+        lastSent = payload
+        NativeUIBridge.sendTextChangeEvent(props.onCaretChangeCb, nodeId, payload)
+    }
+
+    private fun format(value: Float): String = String.format(Locale.US, "%.2f", value)
 }

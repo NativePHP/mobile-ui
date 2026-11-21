@@ -49,6 +49,15 @@ paths serialize to the same wire tree.
 - Each `@selectionChange` event carries the FULL current text and costs a
   component re-render, independent of the `native:model` sync mode — don't
   reach for it when plain `@change` would do.
+- `@caretChange` on a multiline input says where its caret is DRAWN, for
+  placing an overlay by it: type the handler's parameter as
+  `Native\Mobile\UI\Caret` (`x`, `y`, `width`, `height` in points from the
+  top-left of the field's visible area, scrolling taken off, plus `line`,
+  `fieldWidth`, `fieldHeight`). Coalesced like `@selectionChange`, sent only
+  while focused. On Android only `bare-text-input` sends it.
+- A multiline input with `h-full` (or `fill`) fills the height it's given and
+  scrolls its own text, instead of being as tall as its lines. `flex-1` on the
+  field doesn't do it; put the `h-full` field in a `flex-1` column.
 - To put the caret somewhere when PHP rewrites a field's text (say after
   swapping an "@query" for a picked "@handle "), bind `:selection="$caret"`
   (or `[$start, $end]`) in the same code-point offsets. The field only reads

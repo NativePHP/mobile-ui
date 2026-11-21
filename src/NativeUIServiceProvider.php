@@ -22,6 +22,7 @@ use Native\Mobile\UI\Console\GenerateIconsCommand;
 use Native\Mobile\UI\Elements\FloatingOverlay as FloatingOverlayElement;
 use Native\Mobile\UI\Elements\NativeDrawer;
 use Native\Mobile\UI\Testing\DatePickerMacros;
+use Native\Mobile\UI\Testing\TextInputMacros;
 
 class NativeUIServiceProvider extends ServiceProvider
 {
@@ -43,6 +44,7 @@ class NativeUIServiceProvider extends ServiceProvider
             && class_exists(TestableComponent::class)
             && method_exists(TestableComponent::class, 'macro')) {
             DatePickerMacros::register();
+            TextInputMacros::register();
         }
 
         $this->publishes([
