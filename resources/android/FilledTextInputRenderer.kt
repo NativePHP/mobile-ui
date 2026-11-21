@@ -4,6 +4,7 @@ import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
@@ -168,7 +169,9 @@ object FilledTextInputRenderer {
             // Full width by default (parity with the iOS renderer's
             // maxWidth: .infinity); an explicit width in `modifier` (FIXED
             // layout mode) still wins since it comes later in the chain.
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
+            // `fills_height` (`h-full` on a multiline field): all the height it is
+            // given, with no max-lines cap, and the text scrolls inside.
+            modifier = Modifier.fillMaxWidth().then(if (props.fillsHeight) Modifier.fillMaxHeight() else Modifier).focusRequester(focusRequester).then(modifier).nuiA11y(props.a11yLabel, props.a11yHint)
                 .nuiContentType(props.contentType)
                 .nuiAutofocus(props.autofocus),
             enabled = props.enabled,
@@ -193,7 +196,7 @@ object FilledTextInputRenderer {
             },
             isError = props.isError,
             singleLine = props.singleLine,
-            maxLines = props.maxLines,
+            maxLines = props.effectiveMaxLines,
             minLines = props.minLines,
             visualTransformation = props.visualTransformation(revealed),
             keyboardOptions = keyboardOptionsFor(props),

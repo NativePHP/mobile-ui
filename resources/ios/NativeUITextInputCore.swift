@@ -95,6 +95,11 @@ struct NativeUITextInputCore: View {
     // which sizes the field (see NativeUITextEditorSizer).
     @State private var editorSize = NativeUITextEditorSize()
 
+    // Reports where a multiline field draws its caret (`@caretChange`). A
+    // reference the sizer hands the UITextView to; dormant unless
+    // `on_caret_change` is set on a multiline, non-secure field.
+    @State private var caretReporter = NativeUICaretReporter()
+
     // Stable identity of this field's claim on the shared keyboard
     // accessory bar (pad keyboards only — see NativeUIKeyboardAccessoryBar).
     @State private var accessoryToken = UUID()
@@ -174,7 +179,15 @@ struct NativeUITextInputCore: View {
         // The field binds `selection` when it reports it or PHP places it.
         // Decided by props that hold still, because flipping it swaps the
         // field for a new one and drops the keyboard.
-        let selectionBound = selectionEnabled || placesSelection
+        // `@caretChange`: where a multiline field draws its caret. It needs
+        // the selection bound too, since a caret move is what moves it.
+        let onCaretCb     = p.getCallbackId("on_caret_change")
+        let caretEnabled  = onCaretCb != 0 && multiline && !secure
+        // `h-full` / `fill` on a multiline field (`fills_height`): as tall as
+        // its parent makes it, scrolling its own text, rather than as tall as
+        // its lines. `min-lines` is still the least it shows.
+        let fillsHeight   = multiline && p.getBool("fills_height")
+        let selectionBound = selectionEnabled || placesSelection || caretEnabled
         let fontName      = p.getString("font_name")
         let lineSpacing   = NativeUIFontResolver.lineSpacing(
             px: p.getFloat("line_height_px"),
@@ -257,6 +270,7 @@ struct NativeUITextInputCore: View {
         )
         let _ = refreshAccessoryClaim(wantsAccessory, title: accessoryTitle, perform: performSubmit)
         let _ = syncReturnKeyBox(chains: !nextFocus.isEmpty && !multiline, perform: performSubmit)
+        let _ = caretReporter.configure(callbackId: caretEnabled ? onCaretCb : 0, nodeId: node.id, debounceMs: selDebounceMs)
 
         // Apply `.foregroundColor` (not just `.foregroundStyle`) so the TYPED
         // text adopts `contentColor`. SwiftUI's TextField/SecureField don't
@@ -315,8 +329,14 @@ struct NativeUITextInputCore: View {
                 // Let the variant chrome paint the background.
                 .scrollContentBackground(.hidden)
                 .foregroundColor(contentColor)
-                .frame(height: editorSize.height(minLines: lower, maxLines: upper, fallbackLineHeight: textSize * 1.3))
-                .background(NativeUITextEditorSizer(size: $editorSize))
+                // Filling, the field takes the height it's given and never
+                // less than `min-lines`; `max-lines` doesn't cap it.
+                .modifier(NativeUITextEditorFrame(
+                    fills: fillsHeight,
+                    height: editorSize.height(minLines: lower, maxLines: upper, fallbackLineHeight: textSize * 1.3),
+                    minHeight: editorSize.height(minLines: lower, maxLines: lower, fallbackLineHeight: textSize * 1.3)
+                ))
+                .background(NativeUITextEditorSizer(size: $editorSize, caret: caretReporter))
                 .focused($isFocused)
                 .overlay(alignment: .topLeading) {
                     // TextEditor has no placeholder slot. Match the prompt
@@ -445,11 +465,17 @@ struct NativeUITextInputCore: View {
             if selectionEnabled && isFocused {
                 scheduleSelectionEmit(text: filtered, cb: onSelectionCb, debounceMs: selDebounceMs)
             }
+            if caretEnabled && isFocused {
+                caretReporter.schedule()
+            }
         }
         .onChange(of: selection) { _, newSelection in
             // Caret moves via tap / arrow keys / selection drag arrive here.
             // A non-nil selection implies the field is focused; a `nil` value
             // is the no-focus state and must never emit.
+            if caretEnabled && newSelection != nil {
+                caretReporter.schedule()
+            }
             guard selectionEnabled, let sel = newSelection else { return }
             guard let (start, end) = offsets(from: sel, in: text) else { return }
             selStart = start
@@ -483,6 +509,12 @@ struct NativeUITextInputCore: View {
             // (never dispatched mid-typing) and `debounce` mode (in-flight
             // timer that should commit immediately rather than race with
             // focus loss / keyboard dismiss).
+            if caretEnabled {
+                // Focused, the caret is reported afresh even where it was
+                // last time; blurred, a pending report is dropped, since
+                // there's no caret to place anything by.
+                caretReporter.focusChanged(focused)
+            }
             if !focused {
                 flushPending(onChangeCb: onChangeCb)
                 // Flush any coalesced selection emit immediately on blur so the
@@ -1110,23 +1142,30 @@ struct NativeUITextEditorSize: Equatable {
 /// centre.
 struct NativeUITextEditorSizer: UIViewRepresentable {
     @Binding var size: NativeUITextEditorSize
+    /// Told about the text view, and about every scroll and layout of it,
+    /// so `@caretChange` can say where the caret is drawn.
+    var caret: NativeUICaretReporter? = nil
 
     func makeUIView(context: Context) -> Probe {
         let probe = Probe()
         probe.isUserInteractionEnabled = false
         probe.report = { new in if size != new { size = new } }
+        probe.caret = caret
         return probe
     }
 
     func updateUIView(_ probe: Probe, context: Context) {
         probe.report = { new in if size != new { size = new } }
+        probe.caret = caret
         DispatchQueue.main.async { probe.hook() }
     }
 
     final class Probe: UIView {
         var report: ((NativeUITextEditorSize) -> Void)?
+        weak var caret: NativeUICaretReporter?
         private weak var textView: UITextView?
         private var observation: NSKeyValueObservation?
+        private var offsetObservation: NSKeyValueObservation?
         private var lastSize: CGSize = .zero
 
         override func layoutSubviews() {
@@ -1141,6 +1180,9 @@ struct NativeUITextEditorSizer: UIViewRepresentable {
                 // which leaves the caret's line below the new one.
                 DispatchQueue.main.async { tv.scrollRangeToVisible(tv.selectedRange) }
             }
+            if bounds.size != lastSize {
+                caret?.schedule()
+            }
             lastSize = bounds.size
         }
 
@@ -1150,10 +1192,20 @@ struct NativeUITextEditorSizer: UIViewRepresentable {
             if textView !== tv {
                 textView = tv
                 observation = tv.observe(\.contentSize, options: [.new]) { [weak self] tv, _ in
-                    DispatchQueue.main.async { self?.send(tv) }
+                    DispatchQueue.main.async {
+                        self?.send(tv)
+                        // The text was laid out again: the caret may sit on
+                        // another line now, without having moved in the text.
+                        self?.caret?.schedule()
+                    }
+                }
+                // The field scrolling its text moves the caret on screen.
+                offsetObservation = tv.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+                    DispatchQueue.main.async { self?.caret?.schedule() }
                 }
             }
 
+            caret?.textView = tv
             send(tv)
         }
 
@@ -1197,5 +1249,108 @@ struct NativeUITextEditorSizer: UIViewRepresentable {
             }
             return nil
         }
+    }
+}
+
+/// The multiline editor's frame: as tall as its lines (`height`), or, when it
+/// fills (`h-full` / `fill`), as tall as its parent makes it and never less
+/// than `minHeight`. The text view scrolls what doesn't fit either way.
+struct NativeUITextEditorFrame: ViewModifier {
+    let fills: Bool
+    let height: CGFloat
+    let minHeight: CGFloat
+
+    func body(content: Content) -> some View {
+        if fills {
+            content.frame(minHeight: minHeight, maxHeight: .infinity, alignment: .top)
+        } else {
+            content.frame(height: height)
+        }
+    }
+}
+
+/// Reports where a multiline field's UITextView draws its caret, for
+/// `@caretChange`: `x,y,width,height,line,fieldWidth,fieldHeight` in points,
+/// over the same text channel as `@change`.
+///
+/// The rectangle is the text view's `caretRect(for:)` at the selection's end,
+/// less its `contentOffset`, so it's measured from the top-left of what the
+/// field shows. With the insets the sizer takes off, that's the field's own
+/// frame. `line` is the visual line from the top of the text, from the
+/// caret's middle over the typing font's line height (the field's lines are
+/// all one height).
+///
+/// Triggers (the field's selection and text, the text view's content size and
+/// offset, the field's size) are coalesced over the selection window and an
+/// unchanged payload is dropped. Nothing is sent while the field isn't first
+/// responder, or while no callback is set.
+final class NativeUICaretReporter {
+    weak var textView: UITextView?
+    private var callbackId = 0
+    private var nodeId = 0
+    private var debounceMs = 150
+    private var work: DispatchWorkItem?
+    private var lastSent: String?
+
+    /// Body-time refresh, so the callback and window never go stale.
+    func configure(callbackId: Int, nodeId: Int, debounceMs: Int) {
+        if callbackId == 0 {
+            work?.cancel()
+            work = nil
+        }
+        self.callbackId = callbackId
+        self.nodeId = nodeId
+        self.debounceMs = debounceMs
+    }
+
+    func schedule() {
+        guard callbackId != 0 else { return }
+        work?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.flush() }
+        work = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(0, debounceMs)), execute: item)
+    }
+
+    func focusChanged(_ focused: Bool) {
+        lastSent = nil
+        if focused {
+            schedule()
+        } else {
+            work?.cancel()
+            work = nil
+        }
+    }
+
+    func flush() {
+        work?.cancel()
+        work = nil
+        guard callbackId != 0, let tv = textView, tv.isFirstResponder, let range = tv.selectedTextRange else { return }
+
+        let rect = tv.caretRect(for: range.end)
+        guard !rect.isNull, !rect.isInfinite, rect.origin.x.isFinite, rect.origin.y.isFinite else { return }
+
+        let font = (tv.typingAttributes[.font] as? UIFont) ?? tv.font ?? UIFont.preferredFont(forTextStyle: .body)
+        let spacing = (tv.typingAttributes[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing ?? 0
+        let step = font.lineHeight + spacing
+        let line = step > 0 ? max(0, Int((rect.midY / step).rounded(.down))) : 0
+
+        let payload = [
+            Self.format(rect.minX - tv.contentOffset.x),
+            Self.format(rect.minY - tv.contentOffset.y),
+            Self.format(rect.width),
+            Self.format(rect.height),
+            String(line),
+            Self.format(tv.bounds.width),
+            Self.format(tv.bounds.height),
+        ].joined(separator: ",")
+
+        if payload == lastSent { return }
+        lastSent = payload
+        NativeElementBridge.sendTextChangeEvent(callbackId, nodeId: nodeId, text: payload)
+    }
+
+    /// Two decimals with a `.`, whatever the device's locale.
+    private static func format(_ value: CGFloat) -> String {
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(value))
     }
 }

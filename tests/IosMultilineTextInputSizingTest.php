@@ -7,8 +7,8 @@ it('sizes an iOS multiline input from its text view, in whole lines of the text 
         // A Text mirror lays a custom font out at a different line height to
         // the UITextView, so a field capped by one shows part of a line.
         ->not->toContain('Text(text + " ")')
-        ->toContain('.frame(height: editorSize.height(minLines: lower, maxLines: upper,')
-        ->toContain('.background(NativeUITextEditorSizer(size: $editorSize))')
+        ->toContain('height: editorSize.height(minLines: lower, maxLines: upper,')
+        ->toContain('.background(NativeUITextEditorSizer(size: $editorSize, caret: caretReporter))')
         ->toMatch('/let shown = CGFloat\(min\(max\(lines, minLines\), maxLines\)\)\s*return shown \* lineHeight \+ \(shown - 1\) \* lineSpacing/')
         ->toContain('lineHeight: font.lineHeight');
 });
