@@ -16,6 +16,10 @@ import UIKit
 ///   rounded corners.
 /// - `checked`: a tick beside the row, as on the option a menu has picked.
 ///   It's a Toggle, so iOS draws the tick where its own menus do.
+/// - `subtitle`: a second, smaller line under the label, such as an
+///   account's handle under its name. A menu draws a second `Text` in a
+///   row's title as its subtitle, as `UIAction.subtitle` does, and
+///   VoiceOver reads both.
 ///
 /// A menu is a UIMenu underneath, which draws a snapshot of each row's image
 /// and can't load or clip one itself. So `NativeUIMenuImages` fetches the
@@ -52,14 +56,25 @@ struct NativeUIMenuItem: View {
         let icon = item.props.getString("icon", default: "")
         if let picture = images.image(for: item) {
             Label {
-                Text(text)
+                title(text)
             } icon: {
                 Image(uiImage: picture).renderingMode(.original)
             }
         } else if !icon.isEmpty {
-            Label { Text(text) } icon: { NativeIcon.image(icon) }
+            Label { title(text) } icon: { NativeIcon.image(icon) }
         } else {
-            Text(text)
+            title(text)
+        }
+    }
+
+    /// The row's label, with its subtitle, if it has one, as a second Text
+    /// the menu draws smaller and dimmer underneath.
+    @ViewBuilder
+    private func title(_ text: String) -> some View {
+        let subtitle = item.props.getString("subtitle", default: "")
+        Text(text)
+        if !subtitle.isEmpty {
+            Text(subtitle)
         }
     }
 
