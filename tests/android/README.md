@@ -100,4 +100,9 @@ sends `''` with the dialog left closed, that a tap elsewhere on the field and
 an accessibility click both open the dialog, and that no X is drawn without a
 value, without `clearable` or on a disabled picker.
 
+`AnimateLayoutColumnTest` reorders the children of a column with
+`animate-layout` (core's `FlexContainer`) and checks a child passes through
+the places between its old and new spot before it lands, and that without
+the flag it jumps. It needs a Mobile checkout with layout animation.
+
 These are JVM checks; SwiftUI and native device behaviour need separate testing.

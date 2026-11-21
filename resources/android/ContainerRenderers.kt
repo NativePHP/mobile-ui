@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -521,6 +522,28 @@ private suspend fun LazyListState.animateScrollFollowingChrome(
 }
 
 /**
+ * The author's `auto_scroll_token`, or "" when there isn't one. A new token
+ * is a new request for the same child, so asking twice scrolls twice.
+ */
+private fun autoScrollToken(node: NativeUINode): String =
+    node.props.getString("auto_scroll_token", "")
+
+/**
+ * One row of a scroll view. With `animate-layout` it's wrapped in a box that
+ * carries `animateItem()`, so a row kept across frames (same key, which
+ * `native:key` keeps stable) slides to its new place, a new one fades in and
+ * a removed one fades out. Without it the row is composed exactly as before.
+ */
+@Composable
+private fun LazyItemScope.ScrollRow(animate: Boolean, content: @Composable () -> Unit) {
+    if (animate) {
+        Box(Modifier.animateItem()) { content() }
+    } else {
+        content()
+    }
+}
+
+/**
  * Drives a lazy list from the resolved `auto_scroll_to` target.
  *
  * Keyed on the RESOLVED index, so the scroll fires when the author's intent
@@ -544,17 +567,24 @@ private fun AutoScrollToEffect(
     targetIndex: Int,
     listState: LazyListState,
     chrome: ChromeScrollController? = null,
+    token: String = "",
+    alwaysAnimate: Boolean = false,
 ) {
     val currentChrome by rememberUpdatedState(chrome)
     val didInitialScroll = remember { mutableStateOf(false) }
-    val armed = remember(request) { mutableStateOf(request >= 0) }
+    // A new token re-arms the same index, so the list goes back to it.
+    val armed = remember(request, token) { mutableStateOf(request >= 0) }
+    // The request the list opened with. `auto_scroll_animated` animates every
+    // move but this one, so a screen still opens where it's meant to be.
+    val opening = remember { request to token }
 
-    LaunchedEffect(request, targetIndex) {
+    LaunchedEffect(request, targetIndex, token) {
         if (!armed.value || targetIndex < 0) return@LaunchedEffect
 
         armed.value = false
-        if (!didInitialScroll.value) {
-            didInitialScroll.value = true
+        val animate = didInitialScroll.value || (alwaysAnimate && (request to token) != opening)
+        didInitialScroll.value = true
+        if (!animate) {
             listState.scrollToItem(targetIndex)
         } else {
             listState.animateScrollFollowingChrome(targetIndex, 0, currentChrome)
@@ -569,6 +599,9 @@ object ScrollViewRenderer {
         val keyboardController = LocalSoftwareKeyboardController.current
 
         val autoScrollTarget = resolveAutoScrollTarget(node)
+        val autoScrollToken = autoScrollToken(node)
+        val autoScrollAnimated = node.props.getBool("auto_scroll_animated")
+        val animateRows = node.props.getBool("animate_layout")
 
         // Item spacing from `gap-*`. The flex engine spaces ordinary
         // containers, but a lazy list places its own items, so the gap has
@@ -579,7 +612,7 @@ object ScrollViewRenderer {
         if (horizontal) {
             val rowState = rememberLazyListState()
 
-            AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, rowState)
+            AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, rowState, null, autoScrollToken, autoScrollAnimated)
 
             LazyRow(
                 modifier = modifier,
@@ -587,7 +620,7 @@ object ScrollViewRenderer {
                 horizontalArrangement = Arrangement.spacedBy(gap),
             ) {
                 items(node.children, key = { it.id }) { child ->
-                    NodeView(node = child)
+                    ScrollRow(animateRows) { NodeView(node = child) }
                 }
             }
         } else {
@@ -640,7 +673,7 @@ object ScrollViewRenderer {
                 }
             }
 
-            AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, listState, chromeScroll)
+            AutoScrollToEffect(autoScrollRequest(node), autoScrollTarget, listState, chromeScroll, autoScrollToken, autoScrollAnimated)
 
             // A `fill` / `h-full` DIRECT child asked to be at least as tall as
             // the VIEWPORT — the "short screen centred, still scrolls when the
@@ -705,9 +738,9 @@ object ScrollViewRenderer {
                                         )
                                     }
                                 }
-                                NodeView(node = child, overrideModifier = childMod)
+                                ScrollRow(animateRows) { NodeView(node = child, overrideModifier = childMod) }
                             } else {
-                                NodeView(node = child)
+                                ScrollRow(animateRows) { NodeView(node = child) }
                             }
                         }
                     }
@@ -719,7 +752,7 @@ object ScrollViewRenderer {
                     verticalArrangement = Arrangement.spacedBy(gap),
                 ) {
                     items(node.children, key = { it.id }) { child ->
-                        NodeView(node = child)
+                        ScrollRow(animateRows) { NodeView(node = child) }
                     }
                 }
             }

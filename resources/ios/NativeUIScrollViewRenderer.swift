@@ -19,10 +19,17 @@ struct NativeUIScrollViewRenderer: View {
 
     /// The `auto_scroll_to` request this view last saw, and whether the list
     /// still owes it a scroll. Armed when the author sets or changes the
-    /// request, disarmed once the list has gone there, so content that takes
-    /// the child out of range and brings it back doesn't move the reader again.
-    @State private var lastAutoScrollRequest: Int?
+    /// request (its index or its `auto_scroll_token`), disarmed once the list
+    /// has gone there, so content that takes the child out of range and
+    /// brings it back doesn't move the reader again.
+    @State private var lastAutoScrollRequest: AutoScrollRequest?
     @State private var autoScrollArmed: Bool = false
+
+    /// The request the view had when it first appeared. With
+    /// `auto_scroll_animated` every move animates except going to this one,
+    /// so a screen still opens where it's meant to be rather than flying there.
+    @State private var openingAutoScrollRequest: AutoScrollRequest?
+    @State private var didRecordOpening: Bool = false
 
     /// Whether the anchor has pinned the view to the bottom once already, so a
     /// later re-materialization only re-pins a reader who is still there.
@@ -105,7 +112,9 @@ struct NativeUIScrollViewRenderer: View {
                 // the left edge — the same place Android's `scrollToItem`
                 // puts it.
                 .onAppear { applyAutoScroll(proxy: proxy, anchor: .leading, animated: false) }
-                .onChange(of: autoScrollIndex) { _, _ in
+                // Keyed on the token too, so asking for the same child again
+                // with a new `auto_scroll_token` scrolls again.
+                .onChange(of: autoScrollTrigger) { _, _ in
                     applyAutoScroll(proxy: proxy, anchor: .leading, animated: true)
                 }
             }
@@ -301,7 +310,9 @@ struct NativeUIScrollViewRenderer: View {
             // matching Android's `scrollToItem`, which puts the item at the
             // start of the list.
             .onAppear { applyAutoScroll(proxy: proxy, anchor: .top, animated: false) }
-            .onChange(of: autoScrollIndex) { _, _ in
+            // Keyed on the token too, so asking for the same child again with
+            // a new `auto_scroll_token` scrolls again.
+            .onChange(of: autoScrollTrigger) { _, _ in
                 applyAutoScroll(proxy: proxy, anchor: .top, animated: true)
             }
             // The keyboard resizes the scroll viewport in BOTH directions —
@@ -373,6 +384,19 @@ struct NativeUIScrollViewRenderer: View {
         return requested
     }
 
+    /// The request with its `auto_scroll_token`, or `nil` when there's no
+    /// request. A new token is a new request for the same child.
+    private var autoScrollRequestWithToken: AutoScrollRequest? {
+        autoScrollRequest.map { AutoScrollRequest(index: $0, token: node.props.getString("auto_scroll_token")) }
+    }
+
+    /// What the scroll follows: the resolved child and the token. Changes when
+    /// the child comes into range or the author asks again with a new token,
+    /// and not on a frame that repeats the same request.
+    private var autoScrollTrigger: AutoScrollRequest? {
+        autoScrollIndex.map { AutoScrollRequest(index: $0, token: node.props.getString("auto_scroll_token")) }
+    }
+
     /// Brings the `auto_scroll_to` child into view.
     ///
     /// Targets the child's node id, which is the identity `ForEach` already
@@ -380,10 +404,16 @@ struct NativeUIScrollViewRenderer: View {
     /// is needed on the row's modifier chain.
     ///
     /// `animated` is decided by the caller's context, but the FIRST successful
-    /// application always jumps regardless — an `.onChange` can be the first
-    /// thing to fire when the prop arrives after the initial layout.
+    /// application jumps regardless — an `.onChange` can be the first thing
+    /// to fire when the prop arrives after the initial layout. With
+    /// `auto_scroll_animated` the first one animates too, unless it's the
+    /// request the view opened with.
     private func applyAutoScroll(proxy: ScrollViewProxy, anchor: UnitPoint, animated: Bool) {
-        let request = autoScrollRequest
+        let request = autoScrollRequestWithToken
+        if !didRecordOpening {
+            didRecordOpening = true
+            openingAutoScrollRequest = request
+        }
         if request != lastAutoScrollRequest {
             lastAutoScrollRequest = request
             autoScrollArmed = request != nil
@@ -393,7 +423,12 @@ struct NativeUIScrollViewRenderer: View {
 
         autoScrollArmed = false
         let targetID = node.children[index].id
-        let shouldAnimate = animated && didInitialAutoScroll
+        let asksToAnimate = node.props.getBool("auto_scroll_animated")
+        let alwaysAnimate = asksToAnimate && request != openingAutoScrollRequest
+        // A view that asked for animated moves jumps under Reduce Motion. One
+        // that didn't keeps the animated later moves it always had.
+        let shouldAnimate = animated && (didInitialAutoScroll || alwaysAnimate)
+            && !(asksToAnimate && UIAccessibility.isReduceMotionEnabled)
         didInitialAutoScroll = true
 
         // Defer past first layout — lazy content isn't measured yet inside
@@ -459,6 +494,13 @@ struct NativeUIScrollViewRenderer: View {
         }
         return count
     }
+}
+
+/// An `auto_scroll_to` request: the child's index and the author's
+/// `auto_scroll_token` ("" when there isn't one).
+private struct AutoScrollRequest: Equatable {
+    let index: Int
+    let token: String
 }
 
 /// Where a bottom-anchored scroll view is: its offset, and whether that's at
