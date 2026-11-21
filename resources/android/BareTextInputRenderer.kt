@@ -1,8 +1,11 @@
 package com.nativephp.plugins.native_ui.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -14,8 +17,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
@@ -29,11 +32,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import com.nativephp.mobile.ui.nativerender.KeyboardFocusPolicy
 import com.nativephp.mobile.ui.nativerender.NativeUINode
 import com.nativephp.mobile.ui.nativerender.argbToComposeColor
 import com.nativephp.plugins.native_ui.NativeUITheme
+import kotlin.math.roundToInt
 
 /**
  * Chromeless text input — Compose `BasicTextField` with no decoration.
@@ -221,14 +226,31 @@ object BareTextInputRenderer {
             maxLines = props.effectiveMaxLines,
             minLines = props.minLines,
             decorationBox = { innerTextField ->
-                if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
-                    Text(
-                        text = props.placeholder,
-                        color = placeholderColor,
-                        fontSize = props.textSize.sp
-                    )
+                // propagateMinConstraints as BasicTextField's own root box
+                // does, so a field that fills its height still hands all of
+                // it to the text.
+                Box(propagateMinConstraints = true) {
+                    if (value.text.isEmpty() && props.placeholder.isNotEmpty()) {
+                        Text(
+                            text = props.placeholder,
+                            color = placeholderColor,
+                            fontSize = props.textSize.sp
+                        )
+                    }
+                    innerTextField()
+                    // Sits where the scrolled text is, so the caret reporter
+                    // can ask the field's own scroller to show the caret when
+                    // the field gets shorter. Compose only does that when the
+                    // caret moves. See CaretReporter.
+                    if (props.multiline) {
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .offset { IntOffset(0, -caretReporter.scrollPx.roundToInt()) }
+                                .bringIntoViewRequester(caretReporter.bringIntoViewRequester)
+                        )
+                    }
                 }
-                innerTextField()
             },
             // Filled and Outlined pass this since day one; Bare never did, so
             // `keyboard="number"` (and the derived capitalization) were

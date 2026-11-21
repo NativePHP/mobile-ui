@@ -1,11 +1,13 @@
 package com.nativephp.plugins.native_ui.ui
 
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
@@ -790,6 +792,17 @@ internal fun Modifier.nuiAutofocus(enabled: Boolean): Modifier {
  * of the field's text reaches [scrollConnection] as nested scroll, from
  * which the consumed distance is taken.
  *
+ * Compose only scrolls to the caret when the caret moves, not when the
+ * field gets shorter, so a field that shrinks under a caret near its
+ * bottom would leave the caret below its new bottom edge until the next
+ * keystroke. iOS scrolls it back into view. To match, a focused multiline
+ * field that gets shorter asks [bringIntoViewRequester] to show the caret.
+ * The requester sits on a box the renderer places at the mirrored scroll
+ * offset ([scrollPx]), so it moves with the text and the request lands on
+ * the field's own scroller. That scroll reaches [scrollConnection] like a
+ * drag does. This part runs for every multiline field, with or without a
+ * callback.
+ *
  * Reports are coalesced over [TextInputProps.selectionDebounceMs] and an
  * unchanged payload is dropped. Nothing is sent while the field isn't
  * focused, for a single-line or secure field, or with no callback set.
@@ -799,7 +812,11 @@ internal class CaretReporter(
     private val props: TextInputProps,
     private val nodeId: Int,
 ) {
+    /** Whether `@caretChange` reports are sent. */
     val active: Boolean get() = props.onCaretChangeCb != 0 && props.multiline && !props.secure
+
+    /** Whether the scroll is followed at all: any multiline field, see [revealCaret]. */
+    private val tracking: Boolean get() = props.multiline
 
     private var layout: TextLayoutResult? = null
     private var selectionEnd = 0
@@ -809,16 +826,30 @@ internal class CaretReporter(
     private var focused = false
 
     // The mirrored scroll position, in px, and the caret rectangle it was
-    // last coerced for.
+    // last coerced for. [offset] is read from layout callbacks, so it's a
+    // plain field; [offsetState] only carries it to the renderer's anchor
+    // box, which reads it while placing.
     private var offset = 0f
+        set(value) {
+            field = value
+            offsetState.floatValue = value
+        }
+    private val offsetState = mutableFloatStateOf(0f)
     private var previousCursor = Rect.Zero
+
+    /** How far the field has scrolled its text, in px, as a state for placement. */
+    val scrollPx: Float get() = offsetState.floatValue
+
+    /** Put on a box placed at -[scrollPx] over the text, so requests move with it. */
+    val bringIntoViewRequester = BringIntoViewRequester()
+    private var revealJob: Job? = null
 
     private var job: Job? = null
     private var lastSent: String? = null
 
     /** The field's text, laid out again. */
     fun onLayout(result: TextLayoutResult, value: TextFieldValue) {
-        if (!active) return
+        if (!tracking) return
         layout = result
         selectionEnd = value.selection.end
         update()
@@ -826,7 +857,7 @@ internal class CaretReporter(
 
     /** The caret moved or the text changed. */
     fun onValueChanged(value: TextFieldValue) {
-        if (!active) return
+        if (!tracking) return
         selectionEnd = value.selection.end
         // New text gets a new layout, which runs the update; the old one
         // would put the caret by text that's no longer there.
@@ -835,15 +866,17 @@ internal class CaretReporter(
     }
 
     fun onSize(widthPx: Int, heightPx: Int, density: Float) {
-        if (!active) return
+        if (!tracking) return
+        val shrank = heightPx < viewportPx
         fieldWidthPx = widthPx
         viewportPx = heightPx
         this.density = density
         update()
+        if (shrank) revealCaret()
     }
 
     fun onFocusChanged(isFocused: Boolean) {
-        if (!active) return
+        if (!tracking) return
         focused = isFocused
         lastSent = null
         if (isFocused) {
@@ -851,13 +884,32 @@ internal class CaretReporter(
         } else {
             job?.cancel()
             job = null
+            revealJob?.cancel()
+            revealJob = null
+        }
+    }
+
+    /**
+     * The field got shorter: if that left the caret outside what it shows,
+     * scroll the field's text until the caret is back in view. Only while
+     * focused, since there's no caret to keep in view otherwise.
+     */
+    private fun revealCaret() {
+        if (!focused) return
+        val cursor = cursorRect() ?: return
+        if (cursor.top >= offset && cursor.bottom <= offset + viewportPx) return
+        revealJob?.cancel()
+        revealJob = scope.launch {
+            // Cancelled by a newer request or by the field leaving
+            // composition; either way there's nothing left to do.
+            runCatching { bringIntoViewRequester.bringIntoView(cursor) }
         }
     }
 
     /** What the field's own scrolling consumed, as nested scroll reports it. */
     val scrollConnection = object : NestedScrollConnection {
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-            if (active && consumed.y != 0f) {
+            if (tracking && consumed.y != 0f) {
                 // A finger moving up (negative y) scrolls the text up, which
                 // is the scroll position growing.
                 offset = (offset - consumed.y).coerceIn(0f, maxOffset())
@@ -878,12 +930,15 @@ internal class CaretReporter(
 
     private fun update() {
         val cursor = cursorRect() ?: return
-        if (cursor.top != previousCursor.top || cursor.bottom != previousCursor.bottom) {
+        // Compose re-coerces when the caret's left or top edge moves, so
+        // typing along a line brings a scrolled-away caret back too.
+        if (cursor.left != previousCursor.left || cursor.top != previousCursor.top) {
             val start = offset
             val endVisible = start + viewportPx
             val delta = when {
                 cursor.bottom > endVisible -> cursor.bottom - endVisible
-                cursor.top < start && cursor.bottom - cursor.top <= viewportPx -> cursor.top - start
+                cursor.top < start && cursor.bottom - cursor.top > viewportPx -> cursor.bottom - endVisible
+                cursor.top < start -> cursor.top - start
                 else -> 0f
             }
             offset += delta

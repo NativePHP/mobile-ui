@@ -356,6 +356,11 @@ to its toolbar puts the field in a `flex-1` column:
 `flex-1` on the field itself doesn't do this, because in a row (a chat bar) it
 means width, and that field should keep growing a line at a time.
 
+When a focused multiline field gets shorter, it scrolls its text so the caret
+stays in view, on both platforms. So a composer can shrink to make room for
+something under the caret without the caret's line ending up below its bottom
+edge. On Android this is `<native:bare-text-input>` only.
+
 ### Contract details
 
 - **Programmatic value pushes.** When PHP pushes a new `value` onto the input,
