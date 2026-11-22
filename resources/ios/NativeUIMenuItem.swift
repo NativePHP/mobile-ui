@@ -18,8 +18,12 @@ import UIKit
 ///   It's a Toggle, so iOS draws the tick where its own menus do.
 /// - `subtitle`: a second, smaller line under the label, such as an
 ///   account's handle under its name. A menu draws a second `Text` in a
-///   row's title as its subtitle, as `UIAction.subtitle` does, and
+///   row's label as its subtitle, as `UIAction.subtitle` does, and
 ///   VoiceOver reads both.
+///
+/// The row's label is its Texts and its Image side by side, not a `Label`.
+/// A menu reads the two the same way when there's no subtitle, but it drops
+/// a second Text nested in a `Label`'s title, so the subtitle wouldn't show.
 ///
 /// A menu is a UIMenu underneath, which draws a snapshot of each row's image
 /// and can't load or clip one itself. So `NativeUIMenuImages` fetches the
@@ -50,31 +54,22 @@ struct NativeUIMenuItem: View {
         }
     }
 
+    /// The row's label: its text, its subtitle if it has one, and its
+    /// picture or icon if it has one. These go straight into the Button or
+    /// Toggle, which the menu turns into a row's title, subtitle and image.
     @ViewBuilder
     private var label: some View {
         let text = item.props.getString("label", default: "")
-        let icon = item.props.getString("icon", default: "")
-        if let picture = images.image(for: item) {
-            Label {
-                title(text)
-            } icon: {
-                Image(uiImage: picture).renderingMode(.original)
-            }
-        } else if !icon.isEmpty {
-            Label { title(text) } icon: { NativeIcon.image(icon) }
-        } else {
-            title(text)
-        }
-    }
-
-    /// The row's label, with its subtitle, if it has one, as a second Text
-    /// the menu draws smaller and dimmer underneath.
-    @ViewBuilder
-    private func title(_ text: String) -> some View {
         let subtitle = item.props.getString("subtitle", default: "")
+        let icon = item.props.getString("icon", default: "")
         Text(text)
         if !subtitle.isEmpty {
             Text(subtitle)
+        }
+        if let picture = images.image(for: item) {
+            Image(uiImage: picture).renderingMode(.original)
+        } else if !icon.isEmpty {
+            NativeIcon.image(icon)
         }
     }
 
