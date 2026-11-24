@@ -27,12 +27,15 @@ it('draws an iOS menu row subtitle as a second Text in every kind of row', funct
 
     expect($source)
         ->toContain('item.props.getString("subtitle", default: "")')
-        ->toMatch('/private func title\(_ text: String\) -> some View \{\s*let subtitle = .*?\s*Text\(text\)\s*if !subtitle\.isEmpty \{\s*Text\(subtitle\)\s*\}/s')
-        // The picture row, the icon row and the plain row all use it.
-        ->toMatch('/Label \{\s*title\(text\)\s*\} icon: \{\s*Image\(uiImage: picture\)/')
-        ->toContain('Label { title(text) } icon: { NativeIcon.image(icon) }')
-        ->toMatch('/\} else \{\s*title\(text\)\s*\}/')
-        ->not->toMatch('/Label \{\s*Text\(text\)/');
+        // The label, then the subtitle, then the picture or icon, side by
+        // side, so the menu reads them as the row's title, subtitle and image.
+        ->toMatch('/private var label: some View \{.*?Text\(text\)\s*if !subtitle\.isEmpty \{\s*Text\(subtitle\)\s*\}\s*if let picture = images\.image\(for: item\) \{\s*Image\(uiImage: picture\).*?\} else if !icon\.isEmpty \{\s*NativeIcon\.image\(icon\)\s*\}/s')
+        // Ticked rows and plain rows both use it.
+        ->toMatch('/Toggle\(isOn: .*?\) \{\s*label\s*\}/s')
+        ->toMatch('/\} label: \{\s*label\s*\}/')
+        // A menu drops a second Text nested in a Label's title, so the row
+        // mustn't wrap its texts in a Label.
+        ->not->toContain('Label {');
 });
 
 it('draws an Android menu row subtitle as a smaller line under the label', function () {
