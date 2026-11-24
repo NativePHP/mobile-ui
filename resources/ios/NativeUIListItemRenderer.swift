@@ -275,7 +275,7 @@ struct NativeUIListItemRenderer: View {
                 let menuItems = node.children.filter { $0.type == "top_bar_action" }
                 Menu {
                     ForEach(menuItems) { item in
-                        listItemMenuItem(item)
+                        NativeUIMenuItem(item: item)
                     }
                 } label: {
                     // `.nuiMinTapTarget()` expands the tap target to a
@@ -289,6 +289,7 @@ struct NativeUIListItemRenderer: View {
                         .nuiMinTapTarget()
                 }
                 .accessibilityLabel(effectiveTrailingA11y)
+                .nativeUIMenuImages(menuItems)
             } else {
                 Button(action: {
                     let onPressCb = node.props.getCallbackId("on_trailing_press")
@@ -324,31 +325,6 @@ struct NativeUIListItemRenderer: View {
         default:
             EmptyView()
         }
-    }
-}
-
-/// Render one menu item attached via `:trailing-menu`. Same shape as
-/// `pressableMenuItem` / `buttonMenuItem`.
-@ViewBuilder
-private func listItemMenuItem(_ item: NativeUINode) -> some View {
-    if item.props.getBool("divider") {
-        Divider()
-    } else {
-        let label = item.props.getString("label", default: "")
-        let icon = item.props.getString("icon", default: "")
-        let isDestructive = item.props.getBool("destructive")
-        Button(role: isDestructive ? .destructive : nil) {
-            if item.onPress != 0 {
-                NativeUIBridge.sendPressEvent(item.onPress, nodeId: item.id)
-            }
-        } label: {
-            if !icon.isEmpty {
-                Label { Text(label) } icon: { NativeIcon.image(icon) }
-            } else {
-                Text(label)
-            }
-        }
-        .tint(isDestructive ? .red : nil)
     }
 }
 

@@ -17,12 +17,13 @@ struct NativeUIPressableRenderer: View {
             let items = node.children.filter { $0.type == "top_bar_action" }
             Menu {
                 ForEach(items) { item in
-                    pressableMenuItem(item)
+                    NativeUIMenuItem(item: item)
                 }
             } label: {
                 NativeUIColumnRenderer(node: node, children: content)
                     .contentShape(Rectangle())
             }
+            .nativeUIMenuImages(items)
             // Core skips its accessibility modifier for `:menu` pressables
             // (the Menu owns the tap), so the label and hint go on the Menu
             // here. Without them an icon-only menu reads as "pop up button".
@@ -39,9 +40,10 @@ struct NativeUIPressableRenderer: View {
             NativeUIColumnRenderer(node: node, children: content)
                 .contextMenu {
                     ForEach(items) { item in
-                        pressableMenuItem(item)
+                        NativeUIMenuItem(item: item)
                     }
                 }
+                .nativeUIMenuImages(items)
         } else {
             NativeUIColumnRenderer(node: node, children: content)
         }
@@ -64,31 +66,6 @@ private struct PressableMenuAccessibility: ViewModifier {
         case (false, false):
             content.accessibilityLabel(Text(label)).accessibilityHint(Text(hint))
         }
-    }
-}
-
-/// Render one menu item as either a Button or a Divider, mirroring the
-/// `TopBarActionView` dropdown pattern from `NativeRootStackRenderer`.
-@ViewBuilder
-private func pressableMenuItem(_ item: NativeUINode) -> some View {
-    if item.props.getBool("divider") {
-        Divider()
-    } else {
-        let label = item.props.getString("label", default: "")
-        let icon = item.props.getString("icon", default: "")
-        let isDestructive = item.props.getBool("destructive")
-        Button(role: isDestructive ? .destructive : nil) {
-            if item.onPress != 0 {
-                NativeElementBridge.sendPressEvent(item.onPress, nodeId: item.id)
-            }
-        } label: {
-            if !icon.isEmpty {
-                Label { Text(label) } icon: { NativeIcon.image(icon) }
-            } else {
-                Text(label)
-            }
-        }
-        .tint(isDestructive ? .red : nil)
     }
 }
 
