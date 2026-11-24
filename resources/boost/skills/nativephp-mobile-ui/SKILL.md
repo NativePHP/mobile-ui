@@ -22,6 +22,7 @@ dropped without an error.
 | Element | Props that matter |
 |---|---|
 | `column`, `row`, `stack`, `scroll-view`, `spacer`, `divider`, `pressable` | Tailwind `class`: `w-full h-full flex-1 gap-N p-N px-N items-center justify-between rounded-lg bg-theme-*` |
+| `scroll-view` | `:auto-scroll-to` (a direct child to bring into view; first move jumps, later ones animate), `auto-scroll-animated` (animate every move after opening), `:auto-scroll-token` (change it to ask for the same child again), `animate-layout` (keyed children slide to new places, new ones fade in, removed ones fade out; the attribute itself is parsed by nativephp/mobile, NativePHP/mobile-air#736) |
 | `text` (slot is the text) | `class` (`text-lg font-bold line-through underline text-theme-on-surface`), `font` |
 | `button` | label as slot or `label`; `variant` primary\|secondary\|destructive\|success\|ghost; `size` sm\|md\|lg; `icon`, `icon-trailing`, `ios-icon`, `android-icon`, `disabled`, `loading`, `a11y-label` |
 | `outlined-text-input`, `filled-text-input`, `bare-text-input` | `native:model`, `placeholder`, `label`, `@submit`, `@change`, `keyboard` (text\|number\|decimal\|email\|phone\|url\|password), `secure`, `revealable`, `multiline`, `max-length`, `autofocus`, `leading-icon`, `trailing-icon`, `error`, `supporting`, `@selectionChange`, `:selection`, `@caretChange` |
