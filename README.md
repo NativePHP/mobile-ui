@@ -296,6 +296,71 @@ values are floored at one frame (16ms).
 serialized at all when `secure` is set, and both renderers additionally refuse
 to emit — so caret telemetry can't leak password-field context.
 
+### Where the caret is drawn
+
+`@selectionChange` says where the caret is in the text. `@caretChange` says
+where a multiline field draws it, so you can put something next to it, like a
+list of people to mention just under the caret's line. Type the handler's
+parameter as `Native\Mobile\UI\Caret` and the payload is decoded for you:
+
+```php
+use Native\Mobile\UI\Caret;
+
+public function caretMoved(string $field, Caret $caret): void
+{
+    // $caret->x, ->y, ->width, ->height: the caret's rectangle
+    // $caret->line: the visual line it's on, from 0 at the top of the text
+    // $caret->fieldWidth, ->fieldHeight: the field's visible size
+}
+```
+
+```blade
+<native:bare-text-input multiline @caretChange="caretMoved('body')" ... />
+```
+
+The numbers are points on iOS and dp on Android, measured from the top-left
+corner of the part of the field you can see, with the field's own scrolling
+taken off. So `y` is 0 on the top visible line, and goes negative or past
+`fieldHeight` when the field has scrolled the caret out of view
+(`$caret->visible()` checks). To place an overlay, add where the field sits in
+the overlay's parent: a field under 12pt of padding at the top of an
+`absolute` overlay's parent puts the caret's line bottom at
+`12 + $caret->bottom()`.
+
+It's sent after the caret moves, after the text is laid out again (a line
+wrapping moves the caret without it moving in the text), and after the field
+scrolls. Events are coalesced over the same window as `@selectionChange`
+(`selection-debounce-ms`) and dropped when nothing changed. Nothing is sent
+while the field isn't focused, by a single-line field, or by a `secure` one.
+On Android only `<native:bare-text-input>` sends it; on iOS all three text
+inputs do. A handler typed `string` gets the raw payload,
+`x,y,width,height,line,fieldWidth,fieldHeight`.
+
+In tests, `->moveCaretTo('body', new Caret(y: 48, height: 24, line: 2))` fires
+it the way a device would.
+
+### A multiline field that fills its space
+
+A multiline field is as tall as its lines, from `min-lines` up to `max-lines`,
+and scrolls past that. Give it `h-full` (or `fill`) and it takes the height its
+parent gives it instead, scrolling its text inside, and never gets shorter than
+`min-lines`. `max-lines` doesn't cap it then. A composer that should reach down
+to its toolbar puts the field in a `flex-1` column:
+
+```blade
+<native:column class="w-full flex-1 px-5 pt-3">
+    <native:bare-text-input class="w-full h-full" multiline :min-lines="2" native:model="body" />
+</native:column>
+```
+
+`flex-1` on the field itself doesn't do this, because in a row (a chat bar) it
+means width, and that field should keep growing a line at a time.
+
+When a focused multiline field gets shorter, it scrolls its text so the caret
+stays in view, on both platforms. So a composer can shrink to make room for
+something under the caret without the caret's line ending up below its bottom
+edge. On Android this is `<native:bare-text-input>` only.
+
 ### Contract details
 
 - **Programmatic value pushes.** When PHP pushes a new `value` onto the input,

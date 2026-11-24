@@ -64,6 +64,22 @@ was typed or in a secure field, and that the placed caret is what
 `@selectionChange` reports. It also presses a separate Button straight after
 typing and checks the caret's last move reaches PHP before the press does.
 
+`TextInputCaretRectTest` types into a bare multiline field with
+`@caretChange` and checks the caret's line and position, that a field capped
+at three lines reports the caret on its last visible line once it scrolls,
+that nothing is sent unchanged, unfocused or by a single-line field, and that
+`fills_height` makes the field as tall as its parent (scrolling its text past
+what fits) while a field without it stays as tall as its lines. Robolectric's
+font metrics aren't the device's, so positions are checked in the caret's own
+line height.
+
+`TextInputCaretShrinkTest` types twelve lines into a bare field that fills a
+400dp column, then shrinks the column to 120dp. The text must scroll so the
+caret's line is the last one the field shows, with or without `@caretChange`,
+and the reported `y` must match where the text is really drawn. That is read
+from the field's layout nodes, since BasicTextField keeps its scroll private.
+A field whose caret is still in view after shrinking doesn't scroll.
+
 `ListAutoScrollTest` exercises both list renderers through Compose semantics.
 It checks that an out-of-range request waits for its row, shrinking or emptying
 the list doesn't repeat an applied request, disabling then restoring an index
