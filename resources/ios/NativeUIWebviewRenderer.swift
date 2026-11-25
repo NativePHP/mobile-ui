@@ -8,10 +8,11 @@ import UIKit
 /// no JS bridge to the host, no back/forward swipe, no new windows, no
 /// mixed content, non-persistent data store, media requires a user gesture.
 /// Hosts opt back into individual capabilities via attributes
-/// (`javascript`, `dom-storage`) on the Blade tag.
+/// (`javascript`, `dom-storage`, `new-windows`) on the Blade tag.
 ///
 /// Top-frame navigations fire `on_navigated(url)` once committed. External
-/// schemes (mailto, tel, sms, …) and target=_blank attempts are denied.
+/// schemes (mailto, tel, sms, …) are denied. target=_blank / window.open()
+/// attempts are denied unless `new-windows="same-view"` loads them here.
 ///
 /// Two mode attributes change the posture entirely:
 /// - `php` — swaps the sandbox for the app's own enriched Laravel webview
@@ -302,6 +303,7 @@ private struct WebViewContainer: UIViewRepresentable {
         webView.isOpaque = false
         webView.scrollView.bounces = true
 
+        context.coordinator.opensNewWindowsInPlace = node.props.getString("new_windows") == "same-view"
         loadContent(into: webView)
         context.coordinator.attach(webView)
         return webView
@@ -315,6 +317,7 @@ private struct WebViewContainer: UIViewRepresentable {
         }
         context.coordinator.navigatedCallbackId = node.props.getCallbackId("on_navigated")
         context.coordinator.nodeId = node.id
+        context.coordinator.opensNewWindowsInPlace = node.props.getString("new_windows") == "same-view"
     }
 
     private func contentSignature() -> String {
@@ -343,6 +346,7 @@ private struct WebViewContainer: UIViewRepresentable {
         var navigatedCallbackId: Int
         var nodeId: Int
         var lastContentSignature: String = ""
+        var opensNewWindowsInPlace = false
         weak var webView: WKWebView?
 
         init(navigatedCallbackId: Int, nodeId: Int) {
@@ -409,9 +413,17 @@ private struct WebViewContainer: UIViewRepresentable {
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            // target=_blank / window.open() → silently denied.
+            // target=_blank / window.open() → silently denied by default.
             // Returning nil drops the request rather than escalating
-            // out of the embedded view.
+            // out of the embedded view. With new-windows="same-view" the
+            // request loads in this view instead (top frame, so the
+            // navigation policy and @navigated still apply).
+            if opensNewWindowsInPlace,
+               navigationAction.targetFrame == nil,
+               let url = navigationAction.request.url,
+               isLoadableScheme(url.scheme) {
+                webView.load(navigationAction.request)
+            }
             return nil
         }
     }
