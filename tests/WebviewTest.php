@@ -36,6 +36,7 @@ it('stays locked down by default', function () {
     expect($tree['props'])->not->toHaveKey('dom_storage');
     expect($tree['props'])->not->toHaveKey('php');
     expect($tree['props'])->not->toHaveKey('fullscreen');
+    expect($tree['props'])->not->toHaveKey('new_windows');
 });
 
 it('applies sandbox opt-ins', function () {
@@ -50,6 +51,18 @@ it('applies sandbox opt-ins', function () {
 
     expect($tree['props']['javascript'])->toBeTrue();
     expect($tree['props']['dom_storage'])->toBeTrue();
+});
+
+it('passes the new-windows opt-in', function () {
+    NativeElementCollector::leaf('webview', [
+        'src' => 'https://example.com',
+        'new-windows' => 'same-view',
+    ]);
+
+    $registry = new CallbackRegistry;
+    $tree = NativeElementCollector::collect()->toArray($registry);
+
+    expect($tree['props']['new_windows'])->toBe('same-view');
 });
 
 it('fullscreen sets the prop and fill layout', function () {

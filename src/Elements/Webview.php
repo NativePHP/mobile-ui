@@ -50,6 +50,12 @@ class Webview extends Element
             );
         }
 
+        // New windows (target="_blank" links, window.open()) are dropped by
+        // default. `new-windows="same-view"` loads them in this view instead.
+        if (isset($attrs['new-windows']) || isset($attrs['newWindows'])) {
+            $this->webviewProps['new_windows'] = (string) ($attrs['new-windows'] ?? $attrs['newWindows']);
+        }
+
         if (isset($attrs['fullscreen'])) {
             $this->fullscreen(filter_var($attrs['fullscreen'], FILTER_VALIDATE_BOOLEAN));
         }
