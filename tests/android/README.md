@@ -1,6 +1,6 @@
 # Android renderer regression tests
 
-This standalone Robolectric/Compose module compiles a number of component renderers.
+This standalone Robolectric/Compose module compiles a number of component renderers and the remote image helpers.
 
 It records the bridge event boundary; it does not load PHP/JNI, render icons or
 menus, or prove device IME behaviour. The Mobile policy and node models are read
@@ -120,5 +120,11 @@ value, without `clearable` or on a disabled picker.
 `animate-layout` (core's `FlexContainer`) and checks a child passes through
 the places between its old and new spot before it lands, and that without
 the flag it jumps. It needs a Mobile checkout with layout animation.
+
+`RemoteImageRevalidateTest` loads images through Coil's disk cache and real
+OkHttp against a local server, with no memory cache. A plain image is never
+fetched again once it is on disk, however old. A `revalidate` image is served
+from disk while fresh, fetched again once its `max-age` runs out, and asks
+with its ETag when it has one.
 
 These are JVM checks; SwiftUI and native device behaviour need separate testing.

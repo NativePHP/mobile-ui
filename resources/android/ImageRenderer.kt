@@ -44,19 +44,20 @@ object ImageRenderer {
         val tintArgb = p.getColor("tint_color", 0)
         val radius = node.style?.borderRadius ?: 0f
 
+        val revalidate = p.revalidatesRemoteImages()
+
         val context = LocalContext.current
         val model = remember(src, context) { nuiResolveImageSrc(src, context) }
 
         // `none` draws the whole bitmap at its own size, so ask Coil for all
         // of it. Coil does that by itself for ContentScale.None but not for
         // the density-scaled ContentScale used here, and would otherwise
-        // decode a big image down to the frame first.
-        val request = remember(model, context, fit) {
-            if (fit == ImageFit.NONE) {
-                ImageRequest.Builder(context).data(model).size(SizeResolver.ORIGINAL).build()
-            } else {
-                model
-            }
+        // decode a big image down to the frame first. `revalidate` follows
+        // the server's HTTP caching (see nuiImageModel).
+        val request = remember(model, context, fit, revalidate) {
+            val wholeImage: (ImageRequest.Builder.() -> Unit)? =
+                if (fit == ImageFit.NONE) ({ size(SizeResolver.ORIGINAL) }) else null
+            nuiImageModel(model, context, revalidate, wholeImage)
         }
         val density = LocalDensity.current.density
         val contentScale = remember(fit, density) { resolveContentScale(fit, density) }

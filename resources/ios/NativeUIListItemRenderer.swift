@@ -151,7 +151,7 @@ struct NativeUIListItemRenderer: View {
             }
         case "avatar":
             // Decorative — the row's text content carries the meaning.
-            NativeUIRowImage(src: value) {
+            NativeUIRowImage(src: value, revalidate: node.props.revalidatesRemoteImages) {
                 Circle().fill(Color(.systemGray5))
             }
             .frame(width: 40, height: 40)
@@ -171,7 +171,7 @@ struct NativeUIListItemRenderer: View {
         case "image":
             // Decorative — the row's text content carries the meaning.
             // `contain` letterboxes instead of cropping to the square.
-            NativeUIRowImage(src: value, contentMode: imageFit == "contain" ? .fit : .fill) {
+            NativeUIRowImage(src: value, contentMode: imageFit == "contain" ? .fit : .fill, revalidate: node.props.revalidatesRemoteImages) {
                 RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5))
             }
             .frame(width: 56, height: 56)

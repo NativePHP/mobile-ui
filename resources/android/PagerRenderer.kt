@@ -56,6 +56,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
@@ -127,6 +128,8 @@ object PagerRenderer {
         val pageCount = if (hasMore) count + 1 else count
         // Image per page index for pages PHP hasn't shipped; "" for none.
         val placeholders = p.getStringList("placeholders")
+        // `revalidate` on the pager: placeholders follow HTTP caching.
+        val revalidatesPlaceholders = p.revalidatesRemoteImages()
         val requestedPage = p.getInt("page", 0).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
         val cbId = p.getCallbackId("on_page_change")
         val reportOnSettle = p.getBool("report_on_settle", false)
@@ -238,7 +241,7 @@ object PagerRenderer {
                     } else if (hasMore && index >= count) {
                         PagerLoadingPage()
                     } else {
-                        PagerPlaceholder(placeholders.getOrNull(index).orEmpty())
+                        PagerPlaceholder(placeholders.getOrNull(index).orEmpty(), revalidatesPlaceholders)
                     }
                 }
             }
@@ -516,11 +519,12 @@ object PagerRenderer {
      * through and never flashes a theme colour over a dark feed.
      */
     @Composable
-    private fun PagerPlaceholder(imageUrl: String) {
+    private fun PagerPlaceholder(imageUrl: String, revalidate: Boolean) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (imageUrl.isNotEmpty()) {
+                val context = LocalContext.current
                 AsyncImage(
-                    model = imageUrl,
+                    model = remember(imageUrl, context, revalidate) { nuiImageModel(imageUrl, context, revalidate) },
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()

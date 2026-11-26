@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 /// Where an image `src` actually points.
 ///
@@ -13,7 +14,8 @@ import UIKit
 enum NativeUIImageSource {
     /// A file on this device — load it through `NativeUIImageCache`.
     case local(path: String)
-    /// A remote URL — stream through `AsyncImage`, via `NativeUIRemoteImage`.
+    /// A remote URL — download it through `NativeUIRemoteImageCache`, via
+    /// `NativeUIRemoteImage`.
     case remote(url: URL)
     /// Empty, or a string that isn't a usable URL.
     case unresolvable
@@ -56,8 +58,9 @@ enum NativeUIImageSource {
 /// main thread only ever looks in memory here: `image(atPath:)` is a lookup
 /// by path. Checking the file, reading it and decoding it all happen in
 /// `load(atPath:)`, off the main thread. Android works the same way: Coil
-/// keys a file by its path and decodes it on an IO thread. Remote images get
-/// `URLCache` via `AsyncImage`; this is the local-file equivalent.
+/// keys a file by its path and decodes it on an IO thread. Remote images go
+/// through `NativeUIRemoteImageCache`, which decodes off the main thread too
+/// but keeps their bytes on disk rather than decoded images in memory.
 ///
 /// Each entry remembers the file's modification date and size, and `load`
 /// compares them before trusting it. `NativeUILocalImage` calls `load` each
@@ -358,76 +361,447 @@ struct NativeUILocalImage<Content: View, Placeholder: View>: View {
     }
 }
 
-/// `AsyncImage` that tries again when a download fails. On its own, an
-/// `AsyncImage` whose download fails stays on its failure phase until its
-/// view is rebuilt, so one dropped request or 503 leaves the image blank.
+/// Downloaded and decoded remote images.
 ///
-/// A cancelled download comes back as a failure too, and #157 reports images
-/// left blank that way on screens that re-render while they load. So a
-/// cancelled download starts again straight away and doesn't count as a
-/// failure. Any other failure is tried again after 0.5 s and then 1.5 s.
-/// After that the image stays failed until it next comes on screen. Each try
-/// is a new `AsyncImage`, so a download still stops when its image goes off
-/// screen, and the bytes still go through the shared `URLCache`.
+/// Bytes come through one `URLSession` with its own `URLCache` (2 MB in
+/// memory, 50 MB on disk under Caches). The shared session `AsyncImage`
+/// uses only has about 512 KB of memory and 10 MB of disk, so a grid of
+/// product photos pushed itself out of it.
+///
+/// Image URLs are treated as immutable, the way Kingfisher, SDWebImage and
+/// Coil (NativePHP on Android) treat them: once a response is on disk it's
+/// used again without asking the server, even after its `max-age` has run
+/// out. Plenty of image hosts send a short `max-age` and no ETag, and
+/// honouring that refetched every photo a minute after it was first shown.
+/// A response sent with `Cache-Control: no-store` is never written to disk,
+/// so it's still downloaded every time. An image whose URL is reused for
+/// changing content can ask for strict HTTP caching instead (`revalidate`),
+/// which goes through URLSession's normal policy: fresh entries come from
+/// disk, stale ones are revalidated or downloaded again.
+///
+/// Decoding is off the main thread, at the size the image is drawn, and a
+/// full-size decode is left in ImageIO's purgeable cache (see `decodeImage`).
+/// There's no decoded-image cache here: each view holds the image it's showing, and
+/// one it rebuilds decodes again from the disk cache, which takes a few
+/// milliseconds. A 16 MB decoded cache cost about 30 MB of footprint on a
+/// measured shop journey and its second pass still missed it. The URLCache
+/// memory tier is emptied on a memory warning and when the app goes to the
+/// background.
+///
+/// Every image waiting on the same URL shares one download, which is
+/// cancelled only when none of them is waiting any more.
+enum NativeUIRemoteImageCache {
+    private static let memoryCapacity = 2 * 1024 * 1024
+
+    static let urlCache: URLCache = {
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("NativeUIImages", isDirectory: true)
+
+        return URLCache(memoryCapacity: memoryCapacity, diskCapacity: 50 * 1024 * 1024, directory: directory)
+    }()
+
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = urlCache
+        configuration.requestCachePolicy = .useProtocolCachePolicy
+        _ = trimmed
+
+        return URLSession(configuration: configuration)
+    }()
+
+    /// Empties the URLCache memory tier on a memory warning and when the app
+    /// goes to the background. Setting the capacity to zero drops what's in
+    /// memory and leaves the disk alone. Set up once, with the session.
+    private static let trimmed: [NSObjectProtocol] = [
+        UIApplication.didReceiveMemoryWarningNotification,
+        UIApplication.didEnterBackgroundNotification,
+    ].map { name in
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+            urlCache.memoryCapacity = 0
+            urlCache.memoryCapacity = memoryCapacity
+        }
+    }
+
+    /// Downloads in progress, so images showing the same URL share one.
+    @MainActor private static var downloads: [DownloadKey: Download] = [:]
+
+    /// Decodes in progress, by URL and the size they fill.
+    @MainActor private static var decodes: [String: Task<UIImage?, Never>] = [:]
+
+    /// The image at `url`, decoded big enough to fill `pixels` (or at its own
+    /// size, if that's smaller). `revalidate` follows the server's HTTP
+    /// caching instead of reusing whatever is on disk. Throws when the
+    /// download fails or the bytes aren't an image, and `CancellationError`
+    /// when the calling task is cancelled.
+    @MainActor
+    static func load(_ url: URL, filling pixels: CGSize, revalidate: Bool = false) async throws -> UIImage {
+        let data = try await data(for: DownloadKey(url: url, revalidate: revalidate))
+        try Task.checkCancellation()
+
+        let key = "\(url.absoluteString)#\(pixels.width)x\(pixels.height)"
+        let decode = decodes[key] ?? {
+            let task = Task.detached(priority: .userInitiated) { decodeImage(data, filling: pixels) }
+            decodes[key] = task
+
+            return task
+        }()
+        let image = await decode.value
+        if decodes[key] == decode {
+            decodes[key] = nil
+        }
+        guard let image else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        return image
+    }
+
+    /// The bytes for `key`, through the shared download for it.
+    @MainActor
+    private static func data(for key: DownloadKey) async throws -> Data {
+        let download: Download
+        if let existing = downloads[key] {
+            download = existing
+        } else {
+            download = Download(key: key)
+            downloads[key] = download
+            download.start()
+        }
+        let id = download.nextID()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    download.join(id, continuation)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in download.leave(id) }
+        }
+    }
+
+    /// Runs off the main thread.
+    ///
+    /// Unless `revalidate` is set, a successful response already on disk is
+    /// used however old it is. `URLCache.cachedResponse(for:)` hands back
+    /// stored responses whatever their freshness; it's URLSession's protocol
+    /// policy that would have thrown an expired one away.
+    nonisolated private static func fetch(_ key: DownloadKey) async throws -> Data {
+        let request = URLRequest(url: key.url)
+        if !key.revalidate, let cached = urlCache.cachedResponse(for: request) {
+            if let http = cached.response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                return cached.data
+            }
+            // A cached error page would otherwise come back every time.
+            urlCache.removeCachedResponse(for: request)
+        }
+
+        let (data, response) = try await session.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            urlCache.removeCachedResponse(for: request)
+            throw URLError(.badServerResponse)
+        }
+
+        return data
+    }
+
+    /// Decodes `data` at the smallest size that still fills `pixels`. Runs off
+    /// the main thread.
+    ///
+    /// ImageIO thumbnails straight from the compressed bytes, so a big photo
+    /// in a small frame is never in memory at full size. On the simulator a
+    /// thumbnail costs more time per photo than a plain decode, so it's only
+    /// used when the source is more than 1.5 times the size it's drawn at,
+    /// where the memory it saves is worth it. Otherwise the whole image is
+    /// decoded. Either way it comes back already decoded, so drawing it on
+    /// the main thread doesn't decode it there. Animated images give their
+    /// first frame, as `AsyncImage` did.
+    ///
+    /// A full decode stays in ImageIO's own cache, as it does for the lazy
+    /// image `AsyncImage` draws. That memory is purgeable: the system can take
+    /// it back, and it doesn't count toward the app's footprint. Core
+    /// Animation keeps its own copy of what it draws either way. Decoding
+    /// into a bitmap of our own (`preparingForDisplay()`) made the same pixels
+    /// dirty memory the app owns, about 38 MB more footprint on a shop's Home.
+    nonisolated private static func decodeImage(_ data: Data, filling pixels: CGSize) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0 else {
+            return nil
+        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)
+            .flatMap { CGImagePropertyOrientation(rawValue: $0.uint32Value) } ?? .up
+
+        if let properties,
+           let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat($0.doubleValue) }),
+           let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat($0.doubleValue) }),
+           width > 0, height > 0 {
+            // EXIF orientations 5 to 8 turn the image on its side.
+            let oriented = orientation.rawValue >= 5 ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+            let fill = max(pixels.width / oriented.width, pixels.height / oriented.height)
+
+            if fill < 1 / 1.5 {
+                let options = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceThumbnailMaxPixelSize: (max(oriented.width, oriented.height) * fill).rounded(.up),
+                ] as CFDictionary
+                if let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) {
+                    // Drawn at the same size in points as the whole image
+                    // would be (one point per pixel, as AsyncImage drew it),
+                    // so an image laid out at its natural size doesn't move.
+                    let scale = CGFloat(thumbnail.width) / oriented.width
+
+                    return UIImage(cgImage: thumbnail, scale: scale, orientation: .up)
+                }
+            }
+        }
+
+        // Decoded now, into ImageIO's cache, so drawing it doesn't wait.
+        let options = [
+            kCGImageSourceShouldCache: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, options) else {
+            return nil
+        }
+
+        // One point per pixel, turned the way UIImage(data:) would turn it.
+        return UIImage(cgImage: image, scale: 1, orientation: UIImage.Orientation(orientation))
+    }
+
+    /// A URL and how its cache is used. Strict and immutable loads of one URL
+    /// don't share a download: an immutable one may be answered from disk.
+    private struct DownloadKey: Hashable, Sendable {
+        let url: URL
+        let revalidate: Bool
+    }
+
+    /// One download, shared by every image waiting on its URL.
+    ///
+    /// When the last of them stops waiting, the request carries on for a
+    /// moment before it's cancelled. A screen that re-renders while it loads
+    /// rebuilds its images, and the new image asks for the same URL straight
+    /// after the old one gave up: it joins this request rather than starting
+    /// another. A fast scroll still cancels the rows it left behind.
+    @MainActor
+    private final class Download {
+        let key: DownloadKey
+        private var task: Task<Void, Never>?
+        private var waiters: [Int: CheckedContinuation<Data, Error>] = [:]
+        private var lastID = 0
+        private var finished = false
+
+        init(key: DownloadKey) {
+            self.key = key
+        }
+
+        func start() {
+            let key = key
+            task = Task {
+                let result: Result<Data, Error>
+                do {
+                    result = .success(try await NativeUIRemoteImageCache.fetch(key))
+                } catch {
+                    result = .failure(error)
+                }
+                self.finish(result)
+            }
+        }
+
+        func nextID() -> Int {
+            lastID += 1
+
+            return lastID
+        }
+
+        func join(_ id: Int, _ continuation: CheckedContinuation<Data, Error>) {
+            waiters[id] = continuation
+        }
+
+        func leave(_ id: Int) {
+            guard let continuation = waiters.removeValue(forKey: id) else {
+                return
+            }
+            continuation.resume(throwing: CancellationError())
+            guard waiters.isEmpty else {
+                return
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard self.waiters.isEmpty, !self.finished else {
+                    return
+                }
+                self.task?.cancel()
+                self.forget()
+            }
+        }
+
+        private func finish(_ result: Result<Data, Error>) {
+            finished = true
+            forget()
+            let waiting = waiters
+            waiters = [:]
+            for continuation in waiting.values {
+                continuation.resume(with: result)
+            }
+        }
+
+        private func forget() {
+            if NativeUIRemoteImageCache.downloads[key] === self {
+                NativeUIRemoteImageCache.downloads[key] = nil
+            }
+        }
+    }
+}
+
+/// A remote image drawn through `NativeUIRemoteImageCache`. Callers get an
+/// `AsyncImagePhase`, as they did from `AsyncImage`: `.empty` while it
+/// loads, `.success` with the image, `.failure` once it has run out of tries.
+///
+/// The image is decoded at the size this view is laid out at, measured the
+/// way `NativeUILocalImage` measures it. `fullSize` decodes the whole image
+/// instead, for an image drawn at its own size (`object-none`). `revalidate`
+/// follows the server's HTTP caching rather than reusing what's on disk.
+///
+/// A failed download is tried again after 0.5 s and then 1.5 s. After that
+/// the image stays failed until it next comes on screen. A load cancelled
+/// because this view went away or changed its request isn't tried again
+/// from here: the view that replaces it starts its own, and joins the
+/// download if it's still running.
 struct NativeUIRemoteImage<Content: View>: View {
     // Computed: a generic type can't have a stored static.
     private static var retryDelays: [Duration] { [.milliseconds(500), .milliseconds(1500)] }
 
     private let url: URL
+    private let fullSize: Bool
+    private let revalidate: Bool
     private let content: (AsyncImagePhase) -> Content
 
-    /// Changed to throw a failed `AsyncImage` away and start a new one.
-    @State private var attempt = 0
+    @Environment(\.displayScale) private var displayScale
 
-    /// Failed tries so far. Back to zero when the URL changes, or when an
-    /// image that has run out of tries goes off screen.
-    @State private var failures = 0
+    /// What the last load gave. Kept while a new size loads, so the image
+    /// doesn't drop back to its placeholder when its frame changes.
+    @State private var loaded: (url: URL, image: UIImage)?
 
-    init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+    /// The error once the image has run out of tries.
+    @State private var failure: (url: URL, error: Error)?
+
+    /// Laid-out size in points. Zero until the first layout.
+    @State private var size: CGSize = .zero
+
+    init(url: URL, fullSize: Bool = false, revalidate: Bool = false, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
         self.url = url
+        self.fullSize = fullSize
+        self.revalidate = revalidate
         self.content = content
     }
 
     var body: some View {
-        AsyncImage(url: url) { phase in
-            if case .failure(let error) = phase {
-                if Self.isCancellation(error) {
-                    content(.empty).task { attempt += 1 }
-                } else if failures < Self.retryDelays.count {
-                    content(.empty).task {
-                        try? await Task.sleep(for: Self.retryDelays[failures])
-                        if !Task.isCancelled {
-                            failures += 1
-                            attempt += 1
-                        }
+        let request = Request(url: url, size: fullSize ? CGSize(width: CGFloat.infinity, height: .infinity) : size, scale: displayScale)
+
+        // A ZStack rather than a Group: a Group would hand `.task` to each
+        // branch, so swapping in the image would start a second load.
+        ZStack {
+            content(phase)
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        .task(id: request) {
+            // Nothing to fill before the first layout.
+            guard request.pixels.width > 0 || request.pixels.height > 0 else {
+                return
+            }
+            if let held, Self.fills(held, request.pixels) {
+                return
+            }
+            failure = nil
+            var failures = 0
+            while !Task.isCancelled {
+                do {
+                    let image = try await NativeUIRemoteImageCache.load(url, filling: request.pixels, revalidate: revalidate)
+                    if !Task.isCancelled {
+                        loaded = (url, image)
                     }
-                } else {
-                    content(phase).onDisappear { failures = 0 }
+
+                    return
+                } catch {
+                    if Task.isCancelled {
+                        return
+                    }
+                    if failures == Self.retryDelays.count {
+                        failure = (url, error)
+
+                        return
+                    }
+                    try? await Task.sleep(for: Self.retryDelays[failures])
+                    failures += 1
                 }
-            } else {
-                content(phase)
             }
         }
-        .id(attempt)
-        .onChange(of: url) { failures = 0 }
     }
 
-    private static func isCancellation(_ error: Error) -> Bool {
-        error is CancellationError || (error as? URLError)?.code == .cancelled
+    private var phase: AsyncImagePhase {
+        if let held {
+            return .success(Image(uiImage: held))
+        }
+        if let failure, failure.url == url {
+            return .failure(failure.error)
+        }
+
+        return .empty
+    }
+
+    /// Whether `image` fills `pixels` without being scaled up. A pixel short
+    /// is close enough: decoded sizes are rounded.
+    private static func fills(_ image: UIImage, _ pixels: CGSize) -> Bool {
+        image.size.width * image.scale + 1 >= pixels.width && image.size.height * image.scale + 1 >= pixels.height
+    }
+
+    /// The URL and the pixels it has to fill. Whole pixels, so a size that
+    /// moves by a fraction of one doesn't start another load.
+    private struct Request: Equatable {
+        let url: URL
+        let pixels: CGSize
+
+        init(url: URL, size: CGSize, scale: CGFloat) {
+            self.url = url
+            self.pixels = CGSize(width: (size.width * scale).rounded(.up), height: (size.height * scale).rounded(.up))
+        }
+    }
+
+    private var held: UIImage? {
+        loaded?.url == url ? loaded?.image : nil
+    }
+}
+
+extension GenericProps {
+    /// `revalidate` on an element that shows remote images: `<native:image>`,
+    /// a list item's avatar or thumbnail, a pager's placeholders. Those
+    /// images follow the server's HTTP caching instead of reusing whatever
+    /// is on disk (see `NativeUIRemoteImageCache`). A bare Blade attribute
+    /// arrives as `true`, a quoted one as a string.
+    var revalidatesRemoteImages: Bool {
+        getBool("revalidate") || ["true", "1"].contains(getString("revalidate"))
     }
 }
 
 /// Avatar / thumbnail image for list rows: fills its frame, showing
 /// `placeholder` while the image loads and when the source doesn't resolve.
-/// Callers supply their own frame and clip shape.
+/// Callers supply their own frame and clip shape. `revalidate` is the row's
+/// `revalidate` prop, as on `<native:image>`.
 struct NativeUIRowImage<Placeholder: View>: View {
     private let src: String
     private let contentMode: ContentMode
+    private let revalidate: Bool
     private let placeholder: () -> Placeholder
 
-    init(src: String, contentMode: ContentMode = .fill, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+    init(src: String, contentMode: ContentMode = .fill, revalidate: Bool = false, @ViewBuilder placeholder: @escaping () -> Placeholder) {
         self.src = src
         self.contentMode = contentMode
+        self.revalidate = revalidate
         self.placeholder = placeholder
     }
 
@@ -442,7 +816,7 @@ struct NativeUIRowImage<Placeholder: View>: View {
                 placeholder()
             }
         case .remote(let url):
-            NativeUIRemoteImage(url: url) { phase in
+            NativeUIRemoteImage(url: url, revalidate: revalidate) { phase in
                 if let image = phase.image {
                     image
                         .resizable()
@@ -453,6 +827,23 @@ struct NativeUIRowImage<Placeholder: View>: View {
             }
         case .unresolvable:
             placeholder()
+        }
+    }
+}
+
+private extension UIImage.Orientation {
+    /// The UIKit orientation for an EXIF one, as `UIImage(data:)` reads it.
+    init(_ exif: CGImagePropertyOrientation) {
+        switch exif {
+        case .up: self = .up
+        case .upMirrored: self = .upMirrored
+        case .down: self = .down
+        case .downMirrored: self = .downMirrored
+        case .leftMirrored: self = .leftMirrored
+        case .right: self = .right
+        case .rightMirrored: self = .rightMirrored
+        case .left: self = .left
+        @unknown default: self = .up
         }
     }
 }

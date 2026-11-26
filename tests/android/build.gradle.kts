@@ -5,7 +5,7 @@ plugins {
 }
 val stageSources = tasks.register<Sync>("stageSources") {
     from(layout.projectDirectory.dir("../../resources/android")) {
-        include("FilledTextInputRenderer.kt", "OutlinedTextInputRenderer.kt", "BareTextInputRenderer.kt", "TextInputShared.kt", "NativeUIFontResolver.kt", "NativeUITheme.kt", "ButtonRenderer.kt", "GestureAreaRenderer.kt", "ListRenderer.kt", "VirtualListRenderer.kt", "LazyStackRenderer.kt", "PagerRenderer.kt", "BottomSheetRenderer.kt", "NativeLayoutDrawerHost.kt", "NativeUIBackgroundLayerHost.kt", "DatePickerRenderer.kt")
+        include("FilledTextInputRenderer.kt", "OutlinedTextInputRenderer.kt", "BareTextInputRenderer.kt", "TextInputShared.kt", "NativeUIFontResolver.kt", "NativeUITheme.kt", "ButtonRenderer.kt", "GestureAreaRenderer.kt", "ListRenderer.kt", "VirtualListRenderer.kt", "LazyStackRenderer.kt", "PagerRenderer.kt", "BottomSheetRenderer.kt", "NativeLayoutDrawerHost.kt", "NativeUIBackgroundLayerHost.kt", "DatePickerRenderer.kt", "NativeUIRemoteImage.kt")
     }
     from(providers.gradleProperty("mobileRoot").map { "$it/resources/androidstudio/app/src/main/java/com/nativephp/mobile/ui/nativerender" }) {
         include("KeyboardFocusPolicy.kt", "NativeUINode.kt", "SharedValueStore.kt", "NativeCompositionLocals.kt", "NativeRendererRegistry.kt", "NodeModifiers.kt", "NodeBorder.kt", "NodeAccessibility.kt", "ComposeFlexLayout.kt")
@@ -33,8 +33,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.ui:ui")
     implementation("io.coil-kt.coil3:coil-compose:3.1.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.1.0")
+    implementation("io.coil-kt.coil3:coil-network-cache-control:3.1.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

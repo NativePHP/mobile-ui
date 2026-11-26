@@ -103,6 +103,8 @@ Props are written camelCase, exactly as below. Use `:prop` for PHP values.
 - Swipe: `:trailing-actions` and `:leading-actions` take arrays of `method`, `label`, `icon` (or `ios` and
   `android`), `tint`, `role` (`destructive` makes it red). `on-swipe-delete` is the single-action shortcut.
 - `@press` on the row, `disabled`, `native:key` for a stable identity.
+- `revalidate` makes a remote `leadingAvatar` or `leadingImage` follow HTTP caching, for an image URL whose
+  content changes (as on `<native:image revalidate>`). Without it a downloaded URL is never fetched again.
 
 ```blade
 <native:list class="w-full flex-1" separator>

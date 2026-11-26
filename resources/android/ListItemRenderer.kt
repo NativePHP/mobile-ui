@@ -173,7 +173,8 @@ object ListItemRenderer {
                 onChangeCb = onLeadingChangeCb,
                 nodeId = node.id,
                 disabled = disabled,
-                imageFit = p.getString("leading_image_fit")
+                imageFit = p.getString("leading_image_fit"),
+                revalidate = p.revalidatesRemoteImages()
             ),
             trailingContent = run {
                 // Multi-badge stack (e.g. flag + pin both visible)
@@ -218,7 +219,8 @@ object ListItemRenderer {
         onChangeCb: Int,
         nodeId: Int,
         disabled: Boolean,
-        imageFit: String = ""
+        imageFit: String = "",
+        revalidate: Boolean = false
     ): (@Composable () -> Unit)? {
         // Determine effective type — backward compat: fall back to icon if leading_type empty
         val effectiveType = type.ifEmpty {
@@ -256,8 +258,8 @@ object ListItemRenderer {
                 "avatar" -> {
                     val context = LocalContext.current
                     SubcomposeAsyncImage(
-                        model = remember(effectiveValue, context) {
-                            nuiResolveImageSrc(effectiveValue, context)
+                        model = remember(effectiveValue, context, revalidate) {
+                            nuiImageModel(nuiResolveImageSrc(effectiveValue, context), context, revalidate)
                         },
                         contentDescription = null,
                         modifier = Modifier
@@ -304,8 +306,8 @@ object ListItemRenderer {
                 "image" -> {
                     val context = LocalContext.current
                     SubcomposeAsyncImage(
-                        model = remember(effectiveValue, context) {
-                            nuiResolveImageSrc(effectiveValue, context)
+                        model = remember(effectiveValue, context, revalidate) {
+                            nuiImageModel(nuiResolveImageSrc(effectiveValue, context), context, revalidate)
                         },
                         contentDescription = null,
                         modifier = Modifier
