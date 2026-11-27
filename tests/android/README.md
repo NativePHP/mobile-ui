@@ -116,6 +116,10 @@ sends `''` with the dialog left closed, that a tap elsewhere on the field and
 an accessibility click both open the dialog, and that no X is drawn without a
 value, without `clearable` or on a disabled picker.
 
+`PickerTextStyleTest` draws a compact date picker and a select holding a value
+beside ones showing a placeholder, and checks the value has the placeholder's
+size, letter spacing and line height.
+
 `AnimateLayoutColumnTest` reorders the children of a column with
 `animate-layout` (core's `FlexContainer`) and checks a child passes through
 the places between its old and new spot before it lands, and that without

@@ -14,6 +14,7 @@ import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SelectableDates
@@ -229,7 +230,7 @@ object DatePickerRenderer {
                         // TalkBack's click goes through semantics, not the
                         // interaction source.
                         .then(if (disabled) Modifier else Modifier.semantics { onClick { openDialog(); true } }),
-                    textStyle = TextStyle(color = theme.onSurface, fontFamily = nuiDefaultFontFamily()),
+                    textStyle = LocalTextStyle.current.copy(color = theme.onSurface, fontFamily = nuiDefaultFontFamily()),
                     colors = OutlinedTextFieldDefaults.colors(
                         errorBorderColor = theme.destructive,
                         errorSupportingTextColor = theme.destructive,
