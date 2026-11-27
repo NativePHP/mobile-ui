@@ -202,15 +202,6 @@ struct NativeUIScrollViewRenderer: View {
                             ))
                     }
                     if stickBottom {
-                        // The view runs under the home indicator, as the
-                        // screen does, while a bottom bar sits above it. With
-                        // the keyboard down, end the content clear of the
-                        // indicator. The keyboard shrinks the view to its own
-                        // top edge, which is clear already, so then this
-                        // collapses, and a page that pads its end for a bottom
-                        // bar pads the same amount either way.
-                        Color.clear
-                            .frame(height: keyboardShown ? 0 : Self.homeIndicatorClearance)
                         Color.clear
                             .frame(height: 1)
                             .id(Self.bottomAnchorID)
@@ -242,6 +233,20 @@ struct NativeUIScrollViewRenderer: View {
             .scrollDismissesKeyboard(.interactively)
             .modifier(ScrollViewBackgroundModifier(node: node))
             .modifier(NativeUIScrollEdgeExtension())
+            // The view runs under the home indicator, as the screen does,
+            // while a bottom bar sits above it. With the keyboard down, end
+            // the content clear of the indicator; with it up, the view already
+            // ends at the keyboard's top edge, so the margin collapses.
+            //
+            // A content MARGIN, not a spacer row in the lazy stack. A row there
+            // is placed from the estimated heights of the rows above it, and
+            // resizing it with the keyboard changes the content mid-scroll, so
+            // pins to the bottom anchor landed short of the real end.
+            .contentMargins(
+                .bottom,
+                stickBottom && !keyboardShown ? Self.homeIndicatorClearance : 0,
+                for: .scrollContent
+            )
             // Whether the reader is at the bottom, from where the scroll view
             // actually is. The anchor's onAppear / onDisappear can't tell on
             // their own: a lazy stack keeps the anchor alive a little past the
