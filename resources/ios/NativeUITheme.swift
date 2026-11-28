@@ -48,6 +48,12 @@ struct NativeUITokens: Equatable {
     let inputFill: Color
     let onInput: Color?
 
+    // The track of a switch that is on. NIL when undeclared, and the switch
+    // then keeps `primary`, as before the token existed. It has a token of
+    // its own because iOS always draws the switch's knob white: an app whose
+    // `primary` is white (a dark theme, say) gets a white bar with no knob.
+    let toggle: Color?
+
     // Radii (points)
     let radiusSm: CGFloat
     let radiusMd: CGFloat
@@ -84,6 +90,7 @@ struct NativeUITokens: Equatable {
         onAccent:         Color(hex: "#FFFFFF"),
         inputFill:        .clear,
         onInput:          nil,
+        toggle:           nil,
         radiusSm: 4, radiusMd: 8, radiusLg: 16, radiusFull: 9999,
         fontSm: 14, fontMd: 16, fontLg: 20, fontXl: 24,
         fontFamily: "System"
@@ -159,6 +166,8 @@ final class NativeUITheme: ObservableObject {
                 // block's fallback is the resolved LIGHT token set, so
                 // declaring `on-input` under `light` alone still covers both.
                 onInput:          optionalHex(map["on-input"],   fallback: fallbackTo.onInput),
+                // Optional for the same reason: absent means `primary`.
+                toggle:           optionalHex(map["toggle"],     fallback: fallbackTo.toggle),
                 radiusSm: radiusSm, radiusMd: radiusMd, radiusLg: radiusLg, radiusFull: radiusFull,
                 fontSm: fontSm, fontMd: fontMd, fontLg: fontLg, fontXl: fontXl,
                 fontFamily: fontFamily

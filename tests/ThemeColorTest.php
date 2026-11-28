@@ -78,6 +78,25 @@ describe('Theme color token normalization', function () {
         expect(Theme::all()['dark'])->not->toHaveKey('on-input');
     });
 
+    it('carries the optional toggle token through the color grammar', function () {
+        Theme::load([
+            'light' => ['toggle' => 'green-500'],
+            'dark' => ['toggle' => '#05DF72'],
+        ]);
+
+        expect(Theme::get('light.toggle'))->toBe('#22C55E');
+        expect(Theme::get('dark.toggle'))->toBe('#05DF72');
+    });
+
+    it('omits toggle entirely when it is not declared', function () {
+        // Absence is the signal the renderers read: no `toggle` means a
+        // switch that is on keeps `primary`, as before the token existed.
+        Theme::load(['light' => ['primary' => '#B91C1C']]);
+
+        expect(Theme::all()['light'])->not->toHaveKey('toggle');
+        expect(Theme::all()['dark'])->not->toHaveKey('toggle');
+    });
+
     it('normalizes tokens supplied via merge()', function () {
         Theme::load(['light' => ['primary' => '#B91C1C']]);
         Theme::merge(['light' => ['accent' => 'orange-800/50']]);

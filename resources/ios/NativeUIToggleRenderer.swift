@@ -27,7 +27,7 @@ struct NativeUIToggleRenderer: View {
         let a11yHint    = p.getString("a11y_hint")
 
         Toggle(label, isOn: $isOn)
-            .tint(theme.primary)
+            .tint(theme.toggle ?? theme.primary)
             .disabled(disabled)
             .onAppear {
                 if !initialized {
