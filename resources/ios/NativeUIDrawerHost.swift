@@ -76,7 +76,12 @@ struct NativeDrawerHost<Content: View>: View {
 
     @ObservedObject private var state = DrawerHostState.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.nativeUITheme) private var theme
+    // The theme comes from the shared store, as in the renderers. Nothing
+    // sets `\.nativeUITheme` outside previews, so the environment value is
+    // always `.fallback`, whatever the app's theme or colour scheme.
+    @ObservedObject private var themeStore = NativeUITheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: NativeUITokens { themeStore.resolve(for: colorScheme) }
     @State private var dragOffset: CGFloat = 0
     // The last drawer this host drew — see `panelNode`.
     @State private var lastDrawer = LastDrawer()
@@ -228,6 +233,11 @@ struct NativeDrawerHost<Content: View>: View {
                 }
             }
             .animation(drawerAnimation, value: state.isOpen)
+            // The status bar takes its style from the screen's top bar, but an
+            // open drawer covers part of the strip behind it and the scrim the
+            // rest, so no one style reads on both. Hidden while any of the
+            // panel shows.
+            .statusBarHidden(progress > 0)
         }
         // Full-screen coordinate space — the wrapped content manages its own
         // safe-area inset (via the environment, like NativeTreeRenderer), so a
