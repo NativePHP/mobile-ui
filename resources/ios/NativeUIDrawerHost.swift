@@ -233,6 +233,11 @@ struct NativeDrawerHost<Content: View>: View {
                 }
             }
             .animation(drawerAnimation, value: state.isOpen)
+            // The status bar takes its style from the screen's top bar, but an
+            // open drawer covers part of the strip behind it and the scrim the
+            // rest, so no one style reads on both. Hidden while any of the
+            // panel shows.
+            .statusBarHidden(progress > 0)
         }
         // Full-screen coordinate space — the wrapped content manages its own
         // safe-area inset (via the environment, like NativeTreeRenderer), so a
